@@ -1,0 +1,22 @@
+
+
+type BuyWallet1 = record {
+    wallet_controllers: opt vec principal;
+}
+
+
+
+type BuyWallet2 = 
+
+type NewWallet = record {
+    canister_id : principal;
+    controllers : vec principal;
+    cycles : nat;
+    service: service;
+}
+
+
+service : {
+    buy_wallet_1: (BuyWallet1) -> ();
+    buy_wallet_2: (BuyWallet2) -> (NewWallet);
+}
