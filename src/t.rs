@@ -1,18 +1,21 @@
-use sha2::Digest;
 use wasabi_leb128::{ReadLeb128, WriteLeb128};
 
-use crate::stable::FileHashes;
+use crate::tools::{
+    sha256
+};
+
+use crate::stable::{
+    FileHashes,
+    put_file_hashes,
+    get_file_hashes
+};
 
 
 fn type_name<T>(_: &T) -> &'static str {
     std::any::type_name::<T>()
 }
 
-fn sha256(bytes: &[u8]) -> [u8; 32] { // [in]ferr[ed] lifetime on the &[u8]-param?
-    let mut hasher: sha2::Sha256 = sha2::Sha256::new();
-    hasher.update(bytes);
-    hasher.finalize().into()
-}
+
 
 
 #[test]
@@ -55,6 +58,7 @@ fn testleb128() {
 
 
 #[test]
-fn test2() {
+fn test_put_get_file_hashes() {
+    let mut file_hashes = get_file_hashes();
 
 }

@@ -7,15 +7,23 @@ use std::{
     },
     cmp::max,
 };
+// use std::convert::TryInto; // edition 2021 , dont need
+
 use num_traits::{PrimInt,AsPrimitive};
 use ic_certified_map::RbTree;
-use ic_cdk::api::stable::{
-    stable_bytes,
-    stable64_size,
-    stable64_read,
-    stable64_write,
-    stable64_grow,
-    StableMemoryError,
+use ic_cdk::{
+    api::stable::{
+        stable_bytes,
+        stable64_size,
+        stable64_read,
+        stable64_write,
+        stable64_grow,
+        StableMemoryError,
+    },
+    export::{
+        candid::{CandidType},
+        Principal,
+    }
 };
 
 use wasabi_leb128::{ReadLeb128, WriteLeb128};
@@ -105,8 +113,9 @@ pub fn put_file_hashes(file_hashes: &FileHashes) {
     stable64_write(FILEHASHES_START_I, &bytes);
 }
 
-fn get_file_hashes() -> FileHashes { 
+pub fn get_file_hashes() -> FileHashes { 
     let (first_leb128, first_leb128_bytes_size): (u64, usize) = Cursor::new(stable_get(FILEHASHES_START_I, 15)).read_leb128().unwrap();
+    if first_leb128 == 0u64 { return FileHashes::default(); } 
     let mut file_hashes_bytes = Cursor::new(stable_get(FILEHASHES_START_I + first_leb128_bytes_size as u64, first_leb128));
     let (items_size, items_size_leb128_bytes_size): (u64, usize) = file_hashes_bytes.read_leb128().unwrap();
     let mut file_hashes: FileHashes = FileHashes::default();

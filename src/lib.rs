@@ -25,7 +25,6 @@ use ic_cdk::{
         candid,
         candid::{CandidType},
         Principal,
-        serde
     },
     block_on,
 
@@ -41,31 +40,42 @@ use ic_cdk_macros::{
     query,
     import
 };
+use ic_certified_map::RbTree;
+
 use serde::{Serialize, Deserialize};
 use std::convert::TryInto;
 
-mod stable;
-use stable::{FileHashes, Files};
-// use crate::stable::{
-//     put_file_hashes, 
-//     put_files
-// }
-use ic_certified_map::RbTree;
 
 #[cfg(test)]
 mod t;
+
+mod tools;
+
+mod stable;
+use stable::{FileHashes, Files};
+
+
+mod frontcode;
+use frontcode::{http_request, upload_frontcode_files_chunks, public_get_file_hashes, public_clear_file_hashes};
+
+
+
+
+
 
 
 
 
 
 #[init]
-fn test1(num: u64) -> () {
+fn test1() -> () {
     // let files: Files = Files::new();
     // let file_hashes: <RbTree<&'static str, [u8; 32]> as Trait>::new();
     // stable::put_files(&files);
     // stable::put_file_hashes(&file_hashes);
-
+    if stable64_size() < 1u64 {
+        stable64_grow(1);
+    }
     
 }
 
@@ -132,8 +142,6 @@ fn heartbeat() {
 fn __get_candid_interface_tmp_hack() -> String {
     include_str!("../cycles-transfer-station.did").to_string()
 }
-
-
 
 
 
