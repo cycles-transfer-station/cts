@@ -5,26 +5,35 @@ use ic_cdk::{
     export::candid::{CandidType, Deserialize, Func},
     api::{data_certificate, set_certified_data}
 };
-use ic_certified_map::{HashTree, AsHashTree};
+use ic_certified_map::{RbTree, HashTree, AsHashTree};
 
 use serde::Serialize;
 
 use crate::tools::{
     sha256
 };
-
 use crate::stable::{
-    FileHashes,
     put_file_hashes,
-    get_file_hashes
+    get_file_hashes,
+    put_files,
+    get_files,
+    // put_file,
+    // get_file
 };
 
 
-const LABEL_ASSETS: &[u8] = b"http_assets";
 
 
+const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 
-
+#[derive(CandidType, Deserialize)]
+pub struct File {
+    content_type: String,
+    content_encoding: String,
+    content: Box<[u8]>
+}
+pub type Files = HashMap<String, File>;
+pub type FileHashes = RbTree<String, ic_certified_map::Hash>;
 
 
 
@@ -42,7 +51,6 @@ struct StreamingCallbackHttpResponse {
     token: Option<Token>,
 }
 
-
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct HttpRequest {
     method: String,
@@ -50,7 +58,6 @@ pub struct HttpRequest {
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
-
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct HttpResponse {
@@ -65,25 +72,19 @@ pub struct HttpResponse {
 
 
 
-pub fn set_root_hash(tree: &FileHashes) {
+
+
+fn set_root_hash(tree: &FileHashes) {
     let root_hash = ic_certified_map::labeled_hash(LABEL_ASSETS, &tree.root_hash());
-    set_certified_data(&root_hash[..]); // [..] 
+    set_certified_data(&root_hash[..]);
 }
 
 
-#[update]
-pub fn upload_frontcode_files_chunks(file_path: String, file_bytes: Vec<u8>) -> () {
-    let mut file_hashes: FileHashes = get_file_hashes();
-    file_hashes.insert(file_path, sha256(&file_bytes));
-    put_file_hashes(&file_hashes);
-    set_root_hash(&file_hashes);
-}
-
-
-fn make_file_certificate_header<'a>(file_name: &str, asset_hashes: &'a FileHashes) -> (String, String) {
+fn make_file_certificate_header(file_name: &str) -> (String, String) {
     let certificate: Vec<u8> = data_certificate().unwrap();
-    let witness: HashTree<'a> = asset_hashes.witness(file_name.as_bytes());
-    let tree: HashTree<'a> = ic_certified_map::labeled(LABEL_ASSETS, witness);
+    let file_hashes: FileHashes = get_file_hashes();
+    let witness: HashTree = file_hashes.witness(file_name.as_bytes());
+    let tree: HashTree = ic_certified_map::labeled(LABEL_ASSETS, witness);
     let mut serializer = serde_cbor::ser::Serializer::new(vec![]);
     serializer.self_describe().unwrap();
     tree.serialize(&mut serializer).unwrap();
@@ -97,31 +98,41 @@ fn make_file_certificate_header<'a>(file_name: &str, asset_hashes: &'a FileHashe
 }
 
 
+
+#[update]
+pub fn upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+    let mut file_hashes: FileHashes = get_file_hashes();
+    file_hashes.insert(file_path.clone(), sha256(&file.content));
+    put_file_hashes(&file_hashes);
+    set_root_hash(&file_hashes);
+
+    let mut files: Files = get_files();
+    files.insert(file_path, file);
+    put_files(&files);
+
+    
+}
+
+
 #[query]
 pub fn http_request(quest: HttpRequest) -> HttpResponse {
-
-    // let mut certificate_header: (String, String) = ("test".to_string(), "test".to_string());
-    // let url_parts: Vec<&str> = quest.url.split('?').collect();
-    // match url_parts[0] {
-    //     file_name => {
- 
-            
-            
-    //     }
-    // }
-    let certificate_header: (String, String) = make_file_certificate_header(&quest.url, &get_file_hashes());
+    let file_name = quest.url;
+    let files: Files = get_files();
+    let file: &File = files.get(&file_name).unwrap();
+    let certificate_header: (String, String) = make_file_certificate_header(&file_name);
     
     HttpResponse {
-        status_code: 200u16,
+        status_code: 200,
         headers: vec![
             certificate_header, 
-            ("Content-Type".to_string(), "text/plain; charset=utf-8".to_string()),
-            ("content-encoding".to_string(), "".to_string())
+            ("content-type".to_string(), file.content_type.clone()),
+            ("content-encoding".to_string(), file.content_encoding.clone())
         ],
-        body: "hello".as_bytes().to_vec(),
+        body: file.content.to_vec(),
         streaming_strategy: None
     }
 }
+
 
 #[query]
 pub fn public_get_file_hashes() -> Vec<(String, [u8; 32])> {
@@ -138,6 +149,3 @@ pub fn public_get_file_hashes() -> Vec<(String, [u8; 32])> {
 pub fn public_clear_file_hashes() {
     put_file_hashes(&FileHashes::default());
 }
-
-
-

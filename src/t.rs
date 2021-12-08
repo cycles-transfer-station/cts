@@ -10,12 +10,12 @@ use crate::stable::{
     get_file_hashes
 };
 
+use std::any::type_name;
 
-fn type_name<T>(_: &T) -> &'static str {
-    std::any::type_name::<T>()
+
+fn type_name_of_val<T: ?Sized>(_val: &T) -> &'static str {
+    type_name::<T>()
 }
-
-
 
 
 #[test]
@@ -29,7 +29,7 @@ fn test1() {
     println!("{:?}", file_hashes);
 
     file_hashes.for_each(|k,v| {
-        println!("k: {}: \n{:?},\nv: {}: \n{:?}", type_name(&k),k, type_name(&v),v);
+        println!("k: {}: \n{:?},\nv: {}: \n{:?}", type_name_of_val(&k),k, type_name_of_val(&v),v);
     });
 }
 
@@ -44,7 +44,7 @@ fn testleb128() {
     let leb128_size = bytes.write_leb128(count).unwrap();
     println!("sleb128_bytes with a size: {}: {:?}", leb128_size, bytes);
     let mut bytes = std::io::Cursor::new([0x83, 0x00, 0x03]);
-    println!("type of the cursor: {:?}", type_name(&bytes));
+    println!("type of the cursor: {:?}", type_name_of_val(&bytes));
     let (count, leb128_size): (i128, usize) = bytes.read_leb128().unwrap();
     println!("reading the sleb-bytes: 3: with a bytes-size: {}: {:?}", leb128_size, count);
     println!("bytes after read: {:?}", bytes );
@@ -59,6 +59,33 @@ fn testleb128() {
 
 #[test]
 fn test_put_get_file_hashes() {
-    let mut file_hashes = get_file_hashes();
+    // let mut file_hashes = get_file_hashes();
 
 }
+
+#[test]
+fn test_iter_map() {
+    let es: Vec<String> = vec![String::from("hello "), String::from(" hi "), String::from("whatsup")];
+    for e in es.iter() {
+        println!("{}", type_name_of_val(&e));
+        println!("{}", type_name_of_val(&e.clone()));
+        println!("{:?}", e);
+
+        break;
+    }
+    for e in es.iter().map(|s| s.trim()) {
+        println!("{}", type_name_of_val(&e));
+        println!("{}", type_name_of_val(&e.to_string()));
+        println!("{:?}", e);
+
+        
+        break;
+    }
+    
+
+}
+
+
+
+
+

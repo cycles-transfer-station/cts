@@ -1,6 +1,5 @@
 #![allow(unused)] // take this out when done
 
-
 use ic_cdk::{
     api::{
         caller,
@@ -41,22 +40,15 @@ use ic_cdk_macros::{
     import
 };
 use ic_certified_map::RbTree;
-
 use serde::{Serialize, Deserialize};
-use std::convert::TryInto;
-
 
 #[cfg(test)]
 mod t;
-
 mod tools;
-
 mod stable;
-use stable::{FileHashes, Files};
-
-
 mod frontcode;
-use frontcode::{http_request, upload_frontcode_files_chunks, public_get_file_hashes, public_clear_file_hashes};
+
+use frontcode::{http_request, upload_frontcode_file_chunks, public_get_file_hashes, public_clear_file_hashes};
 
 
 
