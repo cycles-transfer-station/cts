@@ -130,10 +130,10 @@ fn heartbeat() {
 
 
 
-#[query]
-fn __get_candid_interface_tmp_hack() -> String {
-    include_str!("../cycles-transfer-station.did").to_string()
-}
+// #[query]
+// fn __get_candid_interface_tmp_hack() -> String {
+//     include_str!("../cycles-transfer-station.did").to_string()
+// }
 
 
 

@@ -40,7 +40,7 @@ use crate::frontcode::{
 const KIB: u64 = 1024;
 const MIB: u64 = 1024*KIB;
 const GIB: u64 = 1024*MIB;  
-const WASM_PAGE_SIZE_BYTES: u64 = 64 * KIB;
+const WASM_PAGE_SIZE_BYTES: u64 = 64 * KIB; // 65536-bytes
 const STABLE_MEMORY_MAX_SIZE_BYTES: u64 = 8 * GIB;
 
 
@@ -48,18 +48,21 @@ const HEADER_START_I: u64 = 0;
 const HEADER_SIZE_BYTES: u64 = 1 * KIB;
 
 const FILEHASHES_START_I: u64 = HEADER_SIZE_BYTES;
-const FILEHASHES_MAX_SIZE_BYTES: u64 = 1 * KIB;
+const FILEHASHES_MAX_SIZE_BYTES: u64 = 20 * KIB;
 
 const FILES_START_I: u64 = FILEHASHES_START_I + FILEHASHES_MAX_SIZE_BYTES;
-const FILES_MAX_SIZE_BYTES: u64 = 20 * MIB;
+const FILES_MAX_SIZE_BYTES: u64 = 25 * MIB;
 
 
 
-#[repr(packed)]
-struct Header {
-    magic: [u8; 3],
 
-}
+
+// #[repr(packed)]
+// struct Header {
+//     magic: [u8; 3],
+
+// }
+
 
 
 
@@ -87,6 +90,8 @@ fn write_leb128<N: PrimInt + AsPrimitive<u8>>(num: N) -> Vec<u8> {
 
 // }
 
+
+
 // store first the total-bytes-length of the Files, then store the count of the files(how many files there are), then 
 // for each file store the name-length as a leb128, then store the name, then store the File-struct-length as leb128, then the File-struct-bytes(i think candid),
 // this way, to find a file, i dont have to de-serialize each File-struct, only the names, and if its not the right name, i can skip over the File-struct-bytes and go to the next filename 
@@ -108,6 +113,9 @@ pub fn put_files(files: &Files) {
     let total_bytes_length_before = first_leb128_bytes_size + first_leb128;
     if bytes.len() < total_bytes_length_before {
         bytes.extend_from_slice(&vec![0; total_bytes_length_before - bytes.len()]);
+    }
+    if bytes.len() as u64 > stable64_size() * WASM_PAGE_SIZE_BYTES - FILES_START_I {
+        stable64_grow( ( ( bytes.len() as u64 - ( stable64_size() * WASM_PAGE_SIZE_BYTES - FILES_START_I ) ) as f64 / WASM_PAGE_SIZE_BYTES as f64 ).ceil() as u64 );
     }
     stable64_write(FILES_START_I, &bytes);
 }
