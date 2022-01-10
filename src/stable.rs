@@ -31,7 +31,7 @@ use wasabi_leb128::{ReadLeb128, WriteLeb128};
 use crate::frontcode::{
     File,
     Files,
-    FileHashes,
+    FilesHashes,
 };
 
 
@@ -45,28 +45,31 @@ const STABLE_MEMORY_MAX_SIZE_BYTES: u64 = 8 * GIB;
 
 
 const HEADER_START_I: u64 = 0;
-const HEADER_SIZE_BYTES: u64 = 1 * KIB;
-
-const FILEHASHES_START_I: u64 = HEADER_SIZE_BYTES;
-const FILEHASHES_MAX_SIZE_BYTES: u64 = 20 * KIB;
-
-const FILES_START_I: u64 = FILEHASHES_START_I + FILEHASHES_MAX_SIZE_BYTES;
-const FILES_MAX_SIZE_BYTES: u64 = 25 * MIB;
+const HEADER_MAX_SIZE_BYTES: u64 = 1 * KIB;
 
 
 
+// const FILEHASHES_START_I: u64 = HEADER_SIZE_BYTES;
+// const FILEHASHES_MAX_SIZE_BYTES: u64 = 20 * KIB;
+
+// const FILES_START_I: u64 = FILEHASHES_START_I + FILEHASHES_MAX_SIZE_BYTES;
+// const FILES_MAX_SIZE_BYTES: u64 = 25 * MIB;
 
 
 // #[repr(packed)]
+// #[derive(CandidType, Deserialize)]
 // struct Header {
-//     magic: [u8; 3],
+//     magic: [u8; 3], // "CTS"
 
+    
 // }
 
 
 
 
-fn stable_get(start: u64, len: u64) -> Vec<u8> {
+
+
+fn stable64_get(start: u64, len: u64) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![0; len.try_into().unwrap()];
     stable64_read(start, &mut buf);
     buf
@@ -86,11 +89,27 @@ fn write_leb128<N: PrimInt + AsPrimitive<u8>>(num: N) -> Vec<u8> {
 
 // }
 
+
+
 // fn get_header() -> Header {
 
 // }
 
 
+
+fn save_frontcode_in_stable_memory(files: Files, files_hashes: FilesHashes) -> () {
+    // save u64 index in the header
+    
+
+
+}
+
+
+
+
+
+
+/*
 
 // store first the total-bytes-length of the Files, then store the count of the files(how many files there are), then 
 // for each file store the name-length as a leb128, then store the name, then store the File-struct-length as leb128, then the File-struct-bytes(i think candid),
@@ -187,6 +206,9 @@ pub fn get_file_hashes() -> FileHashes {
     file_hashes
 }
 
+
+
+*/
 
 
 

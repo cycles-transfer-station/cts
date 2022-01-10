@@ -44,14 +44,23 @@ use serde::{Serialize, Deserialize};
 
 #[cfg(test)]
 mod t;
+
 mod tools;
 mod stable;
 mod frontcode;
 
-use frontcode::{http_request, upload_frontcode_file_chunks, public_get_file_hashes, public_clear_file_hashes};
+use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_hash, make_file_certificate_header};
 
 
 
+
+
+
+thread_local! {
+    static FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
+    static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
+
+}
 
 
 
@@ -77,6 +86,80 @@ fn start() {
 }
 
 
+#[pre_upgrade]
+fn pre_upgrade() -> () {
+
+}
+
+#[post_upgrade]
+fn post_upgrade() -> () {
+
+}
+
+
+
+#[update]
+pub fn upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+    // let mut file_hashes: FileHashes = get_file_hashes();
+    // file_hashes.insert(file_path.clone(), sha256(&file.content));
+    // put_file_hashes(&file_hashes);
+    FRONTCODE_FILES_HASHES.borrow_mut().insert(file_path.clone(), sha256(&file.content));
+    
+    // set_root_hash(&file_hashes);
+    set_root_hash(FRONTCODE_FILES_HASHES.borrow());
+
+    // let mut files: Files = get_files();
+    // files.insert(file_path, file);
+    // put_files(&files);
+    FRONTCODE_FILES.borrow_mut().insert(file_path, file);
+}
+
+
+#[query]
+pub fn http_request(quest: HttpRequest) -> HttpResponse {
+    let file_name = quest.url;
+    // let files: Files = get_files();
+    let file: &File = FRONTCODE_FILES.borrow().get(&file_name).unwrap();
+    let certificate_header: (String, String) = make_file_certificate_header(&file_name);
+    
+    HttpResponse {
+        status_code: 200,
+        headers: vec![
+            certificate_header, 
+            ("content-type".to_string(), file.content_type.clone()),
+            ("content-encoding".to_string(), file.content_encoding.clone())
+        ],
+        body: file.content.to_vec(),
+        streaming_strategy: None
+    }
+}
+
+
+#[query]
+pub fn public_get_file_hashes() -> Vec<(String, [u8; 32])> {
+    let file_hashes = FRONTCODE_FILES_HASHES.borrow();
+    let mut vec = Vec::<(String, [u8; 32])>::new();
+    file_hashes.for_each(|k,v| {
+        vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
+    });
+    vec
+}
+
+
+#[update]
+pub fn public_clear_file_hashes() {
+    // put_file_hashes(&FileHashes::default());
+    FRONTCODE_FILES_HASHES.replace(FilesHashes::default());
+    set_root_hash(FRONTCODE_FILES_HASHES.borrow());
+}
+
+
+
+
+
+
+
+
 
 
 #[update]
@@ -89,6 +172,12 @@ pub fn see_caller() -> Principal {
 fn test_update(num: u32) -> u32 {
     num + 5
 }
+
+
+
+
+
+
 
 
 #[update]

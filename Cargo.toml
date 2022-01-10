@@ -9,7 +9,7 @@ edition = "2021"
 [profile.release]
 lto = true
 opt-level = 'z'
-# panic = 'abort'
+panic = 'abort'
 
 [lib]
 crate-type = ["cdylib"]
@@ -21,7 +21,6 @@ ic-cdk-macros = "0.3.3"
 ic-certified-map = { git = "git://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
 ic-types = "0.1.1"
 serde = "1"
-serde_bytes = "0.11"
 serde_cbor = "0.11"
 sha2 = "0.9.1"
 base64 = "0.13.0"
