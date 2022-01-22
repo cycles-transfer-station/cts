@@ -1,22 +1,48 @@
 
 
-type BuyWallet1 = record {
-    wallet_controllers: opt vec principal;
-}
 
 
 
-type BuyWallet2 = 
-
-type NewWallet = record {
-    canister_id : principal;
-    controllers : vec principal;
-    cycles : nat;
-    service: service;
-}
 
 
-service : {
-    buy_wallet_1: (BuyWallet1) -> ();
-    buy_wallet_2: (BuyWallet2) -> (NewWallet);
+type ICP = record {
+  e8s : nat64;
+};
+
+
+type ChoosePaymentOption = variant {
+    with_cycles;
+    with_icp;
+};
+
+
+
+
+
+service cycles-transfer-station : {
+
+    purchase_wallet_start: ( variant {
+        with_cycles;
+        with_icp;
+    }) -> ( variant {
+        with_cycles: record {
+            canister: principal;
+            cycles_transfer: CyclesTransfer;
+            cost_cycles: nat;                            // 20Tcycles
+        };
+        with_icp: record {
+            icp_id: text;
+            cost_icp: ICP
+        };
+    });
+    
+    purchase_wallet_finish: () -> ( variant {
+        Ok: principal;
+        Err: PurchaseWalletFinishError;
+    });
+
+    
+
+
+
 }
