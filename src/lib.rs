@@ -228,4 +228,38 @@ fn heartbeat() {
 
 
 
+#[derive( CandidType, Deserialize )]
+struct IcpXdrConversionRate {
+  xdr_permyriad_per_icp : u64,
+  timestamp_seconds : u64,
+}
+
+#[derive( CandidType, Deserialize )]
+struct IcpXdrConversionRateCertifiedResponse {
+    certificate : Vec<u8>,
+    data : IcpXdrConversionRate,
+    hash_tree : Vec<u8>,
+}
+
+#[update]               
+pub async fn see_icp_xdr_conversion_rate() -> u64 {
+    caller_controller_check();
+
+    let rate_certified: IcpXdrConversionRateCertifiedResponse = match call_raw(
+        Principal::from_text("rkp4c-7iaaa-aaaaa-aaaca-cai").unwrap(),
+        "get_icp_xdr_conversion_rate",
+        encode_one(()).unwrap(),
+        0
+    ).await {
+        Ok(cbytes) => decode_one(&cbytes).unwrap(),
+        Err(e) => trap(&format!("{:?}", e)),
+    };
+
+    rate_certified.data.xdr_permyriad_per_icp
+    
+    
+
+
+    
+}      
 

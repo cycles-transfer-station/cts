@@ -1,18 +1,14 @@
 
 
-
-
-
-
-
+// tokens, measured in 10^-8 of a token.
 type ICP = record {
   e8s : nat64;
 };
 
 
-type ChoosePaymentOption = variant {
-    with_cycles;
-    with_icp;
+type ChoosePaymentMethod = variant {
+    cycles_payment;
+    icp_payment;
 };
 
 
@@ -21,28 +17,136 @@ type ChoosePaymentOption = variant {
 
 service cycles-transfer-station : {
 
-    purchase_wallet_start: ( variant {
-        with_cycles;
-        with_icp;
-    }) -> ( variant {
-        with_cycles: record {
-            canister: principal;
-            cycles_transfer: CyclesTransfer;
-            cost_cycles: nat;                            // 20Tcycles
-        };
-        with_icp: record {
-            icp_id: text;
-            cost_icp: ICP
-        };
-    });
+    purchase_wallet : ( 
+        variant {
+            start: record {
+                choose_payment_method: ChoosePaymentMethod;
+            };
+            finish: null;
+        }
+    ) -> ( 
+        variant {
+            start: record {
+                payment_method: variant {        
+                    cycles_payment: record {
+                        cycles_transfer_memo: CyclesTransferMemo;
+                        cost_cycles: nat;                            // 20Tcycles
+                    };
+                    icp_payment: record {
+                        icp_id: text;
+                        cost_icp: ICP
+                    };
+                };
+            };
+            finish: variant {
+                Ok: principal;
+                Err: PurchaseWalletFinishError;
+            };
+        }
+    );
     
-    purchase_wallet_finish: () -> ( variant {
-        Ok: principal;
-        Err: PurchaseWalletFinishError;
-    });
+    purchase_cycles_transfer : (
+        variant {
+            start: record {
+                for : principal;   // for-canister and caller will both be able to see the [in]voice/[re]cord/log of this cycles_transfer
+                cycles : nat;
+                cycles_transfer_memo : CyclesTransferMemo;
+                public: bool; 
+                choose_payment_method : ChoosePaymentMethod;
+            };
+            finish: null; 
+        }   
+    ) -> (
+        variant {
+            start: record {
+                payment_method: PaymentMethod;               
+            };
+            finish: record {
+                cycles_sent: nat;
+                cycles_accepted: nat;
+                cycles_refund_available: nat;
+                canister_trap: opt text;            // record { int32; text; }
+                
+                : :
+            };
+        }
+    );
 
-    
+
+    // -----------------------------------------------------------------------------------------
 
 
+    topup_balance : () -> (                           // call as caller
+        record {
+            cycles_balance_topup: record {
+                topup_cycles_transfer_memo: CyclesTransferMemo;
+            };
+            icp_balance_topup: record {
+                topup_icp_id : blob;                  // 32-bytes. see ic ledger.
+            };
+        }
+    );
+
+
+    see_balance : () -> (
+        record {
+            cycles_balance: nat;
+            icp_balance: ICP; 
+        }
+    );
+
+
+    collect_balance : (
+        variant {
+            icp_payout: record {
+                amount: ICP;
+                payout_icp_id: blob; 
+            };
+            cycles_payout: record {
+                amount: nat;
+                payout_cycles_transfer_canister: principal;         // the memo is: cts-payout    
+            };
+        }
+    ) -> (
+        variant {
+            icp_payout: variant {
+                Ok: null;
+                Err: IcpPayoutError;
+            };
+            cycles_payout: record {
+                Ok: nat;                // cycles-paid-out
+                Err: CyclesPayoutError
+            }
+        }
+    );
+
+
+    convert_icp_balance_to_cycles_with_the_cmc_rate : (record { amount: ICP; }) -> (variant { Ok: null; Err: ConvertIcpBalanceToCyclesWithTheCmcRateError; });
+
+
+    purchase_cycles_transfer : (
+        record {
+            for: principal;
+            cycles: nat;
+            cycles_transfer_memo: CyclesTransferMemo;
+        }
+    ) -> (
+        variant {
+            Ok: nat;                                                 // cycles-transfer[red]
+            Err: PurchaseCyclesTransferError
+        }
+    );
+
+
+    purchase_cycles_wallet : (
+        record {
+            
+        }
+    ) -> (
+        variant {
+            Ok: principal;
+            Err: PurchaseCyclesWalletError;
+        }
+    );
 
 }
