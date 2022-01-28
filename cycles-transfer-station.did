@@ -138,15 +138,36 @@ service cycles-transfer-station : {
     );
 
 
-    purchase_cycles_wallet : (
+    purchase_cycles_bank : (
         record {
             
         }
     ) -> (
         variant {
             Ok: principal;
-            Err: PurchaseCyclesWalletError;
+            Err: PurchaseCyclesBankError;
         }
     );
+
+    
+    see_cycles_transfer_purchases(nat) -> (   // page
+        vec record {
+            for: principal;
+            cycles_sent: nat;
+            cycles_accepted: nat;
+            cycles_transfer_memo: CyclesTransferMemo;
+            timestamp: nat64;
+        }
+    );
+    
+    
+    see_cycles_bank_purchases(nat) -> (    // page
+        vec record {
+            cycles_bank_principal: principal;
+            cost_cycles: nat64; // 64?
+            timestamp: nat64;
+        }
+    );
+
 
 }
