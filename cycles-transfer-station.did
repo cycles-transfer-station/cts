@@ -6,15 +6,19 @@ type ICP = record {        // tokens, measured in 10^-8 of a token.
     e8s : nat64;
 };
 
+type IcpPayoutError = variant {
 
-type CyclesBankPurchaseData = record {
-    cycles_bank_principal: principal;
-    cost_cycles: nat64; // 64?
-    timestamp: nat64;
 };
 
+type CyclesPayoutError = variant {
+    
+};
 
-type CyclesTransferPurchaseData = record {
+type ConvertIcpBalanceToCyclesWithTheCmcRateError = variant {
+    
+};
+
+type CyclesTransferPurchaseLog = record {
     for: principal;
     cycles_sent: nat;
     cycles_accepted: nat;
@@ -22,6 +26,21 @@ type CyclesTransferPurchaseData = record {
     timestamp: nat64;
 };
 
+type PurchaseCyclesTransferError = variant {
+    CanisterDoesNotExist;
+    NoCyclesTransferMethodOnTheCanister;
+    BalanceTooLow;
+};
+
+type CyclesBankPurchaseLog = record {
+    cycles_bank_principal: principal;
+    cost_cycles: nat64; // 64?
+    timestamp: nat64;
+};
+
+type PurchaseCyclesBankError = variant {
+    
+};
 
 
 
@@ -31,10 +50,10 @@ service cycles-transfer-station : {
     // call as caller
     topup_balance : () -> (                       
         record {
-            cycles_balance_topup: record {
+            topup_cycles_balance: record {
                 topup_cycles_transfer_memo: CyclesTransferMemo;
             };
-            icp_balance_topup: record {
+            topup_icp_balance: record {
                 topup_icp_id : ICPID;                  
             };
         }
@@ -53,7 +72,7 @@ service cycles-transfer-station : {
         variant {
             icp_payout: record {
                 amount: ICP;
-                payout_icp_id: blob; 
+                payout_icp_id: ICPID; 
             };
             cycles_payout: record {
                 amount: nat;
@@ -66,7 +85,7 @@ service cycles-transfer-station : {
                 Ok: null;
                 Err: IcpPayoutError;
             };
-            cycles_payout: record {
+            cycles_payout: variant {
                 Ok: nat;                // cycles-paid-out      // put cycles_sent & cycles_accepted? 
                 Err: CyclesPayoutError
             }
@@ -74,14 +93,14 @@ service cycles-transfer-station : {
     );
 
 
-    convert_icp_balance_to_cycles_with_the_cmc_rate : (
+    convert_icp_balance_for_cycles_with_the_cmc_rate : (
         record { 
             amount: ICP; 
         }
     ) -> (
         variant { 
             Ok: nat;    // cycles 
-            Err: ConvertIcpBalanceToCyclesWithTheCmcRateError; 
+            Err: ConvertIcpBalanceForCyclesWithTheCmcRateError; 
         }
     );
 
@@ -99,29 +118,29 @@ service cycles-transfer-station : {
             Err: PurchaseCyclesTransferError                        // canister_trap ..
         }
     );
-
     
-    see_cycles_transfer_purchases(
-        nat
-    ) -> (   // page
-        vec CyclesTransferPurchaseData
-    );
-
     
     purchase_cycles_bank : (
         record {}
     ) -> (
         variant {
-            Ok: CyclesBankPurchaseData;
+            Ok: CyclesBankPurchaseLog;
             Err: PurchaseCyclesBankError;
         }
+    );
+
+
+    see_cycles_transfer_purchases(
+        nat
+    ) -> (   // page
+        vec CyclesTransferPurchaseLog
     );
 
 
     see_cycles_bank_purchases(
         nat
     ) -> (
-        vec CyclesBankPurchaseData
+        vec CyclesBankPurchaseLog
     );
 
 
