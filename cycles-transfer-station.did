@@ -47,6 +47,8 @@ type PurchaseCyclesBankError = variant {
 
 service cycles-transfer-station : {
 
+    cycles_transfer : (CyclesTransfer) -> ();
+
     // call as caller
     topup_balance : () -> (                       
         record {
