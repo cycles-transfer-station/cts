@@ -2,6 +2,20 @@
 
 
 
+
+mod tools;
+use tools::{
+    user_icp_balance_id,
+    
+};
+
+
+
+
+
+
+
+
 struct UserData {
     cycles_balance: u128,
     cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, // 
@@ -17,9 +31,9 @@ thread_local! {
 
 
 
-type ICPID = ic_ledger_types::AccountIdentifier;
+type IcpId = ic_ledger_types::AccountIdentifier;
 
-type ICPIDSub = ic_ledger_types::Subaccount;
+type IcpIdSub = ic_ledger_types::Subaccount;
 
 type ICPTokens = ic_ledger_types::Tokens;
 
@@ -31,7 +45,7 @@ struct TopUpCyclesBalanceData {
 
 #[derive(CandidType, Deserialize)]
 struct TopUpIcpBalanceData {
-    topup_icp_id: ICPID
+    topup_icp_id: IcpId
 } 
 
 #[derive(CandidType, Deserialize)]
@@ -50,7 +64,7 @@ pub fn topup_balance() -> TopUpBalanceData {
             topup_cycles_transfer_memo: CyclesTransferMemo::blob(TP30bytesprincipal)
         },
         topup_icp_balance: TopUpIcpBalanceData {
-            topup_icp_id: ICPID::new(&id(), &principal_as_an_icpsubaccount(&caller()))
+            topup_icp_id: user_icp_balance_id(&caller())
         }
     }
 }
@@ -80,7 +94,7 @@ pub async fn see_balance() -> UserBalance {
 #[derive(CandidType, Deserialize)]
 struct IcpPayoutQuest {
     amount: ICPTokens,
-    payout_icp_id: ICPID
+    payout_icp_id: IcpId
 }
 
 #[derive(CandidType, Deserialize)]
