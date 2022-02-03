@@ -6,6 +6,8 @@
 mod tools;
 use tools::{
     user_icp_balance_id,
+    user_cycles_balance_topup_memo_bytes,
+
     
 };
 
@@ -17,8 +19,8 @@ use tools::{
 
 
 struct UserData {
-    cycles_balance: u128,
-    cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, // 
+    pub cycles_balance: u128,
+    pub cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, // 
 }
 
 
@@ -61,7 +63,7 @@ pub fn topup_balance() -> TopUpBalanceData {
 
     TopUpBalanceData {
         topup_cycles_balance: TopUpCyclesBalanceData {
-            topup_cycles_transfer_memo: CyclesTransferMemo::blob(TP30bytesprincipal)
+            topup_cycles_transfer_memo: CyclesTransferMemo::blob(user_cycles_balance_topup_memo_bytes(&caller()))
         },
         topup_icp_balance: TopUpIcpBalanceData {
             topup_icp_id: user_icp_balance_id(&caller())
@@ -77,16 +79,23 @@ struct UserBalance {
     icp_balance: ICPTokens, 
 }
 
+#[derive(CandidType, Deserialize)]
+enum SeeBalanceError {
+
+}
+
+type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
+
 #[update]
-pub async fn see_balance() -> UserBalance {
+pub async fn see_balance() -> SeeBalanceSponse {
     check_caller_is_not_anonymous_caller();
     
     // :check: ledger for the icp-balance.
     
-    UserBalance {
-        cycles_balance: 
+    Ok(UserBalance {
+        cycles_balance: USER_DATA.with(|user_data| user_data.borrow().get(&caller())   .cycles_balance);
         icp_balance: 
-    }
+    })
 }
 
 

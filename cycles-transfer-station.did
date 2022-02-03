@@ -6,6 +6,11 @@ type ICP = record {        // tokens, measured in 10^-8 of a token.
     e8s : nat64;
 };
 
+
+type SeeBalanceError = variant {
+    
+}
+
 type IcpPayoutError = variant {
 
 };
@@ -63,9 +68,12 @@ service cycles-transfer-station : {
 
 
     see_balance : () -> (
-        record {
-            cycles_balance: nat;
-            icp_balance: ICP; 
+        variant {
+            Ok: record {
+                cycles_balance: nat;
+                icp_balance: ICP; 
+            };
+            Err: SeeBalanceError;
         }
     );
 
