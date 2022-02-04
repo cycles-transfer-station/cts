@@ -85,8 +85,6 @@ struct TopUpBalanceData {
 
 #[update]
 pub fn topup_balance() -> TopUpBalanceData {
-    check_caller_is_not_anonymous_caller();
-
     TopUpBalanceData {
         topup_cycles_balance: TopUpCyclesBalanceData {
             topup_cycles_transfer_memo: CyclesTransferMemo::blob(user_cycles_balance_topup_memo_bytes(&caller()).to_vec())
@@ -107,7 +105,7 @@ struct UserBalance {
 
 #[derive(CandidType, Deserialize)]
 enum SeeBalanceError {
-    IcpLedgerError(String),
+    IcpLedgerCheckBalanceError(String),
     
 
 }
@@ -116,13 +114,11 @@ type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
 
 #[update]
 pub async fn see_balance() -> SeeBalanceSponse {
-    check_caller_is_not_anonymous_caller();
-    
     Ok(UserBalance {
         cycles_balance: check_user_cycles_balance(&caller()),
         icp_balance: match check_user_icp_balance(&caller()).await {
             Ok(icp_tokens) => icp_tokens,
-            Err(e) => return Err(SeeBalanceError::IcpLedgerError(format!("{:?}", e)));
+            Err(e) => return Err(SeeBalanceError::IcpLedgerCheckBalanceError(format!("{:?}", e)));
         }
     })
 }
@@ -148,8 +144,11 @@ enum CollectBalanceQuest {
 }
 
 #[derive(CandidType, Deserialize)]
-enum IcpPayoutError {    // make this the ic_ledger_types::TransferResult ?
-  
+enum IcpPayoutError {
+    IcpLedgerCheckBalanceError(String),
+    NotEnoughBalance { icp_balance: IcpTokens },
+
+
 }
 
 #[derive(CandidType, Deserialize)]
@@ -168,8 +167,25 @@ enum CollectBalanceSponse {
 }
 
 #[update]
-pub async fn collect_balance(CollectBalanceQuest) -> CollectBalanceSponse {
+pub async fn collect_balance(q: CollectBalanceQuest) -> CollectBalanceSponse {
+    match q {
+        CollectBalanceQuest::icp_payout(icp_payout_quest) => {
+            let user_icp_balance: IcpTokens = match check_user_icp_balance(&caller()).await {
+                Ok(icp_tokens) => icp_tokens,
+                Err(e) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerCheckBalanceError(format!("{:?}", e))));
+            };
+            if icp_payout_quest.amount + icp_transfer_fee + icp_payout_fee > user_icp_balance {
+                return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::NotEnoughBalance { icp_balance: user_icp_balance }));
+            }
+            // payout
+            // pay self for the icp_payout_fee
 
+
+        },
+        CollectBalanceQuest::cycles_payout(cycles_payout_quest) => {
+
+        }
+    }
 }
 
 
@@ -273,3 +289,24 @@ struct Fees {
 pub fn see_fees() -> Fees {
     
 }
+
+
+
+
+
+
+
+
+#[no_mangle]
+pub fn canister_inspect_message() {
+    // caution: this function is only called for ingress messages 
+    
+    if ["topup_balance", "see_balance", "collect_balance", ].contains(method_name()) {
+        if caller() == Principal::anonymous() { // check '==' plementation is correct otherwise caller().as_slice() == Principal::anonymous().as_slice()
+            trap("caller cannot be anonymous for this method.")
+        }
+    }
+}
+
+
+
