@@ -7,6 +7,8 @@ mod tools;
 use tools::{
     user_icp_balance_id,
     user_cycles_balance_topup_memo_bytes,
+    check_user_icp_balance,
+    check_user_cycles_balance,
 
     
 };
@@ -25,7 +27,31 @@ struct UserData {
 
 
 thread_local! {
-    static USER_DATA = RefCell::new(HashMap::<Principal, UserData>::new());    
+    static USERS_DATA = RefCell::new(HashMap::<Principal, UserData>::new());    
+}
+
+
+
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum CyclesTransferMemo {
+    text(String),
+    nat64(u64),
+    blob(Vec<u8>)
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct CyclesTransfer {
+    memo: CyclesTransferMemo
+}
+
+
+
+#[update]
+pub fn cycles_transfer(CyclesTransfer) -> () {
+
 }
 
 
@@ -37,7 +63,7 @@ type IcpId = ic_ledger_types::AccountIdentifier;
 
 type IcpIdSub = ic_ledger_types::Subaccount;
 
-type ICPTokens = ic_ledger_types::Tokens;
+type IcpTokens = ic_ledger_types::Tokens;
 
 
 #[derive(CandidType, Deserialize)]
@@ -63,7 +89,7 @@ pub fn topup_balance() -> TopUpBalanceData {
 
     TopUpBalanceData {
         topup_cycles_balance: TopUpCyclesBalanceData {
-            topup_cycles_transfer_memo: CyclesTransferMemo::blob(user_cycles_balance_topup_memo_bytes(&caller()))
+            topup_cycles_transfer_memo: CyclesTransferMemo::blob(user_cycles_balance_topup_memo_bytes(&caller()).to_vec())
         },
         topup_icp_balance: TopUpIcpBalanceData {
             topup_icp_id: user_icp_balance_id(&caller())
@@ -76,11 +102,13 @@ pub fn topup_balance() -> TopUpBalanceData {
 #[derive(CandidType, Deserialize)]
 struct UserBalance {
     cycles_balance: u128,
-    icp_balance: ICPTokens, 
+    icp_balance: IcpTokens, 
 }
 
 #[derive(CandidType, Deserialize)]
 enum SeeBalanceError {
+    IcpLedgerError(String),
+    
 
 }
 
@@ -90,11 +118,12 @@ type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
 pub async fn see_balance() -> SeeBalanceSponse {
     check_caller_is_not_anonymous_caller();
     
-    // :check: ledger for the icp-balance.
-    
     Ok(UserBalance {
-        cycles_balance: USER_DATA.with(|user_data| user_data.borrow().get(&caller())   .cycles_balance);
-        icp_balance: 
+        cycles_balance: check_user_cycles_balance(&caller()),
+        icp_balance: match check_user_icp_balance(&caller()).await {
+            Ok(icp_tokens) => icp_tokens,
+            Err(e) => return Err(SeeBalanceError::IcpLedgerError(format!("{:?}", e)));
+        }
     })
 }
 
@@ -102,7 +131,7 @@ pub async fn see_balance() -> SeeBalanceSponse {
 
 #[derive(CandidType, Deserialize)]
 struct IcpPayoutQuest {
-    amount: ICPTokens,
+    amount: IcpTokens,
     payout_icp_id: IcpId
 }
 
@@ -147,7 +176,7 @@ pub async fn collect_balance(CollectBalanceQuest) -> CollectBalanceSponse {
 
 #[derive(CandidType, Deserialize)]
 struct ConvertIcpBalanceForCyclesWithTheCmcRateQuest {
-    amount: ICPTokens
+    amount: IcpTokens
 }
 
 #[derive(CandidType, Deserialize)]
