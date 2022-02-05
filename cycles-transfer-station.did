@@ -1,10 +1,12 @@
 
 
-type ICPID = blob;         // 32-bytes. see ic ledger.
+type IcpId = blob;         // 32-bytes. see ic ledger.
 
-type ICP = record {        // tokens, measured in 10^-8 of a token.
+type IcpTokens = record {        // tokens, measured in 10^-8 of a token.
     e8s : nat64;
 };
+
+type IcpBlockIndex = nat64;
 
 
 type SeeBalanceError = variant {
@@ -61,7 +63,7 @@ service cycles-transfer-station : {
                 topup_cycles_transfer_memo: CyclesTransferMemo;
             };
             topup_icp_balance: record {
-                topup_icp_id : ICPID;                  
+                topup_icp_id : IcpId;                  
             };
         }
     );
@@ -71,7 +73,7 @@ service cycles-transfer-station : {
         variant {
             Ok: record {
                 cycles_balance: nat;
-                icp_balance: ICP; 
+                icp_balance: IcpTokens; 
             };
             Err: SeeBalanceError;
         }
@@ -81,8 +83,8 @@ service cycles-transfer-station : {
     collect_balance : (
         variant {
             icp_payout: record {
-                amount: ICP;
-                payout_icp_id: ICPID; 
+                amount: IcpTokens;
+                payout_icp_id: IcpId; 
             };
             cycles_payout: record {
                 amount: nat;
@@ -92,7 +94,7 @@ service cycles-transfer-station : {
     ) -> (
         variant {
             icp_payout: variant {
-                Ok: null;
+                Ok: IcpBlockIndex;
                 Err: IcpPayoutError;
             };
             cycles_payout: variant {
@@ -105,7 +107,7 @@ service cycles-transfer-station : {
 
     convert_icp_balance_for_cycles_with_the_cmc_rate : (
         record { 
-            amount: ICP; 
+            amount: IcpTokens; 
         }
     ) -> (
         variant { 

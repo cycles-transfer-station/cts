@@ -30,16 +30,16 @@ fn thirty_bytes_as_principal(bytes: &[u8; 30]) -> Principal {
 
 
 
-fn principal_as_an_icpsubaccount(p: &Principal) -> IcpIdSub {
+pub fn user_icp_balance_subaccount(user: &Principal) -> IcpIdSub {
     let mut sub_bytes = [0u8; 32];
-    sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(p));
+    sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(user));
     IcpIdSub(sub_bytes)
 }
 
 
 
 pub fn user_icp_balance_id(user: &Principal) -> IcpId {
-    IcpId::new(&id(), &principal_as_an_icpsubaccount(user))
+    IcpId::new(&id(), &user_icp_balance_subaccount(user))
 }
 
 
