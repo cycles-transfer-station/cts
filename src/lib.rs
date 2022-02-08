@@ -1,6 +1,8 @@
 
 
 
+use ic_cdk::api::{id, time};
+
 
 
 mod tools;
@@ -13,6 +15,22 @@ use tools::{
     
 };
 
+
+
+type IcpId = ic_ledger_types::AccountIdentifier;
+type IcpIdSub = ic_ledger_types::Subaccount;
+type IcpTokens = ic_ledger_types::Tokens;
+type IcpBlockIndex = ic_ledger_types::BlockIndex;
+type IcpMemo = ic_ledger_types::Memo; 
+type IcpTimestamp = ic_ledger_types::Timestamp;
+
+
+pub const ICP_DEFAULT_SUBACCOUNT: IcpIdSub = ic_ledger_types::DEFAULT_SUBACCOUNT;
+pub const ICP_LEDGER_TRANSFER_FEE: IcpTokens = ic_ledger_types::DEFAULT_FEE;
+pub const ICP_PAYOUT_FEE: IcpTokens = ;                                                             // with the clude of the ICP_LEDGER_TRANSFER_FEE for the take_icp_payout_fee_transfer_call .
+pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));                                     // b"CTS-POUT"
+pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));                            // b"CTS-TFEE"
+pub const CYCLES_TRANSFER_FEE: u128 = ;
 
 
 
@@ -59,15 +77,6 @@ pub fn cycles_transfer(CyclesTransfer) -> () {
 
 
 
-
-
-type IcpId = ic_ledger_types::AccountIdentifier;
-
-type IcpIdSub = ic_ledger_types::Subaccount;
-
-type IcpTokens = ic_ledger_types::Tokens;
-
-type IcpBlockIndex = ic_ledger_types::BlockIndex;
 
 
 #[derive(CandidType, Deserialize)]
@@ -149,8 +158,9 @@ enum CollectBalanceQuest {
 
 #[derive(CandidType, Deserialize)]
 enum IcpPayoutError {
-    // IcpLedgerCheckBalanceError(String),
-    // NotEnoughBalance { icp_balance: IcpTokens },
+    InvalidIcpAmount,
+    IcpLedgerCheckBalanceError(String),
+    BalanceTooLow { max_icp_payout: IcpTokens },
     IcpLedgerTransferError(ic_ledger_types::TransferError),
     IcpLedgerTransferCallError(String),
 
@@ -159,8 +169,8 @@ enum IcpPayoutError {
 
 #[derive(CandidType, Deserialize)]
 enum CyclesPayoutError {
-    BalanceTooLow,
     InvalidCyclesAmount,
+    BalanceTooLow { max_cycles_payout: u128 },
     // CanisterDoesNotExist,
     // NoCyclesTransferMethodOnTheCanister,
     CyclesTransferCallError(String),
@@ -177,52 +187,77 @@ enum CollectBalanceSponse {
 }
 
 #[update]
-pub async fn collect_balance(q: CollectBalanceQuest) -> CollectBalanceSponse {
-    match q {
+pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> CollectBalanceSponse {
+    
+    match collect_balance_quest {
 
         CollectBalanceQuest::icp_payout(icp_payout_quest) => {
-            // payout  // test if someone tries to payout the total-balance, will it give an InsufficientFunds Error cause of the icp transfer fee ? 
-            // let user_icp_balance: IcpTokens = match check_user_icp_balance(&caller()).await {
-            //     Ok(icp_tokens) => icp_tokens,
-            //     Err(e) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerCheckBalanceError(format!("{:?}", e))));
-            // };
-            // if icp_payout_quest.amount + icp_transfer_fee + icp_payout_fee > user_icp_balance {
-            //     return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::NotEnoughBalance { icp_balance: user_icp_balance }));
-            // }
-            // ICP_PAYOUT_FEE ? check balance? minimum-transfer? // collect fee ?
-
-            use ic_ledger_types::{transfer, MAINNET_LEDGER_CANISTER_ID, TransferArgs, Memo, DEFAULT_FEE};
             
-            let icp_transfer_call: CallResult<TransferResult> = transfer(
+            if icp_payout_quest.icp.e8s == 0 {
+                return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::InvalidIcpAmount));
+            } 
+            
+            let user_icp_balance: IcpTokens = match check_user_icp_balance(&caller()).await {
+                Ok(icp_tokens) => icp_tokens,
+                Err(e) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerCheckBalanceError(format!("{:?}", e))));
+            };
+            
+            if icp_payout_quest.icp + ICP_LEDGER_TRANSFER_FEE + ICP_PAYOUT_FEE > user_icp_balance {
+                return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::BalanceTooLow { max_icp_payout: user_icp_balance - ICP_LEDGER_TRANSFER_FEE - ICP_PAYOUT_FEE }));
+            }
+            
+            use ic_ledger_types::{transfer, MAINNET_LEDGER_CANISTER_ID, TransferArgs};
+            
+            let icp_payout_transfer_call: CallResult<TransferResult> = transfer(
                 MAINNET_LEDGER_CANISTER_ID,
                 TransferArgs {
-                    memo: Memo(0),                                                                  // custom-memo? 
+                    memo: ICP_PAYOUT_MEMO,
                     amount: icp_payout_quest.icp,
-                    fee: DEFAULT_FEE,
+                    fee: ICP_LEDGER_TRANSFER_FEE,
                     from_subaccount: user_icp_balance_subaccount(&caller()),
                     to: icp_payout_quest.payout_icp_id,                        
-                    created_at_time: None
+                    created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
                 }
             ).await; 
 
-            match icp_transfer_call {
+            let take_icp_payout_fee_transfer_call: CallResult<TransferResult> = transfer(
+                MAINNET_LEDGER_CANISTER_ID,
+                TransferArgs {
+                    memo: ICP_TAKE_PAYOUT_FEE_MEMO,
+                    amount: ICP_PAYOUT_FEE - ICP_LEDGER_TRANSFER_FEE,
+                    fee: ICP_LEDGER_TRANSFER_FEE,
+                    from_subaccount: user_icp_balance_subaccount(&caller()),
+                    to: main_cts_icp_id(),                        
+                    created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
+                }
+            ).await;             
+
+            
+
+
+            match icp_payout_transfer_call {
                 Ok(transfer_result) => match transfer_result {
                     Ok(block_index) => CollectBalanceSponse::icp_payout(Ok(block_index)),
                     Err(transfer_error) => CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferError(transfer_error)))
                 },
                 Err(e) => CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferCallError(format!("{:?}", e))))
             }
+        
+        
+        
+        
         },
 
-        
+
         CollectBalanceQuest::cycles_payout(cycles_payout_quest) => {
 
             if cycles_payout_quest.cycles == 0 {
                 return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::InvalidCyclesAmount));
             }
 
-            if cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE > check_user_cycles_balance(&caller()) {
-                return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::BalanceTooLow));
+            let user_cycles_balance: u128 = check_user_cycles_balance(&caller());
+            if cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
+                return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::BalanceTooLow { max_cycles_payout: user_cycles_balance - CYCLES_TRANSFER_FEE }));
             }
 
             let cycles_transfer_call: CallResult<Vec<u8>> = call_raw(

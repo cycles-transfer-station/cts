@@ -1,9 +1,8 @@
 use sha2::Digest;
+use ic_cdk::api::id;
 
 
-
-
-
+use crate::ICP_DEFAULT_SUBACCOUNT;
 
 
 
@@ -71,3 +70,7 @@ pub fn check_user_cycles_balance(user: &Principal) -> u128 {
     user_cycles_balance
 }
 
+
+pub fn main_cts_icp_id() -> IcpId {  // do once
+    IcpId::new(&id(), &ICP_DEFAULT_SUBACCOUNT)
+}
