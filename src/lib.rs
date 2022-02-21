@@ -1,7 +1,18 @@
 
+// lock each user from making other calls on each async call that awaits, like the collect_balance call, lock the user at the begining and unlock the user at the end. 
+// will callbacks (the code after an await) get dropped if the subnet is under heavy load?
 
 
-use ic_cdk::api::{id, time};
+use ic_cdk::{
+    api::{
+        id, 
+        time, 
+        call::{
+            call_raw,
+            RejectionCode
+        },
+    }
+};
 
 
 
@@ -11,7 +22,7 @@ use tools::{
     user_cycles_balance_topup_memo_bytes,
     check_user_icp_balance,
     check_user_cycles_balance,
-
+    main_cts_icp_id,
     
 };
 
@@ -25,12 +36,13 @@ type IcpMemo = ic_ledger_types::Memo;
 type IcpTimestamp = ic_ledger_types::Timestamp;
 
 
+
 pub const ICP_DEFAULT_SUBACCOUNT: IcpIdSub = ic_ledger_types::DEFAULT_SUBACCOUNT;
 pub const ICP_LEDGER_TRANSFER_FEE: IcpTokens = ic_ledger_types::DEFAULT_FEE;
-pub const ICP_PAYOUT_FEE: IcpTokens = ;                                                             // with the clude of the ICP_LEDGER_TRANSFER_FEE for the take_icp_payout_fee_transfer_call .
+pub const ICP_PAYOUT_FEE: IcpTokens = ; // calculate through the xdr conversion rate ?                                               
+pub const CYCLES_TRANSFER_FEE: u128 = 300_000_000_000;
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));                                     // b"CTS-POUT"
 pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));                            // b"CTS-TFEE"
-pub const CYCLES_TRANSFER_FEE: u128 = ;
 
 
 
@@ -39,6 +51,7 @@ pub const CYCLES_TRANSFER_FEE: u128 = ;
 struct UserData {
     pub cycles_balance: u128,
     //pub cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, // 
+    pub untaken_icp_to_collect: IcpTokens,
 }
 
 
@@ -57,9 +70,9 @@ thread_local! {
 
 #[derive(CandidType, Deserialize)]
 pub enum CyclesTransferMemo {
-    text(String),
-    nat64(u64),
-    blob(Vec<u8>)
+    Text(String),
+    Nat64(u64),
+    Blob(Vec<u8>)
 }
 
 #[derive(CandidType, Deserialize)]
@@ -100,7 +113,7 @@ struct TopUpBalanceData {
 pub fn topup_balance() -> TopUpBalanceData {
     TopUpBalanceData {
         topup_cycles_balance: TopUpCyclesBalanceData {
-            topup_cycles_transfer_memo: CyclesTransferMemo::blob(user_cycles_balance_topup_memo_bytes(&caller()).to_vec())
+            topup_cycles_transfer_memo: CyclesTransferMemo::Blob(user_cycles_balance_topup_memo_bytes(&caller()).to_vec())
         },
         topup_icp_balance: TopUpIcpBalanceData {
             topup_icp_id: user_icp_balance_id(&caller())
@@ -118,7 +131,7 @@ struct UserBalance {
 
 #[derive(CandidType, Deserialize)]
 enum SeeBalanceError {
-    IcpLedgerCheckBalanceError(String),
+    IcpLedgerCheckBalanceCallError(String),
     
 
 }
@@ -131,7 +144,7 @@ pub async fn see_balance() -> SeeBalanceSponse {
         cycles_balance: check_user_cycles_balance(&caller()),
         icp_balance: match check_user_icp_balance(&caller()).await {
             Ok(icp_tokens) => icp_tokens,
-            Err(e) => return Err(SeeBalanceError::IcpLedgerCheckBalanceError(format!("{:?}", e)));
+            Err(balance_call_error) => return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
         }
     })
 }
@@ -159,7 +172,7 @@ enum CollectBalanceQuest {
 #[derive(CandidType, Deserialize)]
 enum IcpPayoutError {
     InvalidIcpAmount,
-    IcpLedgerCheckBalanceError(String),
+    IcpLedgerCheckBalanceCallError(String),
     BalanceTooLow { max_icp_payout: IcpTokens },
     IcpLedgerTransferError(ic_ledger_types::TransferError),
     IcpLedgerTransferCallError(String),
@@ -173,7 +186,7 @@ enum CyclesPayoutError {
     BalanceTooLow { max_cycles_payout: u128 },
     // CanisterDoesNotExist,
     // NoCyclesTransferMethodOnTheCanister,
-    CyclesTransferCallError(String),
+    CyclesTransferCallError { call_error: String, paid_fee: bool }, // fee_paid: u128 ??
 }
 
 type IcpPayoutSponse = Result<IcpBlockIndex, IcpPayoutError>;
@@ -199,14 +212,14 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             
             let user_icp_balance: IcpTokens = match check_user_icp_balance(&caller()).await {
                 Ok(icp_tokens) => icp_tokens,
-                Err(e) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerCheckBalanceError(format!("{:?}", e))));
+                Err(balance_call_error) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error))));
             };
             
-            if icp_payout_quest.icp + ICP_LEDGER_TRANSFER_FEE + ICP_PAYOUT_FEE > user_icp_balance {
-                return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::BalanceTooLow { max_icp_payout: user_icp_balance - ICP_LEDGER_TRANSFER_FEE - ICP_PAYOUT_FEE }));
+            if icp_payout_quest.icp + ICP_PAYOUT_FEE + ICP_LEDGER_TRANSFER_FEE*2 > user_icp_balance {
+                return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::BalanceTooLow { max_icp_payout: user_icp_balance - ICP_PAYOUT_FEE - ICP_LEDGER_TRANSFER_FEE*2 }));
             }
             
-            use ic_ledger_types::{transfer, MAINNET_LEDGER_CANISTER_ID, TransferArgs};
+            use ic_ledger_types::{transfer, MAINNET_LEDGER_CANISTER_ID, TransferArgs, TransferResult, TransferError};
             
             let icp_payout_transfer_call: CallResult<TransferResult> = transfer(
                 MAINNET_LEDGER_CANISTER_ID,
@@ -220,11 +233,19 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                 }
             ).await; 
 
-            let take_icp_payout_fee_transfer_call: CallResult<TransferResult> = transfer(
+           let icp_payout_transfer_call_block_index: IcpBlockIndex = match icp_payout_transfer_call {
+                Ok(transfer_result) => match transfer_result {
+                    Ok(block_index) => block_index,
+                    Err(transfer_error) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferError(transfer_error)));
+                },
+                Err(transfer_call_error) => return CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferCallError(format!("{:?}", transfer_call_error))));
+            };
+
+            let icp_payout_take_fee_transfer_call: CallResult<TransferResult> = transfer(
                 MAINNET_LEDGER_CANISTER_ID,
                 TransferArgs {
                     memo: ICP_TAKE_PAYOUT_FEE_MEMO,
-                    amount: ICP_PAYOUT_FEE - ICP_LEDGER_TRANSFER_FEE,
+                    amount: ICP_PAYOUT_FEE,
                     fee: ICP_LEDGER_TRANSFER_FEE,
                     from_subaccount: user_icp_balance_subaccount(&caller()),
                     to: main_cts_icp_id(),                        
@@ -232,20 +253,17 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                 }
             ).await;             
 
-            
-
-
-            match icp_payout_transfer_call {
+            match icp_payout_take_fee_transfer_call {
                 Ok(transfer_result) => match transfer_result {
-                    Ok(block_index) => CollectBalanceSponse::icp_payout(Ok(block_index)),
-                    Err(transfer_error) => CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferError(transfer_error)))
+                    Ok(block_index) => {},
+                    Err(transfer_error) =>  // log and take into the count 
                 },
-                Err(e) => CollectBalanceSponse::icp_payout(Err(IcpPayoutError::IcpLedgerTransferCallError(format!("{:?}", e))))
+                Err(transfer_call_error) => { // log and take into the count
+                    user_data.untaken_icp_to_collect += ICP_PAYOUT_FEE + ICP_LEDGER_TRANSFER_FEE; 
+                }
             }
-        
-        
-        
-        
+
+            return CollectBalanceSponse::icp_payout(Ok(icp_payout_transfer_call_block_index));
         },
 
 
@@ -256,6 +274,7 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             }
 
             let user_cycles_balance: u128 = check_user_cycles_balance(&caller());
+
             if cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
                 return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::BalanceTooLow { max_cycles_payout: user_cycles_balance - CYCLES_TRANSFER_FEE }));
             }
@@ -263,29 +282,35 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             let cycles_transfer_call: CallResult<Vec<u8>> = call_raw(
                 cycles_payout_quest.payout_cycles_transfer_canister,
                 "cycles_transfer",
-                encode_one(&CyclesTransfer { memo: CyclesTransferMemo::text("CTS-PAYOUT".to_string()) }).unwrap(),
+                encode_one(&CyclesTransfer { memo: CyclesTransferMemo::Text("CTS-PAYOUT".to_string()) }).unwrap(),
                 cycles_payout_quest.cycles as u64  // as u64 for now till cdk compatible with the u128
             ).await;
             
-            let cycles_accepted: u128 = ( cycles_payout_quest.cycles as u64 - msg_cycles_refunded() ) as u128;          // u64 for now till cdk compatible with the u128
-
-            USERS_DATA.with(|ud| {
-                ud.borrow().get(user).unwrap().cycles_balance -= cycles_accepted + CYCLES_TRANSFER_FEE;          // can unwrap here because of the checks [a]bove, that the user's-balance is greater than 1
-            });
-
             // check if it is possible for the canister to reject/trap but still keep the cycles. if yes, [re]turn the cycles_accepted in the error. for now, going as if not possible.
 
             match cycles_transfer_call {
-                Ok(_) => CollectBalanceSponse::cycles_payout(Ok(cycles_accepted)),
-                Err(cycles_transfer_call_error) => CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError(format!("{:?}", cycles_transfer_call_error))))
+                Ok(_) => {
+                    let cycles_accepted: u128 = cycles_payout_quest.cycles - msg_cycles_refunded() as u128; 
+                    USERS_DATA.with(|ud| { ud.borrow().get(user).unwrap().cycles_balance -= cycles_accepted + CYCLES_TRANSFER_FEE; });          // can unwrap here because of the checks [a]bove, that the user's-balance is greater than 1
+                    return CollectBalanceSponse::cycles_payout(Ok(cycles_accepted));
+                },
+                Err(cycles_transfer_call_error) => {
+                    match cycles_transfer_call_error.0 {
+                        RejectionCode::DestinationInvalid | RejectionCode::CanisterReject | RejectionCode::CanisterError => {
+                            USERS_DATA.with(|ud| { ud.borrow().get(user).unwrap().cycles_balance -= CYCLES_TRANSFER_FEE; });
+                            return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: true }))
+                        },
+                        _ => return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: false }))
+                    }
+                }
             }
-            
-            
 
 
+            
         }
-
     }
+    // if an icp payout fails then the cts does not take a fee, but if a cycles payout fails with a canister error or canister reject then the cts does take a fee. 
+    // because there is nothing a user can do to make the icp  
 }
 
 
