@@ -51,7 +51,7 @@ fn thirty_bytes_as_principal(bytes: &[u8; 30]) -> Principal {
 
 
 
-pub fn user_icp_balance_subaccount(user: &Principal) -> IcpIdSub {
+pub fn principal_icp_subaccount(user: &Principal) -> IcpIdSub {
     let mut sub_bytes = [0u8; 32];
     sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(user));
     IcpIdSub(sub_bytes)
@@ -60,7 +60,7 @@ pub fn user_icp_balance_subaccount(user: &Principal) -> IcpIdSub {
 
 
 pub fn user_icp_balance_id(user: &Principal) -> IcpId {
-    IcpId::new(&id(), &user_icp_balance_subaccount(user))
+    IcpId::new(&id(), &principal_icp_subaccount(user))
 }
 
 
@@ -115,4 +115,15 @@ pub fn unlock_user(user: &Principal) {
     USERS_DATA.with(|ud| {
         ud.borrow_mut().entry(*user).or_default().user_lock.lock = false;
     });
+}
+
+
+pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000u128; // 1T cycles = 1 XDR
+
+
+pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
+    icpts.e8s() as u128 
+    * xdr_permyriad_per_icp as u128 
+    * DEFAULT_CYCLES_PER_XDR 
+    / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
 }
