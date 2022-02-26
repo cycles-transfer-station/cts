@@ -16,13 +16,16 @@ use ic_cdk::{
 };
 
 use crate::{
-    ICP_DEFAULT_SUBACCOUNT,
     USERS_DATA,
     UserLock,
     UserData,
     IcpId,
     IcpIdSub,
     IcpTokens,
+    IcpAccountBalanceArgs,
+    icp_account_balance,
+    ICP_DEFAULT_SUBACCOUNT,
+    MAINNET_LEDGER_CANISTER_ID,
 
 };
 
@@ -73,10 +76,9 @@ pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
 
 
 pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
-    use ic_ledger_types::{account_balance, AccountBalanceArgs, MAINNET_LEDGER_CANISTER_ID};
-    let mut icp_balance: IcpTokens = account_balance(
+    let mut icp_balance: IcpTokens = icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
-        AccountBalanceArgs { account: user_icp_balance_id(user) }    
+        IcpAccountBalanceArgs { account: user_icp_balance_id(user) }    
     ).await?;
     icp_balance -= USERS_DATA.with(|ud| { ud.borrow_mut().entry(*user).or_default().untaken_icp_to_collect });
     Ok(icp_balance)
@@ -85,10 +87,7 @@ pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
 
 pub fn check_user_cycles_balance(user: &Principal) -> u128 {
     USERS_DATA.with(|ud| {
-        match ud.borrow().get(user) {
-            Some(user_data) => user_data.cycles_balance,
-            None            => 0                               
-        }
+        ud.borrow_mut().entry(*user).or_default().cycles_balance
     })
 }
 
@@ -113,7 +112,7 @@ pub fn check_lock_and_lock_user(user: &Principal) {
 
 pub fn unlock_user(user: &Principal) {
     USERS_DATA.with(|ud| {
-        ud.borrow_mut().entry(*user).or_default().user_lock.lock = false;
+        ud.borrow_mut().get_mut(user).unwrap().user_lock.lock = false;
     });
 }
 
