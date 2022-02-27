@@ -8,10 +8,17 @@ use ic_cdk::{
         call::{
             CallResult,
             RejectionCode,
+            call_raw,
         },
     },
     export::{
-        Principal
+        Principal,
+        candid::{
+            CandidType,
+            Deserialize,
+            utils::{encode_one, decode_one},
+            error::Error as CandidError,
+        },
     }
 };
 
@@ -26,6 +33,8 @@ use crate::{
     icp_account_balance,
     ICP_DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID,
+    MAINNET_CYCLES_MINTING_CANISTER_ID,
+
 
 };
 
@@ -117,8 +126,45 @@ pub fn unlock_user(user: &Principal) {
 }
 
 
-pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000u128; // 1T cycles = 1 XDR
 
+pub enum CheckCurrentXdrPerMyriadPerIcpCmcRateError {
+    CmcGetRateCallError(String),
+    CmcGetRateCallSponseCandidError(String),
+}
+
+#[derive(CandidType, Deserialize)]
+struct IcpXdrConversionRateCertifiedResponse {
+    certificate: Vec<u8>, 
+    data : IcpXdrConversionRate,
+    hash_tree : Vec<u8>
+}
+
+#[derive(CandidType, Deserialize)]
+struct IcpXdrConversionRate {
+    xdr_permyriad_per_icp : u64,
+    timestamp_seconds : u64
+}
+
+// cache this? for a certain-mount of the time?
+pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> Result<u64, CheckCurrentXdrPerMyriadPerIcpCmcRateError> {
+    let call_sponse_candid_bytes: Vec<u8> = match call_raw(
+        MAINNET_CYCLES_MINTING_CANISTER_ID,
+        "get_icp_xdr_conversion_rate",
+        encode_one(()).unwrap(),
+        0
+    ).await {
+        Ok(b) => b,
+        Err(call_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(format!("{:?}", call_error)))
+    };
+    let icp_xdr_conversion_rate_with_certification: IcpXdrConversionRateCertifiedResponse = match decode_one(&call_sponse_candid_bytes) {
+        Ok(s) => s,
+        Err(candid_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(format!("{}", candid_error))),
+    };
+    Ok(icp_xdr_conversion_rate_with_certification.data.xdr_permyriad_per_icp)
+}
+
+
+pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000u128; // 1T cycles = 1 XDR
 
 pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
     icpts.e8s() as u128 
@@ -126,3 +172,16 @@ pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128
     * DEFAULT_CYCLES_PER_XDR 
     / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
 }
+
+// test this!!! these two backwards and forwards
+pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpTokens {
+    IcpTokens::from_e8s(
+        ( cycles
+        * (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
+        / DEFAULT_CYCLES_PER_XDR
+        / xdr_permyriad_per_icp as u128 ) as u64    
+    )
+}
+
+
+

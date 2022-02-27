@@ -69,19 +69,26 @@ use tools::{
     main_cts_icp_id,
     check_lock_and_lock_user,
     unlock_user,
+    CheckCurrentXdrPerMyriadPerIcpCmcRateError,
+    check_current_xdr_permyriad_per_icp_cmc_rate,
     icptokens_to_cycles,
+    cycles_to_icptokens,
+    
 
     
 };
 
 
+pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 
 pub const CYCLES_TRANSFER_FEE: u128 = 300_000_000_000;
+pub const CYCLES_BANK_COST: u128 = 20_000_000_000_000;
+
 pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(1000000);      // calculate through the xdr conversion rate ?                                               
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));                                     // b"CTS-POUT"
 pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));                            // b"CTS-TFEE"
-pub const MEMO_CREATE_CANISTER: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
-pub const MEMO_TOP_UP_CANISTER: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
+pub const ICP_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
+pub const ICP_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 
 
 
@@ -407,7 +414,7 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             let cycles_transfer_call: CallResult<Vec<u8>> = call_raw(
                 cycles_payout_quest.payout_cycles_transfer_canister,
                 "cycles_transfer",
-                match encode_one(&CyclesTransfer { memo: CyclesTransferMemo::Text("CTS-PAYOUT".to_string()) }) {
+                match encode_one(&CyclesTransfer { memo: CyclesTransferMemo::Text("CTS-POUT".to_string()) }) {
                     Ok(candid_bytes) => candid_bytes,
                     Err(candid_error) => {
                         unlock_user(&user);
@@ -462,7 +469,7 @@ pub struct ConvertIcpBalanceForTheCyclesWithTheCmcRateQuest {
 #[derive(CandidType, Deserialize)]
 pub enum ConvertIcpBalanceForTheCyclesWithTheCmcRateError {
     CmcGetRateCallError(String),
-    CmcGetRateCallSponseCandidDecodeError(String),
+    CmcGetRateCallSponseCandidError(String),
     IcpLedgerCheckBalanceCallError(String),
     IcpBalanceTooLow { max_icp_convert_for_the_cycles: IcpTokens },
     TopUpCyclesIcpTransferCallError(String),
@@ -472,19 +479,6 @@ pub enum ConvertIcpBalanceForTheCyclesWithTheCmcRateError {
     TopUpCyclesIcpNotifySponseCandidDecodeError { candid_error: String, topup_transfer_block_height: IcpBlockIndex },
     TopUpCyclesIcpTransferRefund(String, Option<IcpBlockIndex>),
     UnknownIcpNotifySponse
-}
-
-#[derive(CandidType, Deserialize)]
-struct IcpXdrConversionRateCertifiedResponse {
-    certificate: Vec<u8>, 
-    data : IcpXdrConversionRate,
-    hash_tree : Vec<u8>
-}
-
-#[derive(CandidType, Deserialize)]
-struct IcpXdrConversionRate {
-    xdr_permyriad_per_icp : u64,
-    timestamp_seconds : u64
 }
 
 #[derive(CandidType, Deserialize)]
@@ -512,21 +506,18 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
     
     let user: Principal = caller();
 
-    let xdr_permyriad_per_icp: u64 = {
-        let candid_bytes: Vec<u8> = match call_raw(
-            MAINNET_CYCLES_MINTING_CANISTER_ID,
-            "get_icp_xdr_conversion_rate",
-            encode_one(()).unwrap(),
-            0
-        ).await {
-            Ok(b) => b,
-            Err(call_error) => return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallError(format!("{:?}", call_error)))
-        };
-        let icp_xdr_conversion_rate_with_certification: IcpXdrConversionRateCertifiedResponse = match decode_one(&candid_bytes) {
-            Ok(s) => s,
-            Err(candid_error) => return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallSponseCandidDecodeError(format!("{}", candid_error))),
-        };
-        icp_xdr_conversion_rate_with_certification.data.xdr_permyriad_per_icp
+    let xdr_permyriad_per_icp: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate().await {
+        Ok(rate) => rate,
+        Err(check_current_rate_error) => {
+            match check_current_rate_error {
+                CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(call_error) => {
+                    return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallError(call_error));
+                },
+                CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(candid_error) => {
+                    return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallSponseCandidError(candid_error));
+                }
+            }
+        }
     };
 
     let cycles: u128 = icptokens_to_cycles(q.icp, xdr_permyriad_per_icp);
@@ -549,7 +540,7 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
     let topup_cycles_icp_transfer_call: CallResult<IcpTransferResult> = icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
-            memo: MEMO_TOP_UP_CANISTER,
+            memo: ICP_TOP_UP_CANISTER_MEMO,
             amount: q.icp,   // q.icp - ICP_LEDGER_TRANSFER_DEFAULT_FEE ??
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: Some(principal_icp_subaccount(&user)),
@@ -722,30 +713,178 @@ pub async fn purchase_cycles_transfer(pctq: PurchaseCyclesTransferQuest) -> Resu
 
 
 
-
-
-
 #[derive(CandidType, Deserialize)]
-struct PurchaseCyclesBankQuest {
-
+pub enum CyclesPaymentOrIcpPayment {
+    cycles_payment,
+    icp_payment
 }
 
 #[derive(CandidType, Deserialize)]
-struct CyclesBankPurchaseLog {
+pub struct PurchaseCyclesBankQuest {
+    cycles_payment_or_icp_payment: CyclesPaymentOrIcpPayment,
+}
+
+#[derive(CandidType, Deserialize, Copy, Clone)] // do i want copy?
+pub struct CyclesBankPurchaseLog {
     cycles_bank_principal: Principal,
-    cost_cycles: u64, // 64? or 128
+    cost_cycles: u128,
     timestamp: u64
 }
 
 #[derive(CandidType, Deserialize)]
-enum PurchaseCyclesBankError {
+pub enum PurchaseCyclesBankError {
+    CyclesBalanceTooLow { current_user_cycles_balance: u128, current_cycles_bank_cost_cycles: u128 },
+    IcpCheckBalanceCallError(String),
+    CmcGetRateCallError(String),
+    CmcGetRateCallSponseCandidError(String),
+    IcpBalanceTooLow { current_user_icp_balance: IcpTokens, current_cycles_bank_cost_icp: IcpTokens },
+    CreateCyclesBankCanisterManagementCallQuestCandidError(String),
+    CreateCyclesBankCanisterManagementCallError(String),
+    CreateCyclesBankCanisterManagementCallSponseCandidError { candid_error: String, candid_bytes: Vec<u8> },
+
 
 }
 
-// #[update]
-// pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBankPurchaseLog, PurchaseCyclesBankError> {
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterCreateCanisterQuest {
+    settings : Option<ManagementCanisterOptionalCanisterSettings>
+}
 
-// }
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterOptionalCanisterSettings {
+    controllers : Option<Vec<Principal>>,
+    compute_allocation : Option<u128>,
+    memory_allocation : Option<u128>,
+    freezing_threshold : Option<u128>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterInstallCodeQuest {
+    mode : ManagementCanisterInstallCodeMode,
+    canister_id : Principal,
+    wasm_module : Vec<u8>,
+    arg : Vec<u8>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum ManagementCanisterInstallCodeMode {
+    install, 
+    reinstall, 
+    upgrade
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct CanisterIdRecord {
+    canister_id : Principal
+}
+
+#[update]
+pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<CyclesBankPurchaseLog, PurchaseCyclesBankError> {
+    let user: Principal = caller();
+    check_lock_and_lock_user(&user);
+
+    let mut cycles_bank_cost_icp: IcpTokens;
+    match pcbq.cycles_payment_or_icp_payment {
+        CyclesPaymentOrIcpPayment::cycles_payment => {
+            let user_cycles_balance: u128 = check_user_cycles_balance(&user);
+            if user_cycles_balance < CYCLES_BANK_COST {
+                unlock_user(&user);
+                return Err(PurchaseCyclesBankError::CyclesBalanceTooLow{ current_user_cycles_balance: user_cycles_balance, current_cycles_bank_cost_cycles: CYCLES_BANK_COST });
+            }
+        },
+        
+        CyclesPaymentOrIcpPayment::icp_payment => {
+            let user_icp_balance: IcpTokens = match check_user_icp_balance(&user).await {
+                Ok(icp_tokens) => icp_tokens,
+                Err(balance_call_error) => {
+                    unlock_user(&user);
+                    return Err(PurchaseCyclesBankError::IcpCheckBalanceCallError(format!("{:?}", balance_call_error)));
+                }
+            };
+            let xdr_permyriad_per_icp: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate().await {
+                Ok(rate) => rate,
+                Err(check_current_rate_error) => {
+                    unlock_user(&user);
+                    match check_current_rate_error {
+                        CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(call_error) => {
+                            return Err(PurchaseCyclesBankError::CmcGetRateCallError(call_error));
+                        },
+                        CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(candid_error) => {
+                            return Err(PurchaseCyclesBankError::CmcGetRateCallSponseCandidError(candid_error));
+                        }
+                    }
+                }
+            };
+            cycles_bank_cost_icp = cycles_to_icptokens(CYCLES_BANK_COST, xdr_permyriad_per_icp);
+            if user_icp_balance < cycles_bank_cost_icp { // clude: + ICP_LEDGER_TRANSFER_DEFAULT_FEE ?
+                unlock_user(&user);
+                return Err(PurchaseCyclesBankError::IcpBalanceTooLow{ current_user_icp_balance: user_icp_balance, current_cycles_bank_cost_icp: cycles_bank_cost_icp });
+            }
+        }
+    }
+
+            
+    let create_cycles_bank_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(
+        &ManagementCanisterCreateCanisterQuest {
+            settings: Some(ManagementCanisterOptionalCanisterSettings{
+                controllers: Some(vec![ic_cdk::api::id()]),
+                compute_allocation : None,
+                memory_allocation : None,
+                freezing_threshold : None
+            })
+        }
+    ) {
+        Ok(candid_bytes) => candid_bytes,
+        Err(candid_error) => {
+            unlock_user(&user);
+            return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterManagementCallQuestCandidError(format!("{}", candid_error)))
+        }
+    };
+
+    let create_cycles_bank_canister_management_call: CallResult<Vec<u8>> = call_raw(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "install_code",
+        create_cycles_bank_canister_management_call_quest_candid_bytes,
+        0
+    ).await;
+
+    let cycles_bank_principal: Principal = match create_cycles_bank_canister_management_call {
+        Ok(call_sponse_candid_bytes) => match decode_one::<CanisterIdRecord>(&call_sponse_candid_bytes) {
+            Ok(canister_id_record) => canister_id_record.canister_id,
+            Err(candid_error) => {
+                unlock_user(&user);
+                return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterManagementCallSponseCandidError{ candid_error: format!("{}", candid_error), candid_bytes: call_sponse_candid_bytes });
+            }
+        },
+        Err(call_error) => {
+            unlock_user(&user);
+            return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterManagementCallError(format!("{:?}", call_error)));
+        }
+    };
+
+    // install code
+
+    // start canister (and test the canister?)
+
+    // change canister controllers
+
+    // make the cycles-bank-purchase-log
+    let cycles_bank_purchase_log = CyclesBankPurchaseLog {
+        cycles_bank_principal,
+        cost_cycles: CYCLES_BANK_COST,
+        timestamp: time()
+    };
+
+    // log the cycles-bank-purchase-log within the USERS_DATA.with-closure and take the icp or cycles cost within the USERS_DATA.with-closure
+
+
+
+    unlock_user(&user);
+    Ok(cycles_bank_purchase_log)
+}
+
+
+
 
 
 
