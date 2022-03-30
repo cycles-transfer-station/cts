@@ -785,6 +785,7 @@ pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<Cycle
 
     let mut cycles_bank_cost_icp: IcpTokens;
     match pcbq.cycles_payment_or_icp_payment {
+        
         CyclesPaymentOrIcpPayment::cycles_payment => {
             let user_cycles_balance: u128 = check_user_cycles_balance(&user);
             if user_cycles_balance < CYCLES_BANK_COST {

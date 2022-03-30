@@ -1,0 +1,41 @@
+
+
+type IcpTransferError = variant {
+    BadFee: record { expected_fee: IcpTokens; };
+    InsufficientFunds: record { balance: IcpTokens; };
+    TxTooOld: record { allowed_window_nanos: nat64; };
+    TxCreatedInFuture;
+    TxDuplicate: record { duplicate_of: IcpBlockIndex; };
+};
+
+
+
+type CollectIcpBalanceQuest = record {
+    icp: IcpTokens;
+    payout_icp_id: IcpId;
+};
+
+type CollectIcpBalanceSponse = variant {
+    Ok: IcpBlockIndex;
+    Err: CollectIcpBalanceError; 
+};
+
+type CollectIcpBalanceError = variant {
+    InvalidIcpPayout0Amount;
+    IcpLedgerCheckBalanceCallError: text;
+    BalanceTooLow: record { max_icp_payout: IcpTokens; };
+    IcpLedgerTransferError: IcpTransferError;
+    IcpLedgerTransferCallError: text;
+};
+
+
+
+
+service cts-icp_transferrer : {
+
+    // the caller must be the user
+    collect_icp_balance : (CollectIcpBalanceQuest) -> (CollectIcpBalanceSponse);
+
+}
+
+

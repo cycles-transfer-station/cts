@@ -5,3 +5,7 @@ Cargo.lock
 **/*.rs.bk
 
 code-logs
+
+/canister1
+/cycles-wallet
+/scripts
