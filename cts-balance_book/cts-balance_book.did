@@ -3,7 +3,7 @@ type IcpTokens = record {
     e8s : nat64;
 };
 
----------------------------------------------------------------
+// ---------------------------------------------------------------
 
 type SeeUserBalanceQuest = record {
     user : principal;
@@ -23,7 +23,7 @@ type SeeUserBalanceSponseErr = variant {
 
 };
 
----------------------------------------------------------------
+// ---------------------------------------------------------------
 
 type ChangeUserBalanceQuest = record {
     user : principal;
@@ -53,11 +53,20 @@ type ChangeUserBalanceSponseErr = variant {
     Error2;
 };
 
+// ---------------------------------------------------------------
+
 service cts-balance_book : {
 
     // can only be called by the other cts canisters or by the user 
     // the caller must be either one of the cts canisters or the user
     see_user_balance : (SeeUserBalanceQuest) -> (SeeUserBalanceSponse);
+
+
+
+
+
+
+
 
 
     // this method can only be called by the other cts canisters
