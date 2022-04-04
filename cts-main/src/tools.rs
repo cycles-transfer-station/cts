@@ -8,7 +8,7 @@ use ic_cdk::{
         call::{
             CallResult,
             RejectionCode,
-            call_raw,
+            call_raw128,
         },
     },
     export::{
@@ -24,6 +24,7 @@ use ic_cdk::{
 
 use crate::{
     USERS_DATA,
+    NEW_CANISTERS,
     UserLock,
     UserData,
     IcpId,
@@ -34,6 +35,7 @@ use crate::{
     ICP_DEFAULT_SUBACCOUNT,
     MAINNET_LEDGER_CANISTER_ID,
     MAINNET_CYCLES_MINTING_CANISTER_ID,
+    MANAGEMENT_CANISTER_PRINCIPAL,
 
 
 };
@@ -147,10 +149,10 @@ struct IcpXdrConversionRate {
 
 // cache this? for a certain-mount of the time?
 pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> Result<u64, CheckCurrentXdrPerMyriadPerIcpCmcRateError> {
-    let call_sponse_candid_bytes: Vec<u8> = match call_raw(
+    let call_sponse_candid_bytes: Vec<u8> = match call_raw128(
         MAINNET_CYCLES_MINTING_CANISTER_ID,
         "get_icp_xdr_conversion_rate",
-        encode_one(()).unwrap(),
+        &encode_one(()).unwrap(),
         0
     ).await {
         Ok(b) => b,
@@ -184,4 +186,72 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 }
 
 
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterCreateCanisterQuest {
+    settings : Option<ManagementCanisterOptionalCanisterSettings>
+}
 
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterOptionalCanisterSettings {
+    controllers : Option<Vec<Principal>>,
+    compute_allocation : Option<u128>,
+    memory_allocation : Option<u128>,
+    freezing_threshold : Option<u128>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct CanisterIdRecord {
+    canister_id : Principal
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum GetNewCanisterError {
+    CreateCanisterManagementCallQuestCandidError(String),
+    CreateCanisterManagementCallSponseCandidError{candid_error: String, candid_bytes: Vec<u8>},
+    CreateCanisterManagementCallError(String)
+}
+
+pub async fn get_new_canister() -> Result<Principal, GetNewCanisterError> {
+    
+    if let Some(principal) = NEW_CANISTERS.with(|nc| nc.borrow_mut().pop()) {
+        return Ok(principal);
+    } 
+
+    let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(
+        &ManagementCanisterCreateCanisterQuest {
+            settings: Some(ManagementCanisterOptionalCanisterSettings{
+                controllers: Some(vec![ic_cdk::api::id()]),
+                compute_allocation : None,
+                memory_allocation : None,
+                freezing_threshold : None
+            })
+        }
+    ) {
+        Ok(candid_bytes) => candid_bytes,
+        Err(candid_error) => {
+            return Err(GetNewCanisterError::CreateCanisterManagementCallQuestCandidError(format!("{}", candid_error)))
+        }
+    };
+
+    let create_canister_management_call: CallResult<Vec<u8>> = call_raw128(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "create_canister",
+        &create_canister_management_call_quest_candid_bytes,
+        0
+    ).await;
+
+    let canister_principal: Principal = match create_canister_management_call {
+        Ok(call_sponse_candid_bytes) => match decode_one::<CanisterIdRecord>(&call_sponse_candid_bytes) {
+            Ok(canister_id_record) => canister_id_record.canister_id,
+            Err(candid_error) => {
+                return Err(GetNewCanisterError::CreateCanisterManagementCallSponseCandidError{ candid_error: format!("{}", candid_error), candid_bytes: call_sponse_candid_bytes });
+            }
+        },
+        Err(call_error) => {
+            return Err(GetNewCanisterError::CreateCanisterManagementCallError(format!("{:?}", call_error)));
+        }
+    };
+
+    Ok(canister_principal)
+
+}

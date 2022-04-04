@@ -6,10 +6,7 @@ members = [
 	"cycles-wallet",
 
 	"cts-main",
-    "cts-balance_book",
     "cts-cycles_transferrer",
-    "cts-icp_transferrer",
-    "cts-cycles_bank_creator",
     "cts-cycles_market",
 
 	
