@@ -24,6 +24,7 @@ use ic_cdk::{
         call::{
             call_raw128,
             call,
+            call_with_payment128,
             CallResult,
             RejectionCode,
             msg_cycles_refunded128,
@@ -87,13 +88,23 @@ use tools::{
     cycles_to_icptokens,
     get_new_canister,
     GetNewCanisterError,
+    ManagementCanisterCanisterSettings,
+    ManagementCanisterOptionalCanisterSettings,
+    ManagementCanisterCanisterStatusRecord,
+    ManagementCanisterCanisterStatusVariant,
+    CanisterIdRecord,
+    ChangeCanisterSettingsRecord,
+
+    
+
+
 
     
 
     
 };
 
-#[cfg(tests)]
+#[cfg(test)]
 mod t;
 
 
@@ -149,13 +160,40 @@ impl Default for UserData {
 
 
 
-thread_local! {
-    pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
-    pub static CYCLES_BANK_WASM: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-    pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+mod cbc {
+
+    pub struct CyclesBankCode {
+        module: Vec<u8>,
+        module_hash: [u8; 32] 
+    }
+    impl CyclesBankCode {
+        pub fn new(module: Vec<u8>) -> Self {
+            Self {
+                module_hash: super::tools::sha256(&module), // put this on top if move error
+                module: module,
+            }
+        }
+        pub fn module(&self) -> &Vec<u8> {
+            &self.module
+        }
+        pub fn module_hash(&self) -> &[u8; 32] {
+            &self.module_hash
+        }
+        pub fn change_module(&mut self, module: Vec<u8>) -> () {
+            *self = Self::new(module);
+        }
+    }
 }
 
+use cbc::CyclesBankCode;
 
+
+
+thread_local! {
+    pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
+    pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
+    pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+}
 
 
 
@@ -759,17 +797,31 @@ pub struct PurchaseCyclesBankQuest {
 pub struct CyclesBankPurchaseLog {
     cycles_bank_principal: Principal,
     cost_cycles: u128,
-    timestamp: u64
+    timestamp: u64,
+    // module_hash?
 }
 
 #[derive(CandidType, Deserialize)]
 pub enum PurchaseCyclesBankError {
     CyclesBalanceTooLow { current_user_cycles_balance: u128, current_cycles_bank_cost_cycles: u128 },
     IcpCheckBalanceCallError(String),
-    CmcGetRateCallError(String),
-    CmcGetRateCallSponseCandidError(String),
+    CmcGetRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
     IcpBalanceTooLow { current_user_icp_balance: IcpTokens, current_cycles_bank_cost_icp: IcpTokens, current_icp_payment_ledger_transfer_fee: IcpTokens },
     CreateCyclesBankCanisterError(GetNewCanisterError),
+    UninstallCodeCallError(String),
+    NoCyclesBankCode,
+    PutCodeCallError(String),
+    CanisterStatusCallError(String),
+    CheckModuleHashError{canister_status_record_module_hash: Option<[u8; 32]>, cbc_module_hash: [u8; 32]},
+    StartCanisterCallError(String),
+    PutCyclesCallError(String),
+    UpdateSettingsCallError(String),
+
+
+
+
+
+    
 
 }
 
@@ -791,12 +843,13 @@ pub enum ManagementCanisterInstallCodeMode {
 
 
 #[update]
-pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<CyclesBankPurchaseLog, PurchaseCyclesBankError> {
+pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBankPurchaseLog, PurchaseCyclesBankError> {
     let user: Principal = caller();
     check_lock_and_lock_user(&user);
 
-    let mut cycles_bank_cost_icp: IcpTokens;
-    match pcbq.cycles_payment_or_icp_payment {
+    let mut cycles_bank_cost_icp: Option<IcpTokens> = None;
+
+    match q.cycles_payment_or_icp_payment {
         
         CyclesPaymentOrIcpPayment::cycles_payment => {
             
@@ -820,22 +873,15 @@ pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<Cycle
                 Ok(rate) => rate,
                 Err(check_current_rate_error) => {
                     unlock_user(&user);
-                    match check_current_rate_error {
-                        CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(call_error) => {
-                            return Err(PurchaseCyclesBankError::CmcGetRateCallError(call_error));
-                        },
-                        CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(candid_error) => {
-                            return Err(PurchaseCyclesBankError::CmcGetRateCallSponseCandidError(candid_error));
-                        }
-                    }
+                    return Err(PurchaseCyclesBankError::CmcGetRateError(check_current_rate_error));    
                 }
             };
-            cycles_bank_cost_icp = cycles_to_icptokens(CYCLES_BANK_COST, xdr_permyriad_per_icp);
-            if user_icp_balance < cycles_bank_cost_icp + ICP_LEDGER_TRANSFER_DEFAULT_FEE { // ledger fee for the icp-transfer from user subaccount to cts main
+            cycles_bank_cost_icp = Some(cycles_to_icptokens(CYCLES_BANK_COST, xdr_permyriad_per_icp));
+            if user_icp_balance < cycles_bank_cost_icp.unwrap() + ICP_LEDGER_TRANSFER_DEFAULT_FEE { // ledger fee for the icp-transfer from user subaccount to cts main
                 unlock_user(&user);
                 return Err(PurchaseCyclesBankError::IcpBalanceTooLow{ 
                     current_user_icp_balance: user_icp_balance, 
-                    current_cycles_bank_cost_icp: cycles_bank_cost_icp, 
+                    current_cycles_bank_cost_icp: cycles_bank_cost_icp.unwrap(), 
                     current_icp_payment_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE 
                 });
             }
@@ -850,14 +896,37 @@ pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<Cycle
         }
     };
             
-
+    // on errors after here make sure to put the cycles-bank-canister into the NEW_CANISTERS list 
 
     // install code
 
-    let (cbw_pointer, cbw_len, cbw_capacity) = CYCLES_BANK_WASM.with(|cbw_refcell| { 
-        let mut cbw: RefMut<Vec<u8>> = cbw_refcell.borrow_mut();
-        (cbw.as_mut_ptr(), cbw.len(), cbw.capacity()) 
-    }); 
+    let uninstall_code_call: CallResult<()> = call(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "uninstall_code",
+        (CanisterIdRecord { canister_id: cycles_bank_principal },),
+    ).await; 
+    match uninstall_code_call {
+        Ok(_) => {},
+        Err(uninstall_code_call_error) => {
+            unlock_user(&user);
+            NEW_CANISTERS.with(|ncs| {
+                ncs.borrow_mut().push(cycles_bank_principal);
+            });
+            return Err(PurchaseCyclesBankError::UninstallCodeCallError(format!("{:?}", uninstall_code_call_error)));
+        }
+    }
+    
+    if CYCLES_BANK_CODE.with(|cbc_refcell| { (*cbc_refcell.borrow()).module().len() == 0 }) {
+        unlock_user(&user);
+        NEW_CANISTERS.with(|ncs| {
+            ncs.borrow_mut().push(cycles_bank_principal);
+        });
+        return Err(PurchaseCyclesBankError::NoCyclesBankCode);
+    }
+
+    let cbc_module_pointer: *const Vec<u8> = CYCLES_BANK_CODE.with(|cbc_refcell| {
+        (*cbc_refcell.borrow()).module() as *const Vec<u8>
+    });
 
     let put_code_call: CallResult<()> = call(
         MANAGEMENT_CANISTER_PRINCIPAL,
@@ -865,31 +934,134 @@ pub async fn purchase_cycles_bank(pcbq: PurchaseCyclesBankQuest) -> Result<Cycle
         (ManagementCanisterInstallCodeQuest {
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : cycles_bank_principal,
-            wasm_module : unsafe { &Vec::from_raw_parts(cbw_pointer, cbw_len, cbw_capacity) },
+            wasm_module : unsafe { &*cbc_module_pointer },
             arg : &[0u8; 0]
         },),
-    ).await;
-    
+    ).await;   
     match put_code_call {
         Ok(_) => {},
-        Err(put_code_call_error) => {}
+        Err(put_code_call_error) => {
+            unlock_user(&user);
+            NEW_CANISTERS.with(|ncs| {
+                ncs.borrow_mut().push(cycles_bank_principal);
+            });
+            return Err(PurchaseCyclesBankError::PutCodeCallError(format!("{:?}", put_code_call_error)));
+        }
     }
 
+    // check canister status
+    let canister_status_call: CallResult<(ManagementCanisterCanisterStatusRecord,)> = call(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "canister_status",
+        (CanisterIdRecord { canister_id: cycles_bank_principal },),
+    ).await;
+    let canister_status_record: ManagementCanisterCanisterStatusRecord = match canister_status_call {
+        Ok((canister_status_record,)) => canister_status_record,
+        Err(canister_status_call_error) => {
+            unlock_user(&user);
+            NEW_CANISTERS.with(|ncs| {
+                ncs.borrow_mut().push(cycles_bank_principal);
+            });
+            return Err(PurchaseCyclesBankError::CanisterStatusCallError(format!("{:?}", canister_status_call_error)));
+        }
+    };
 
-    // start canister (and test the canister?)
+    // check the wasm hash of the canister
+    if canister_status_record.module_hash == None || canister_status_record.module_hash.unwrap() != CYCLES_BANK_CODE.with(|cbc_refcell| { *(*cbc_refcell.borrow()).module_hash() }) {
+        unlock_user(&user);
+        NEW_CANISTERS.with(|ncs| {
+            ncs.borrow_mut().push(cycles_bank_principal);
+        });
+        return Err(PurchaseCyclesBankError::CheckModuleHashError{canister_status_record_module_hash: canister_status_record.module_hash, cbc_module_hash: CYCLES_BANK_CODE.with(|cbc_refcell| { *(*cbc_refcell.borrow()).module_hash() }) });
+    }
+
+    // check the running status
+    if canister_status_record.status != ManagementCanisterCanisterStatusVariant::running {
+
+        // start canister
+        let start_canister_call: CallResult<()> = call(
+            MANAGEMENT_CANISTER_PRINCIPAL,
+            "start_canister",
+            (CanisterIdRecord { canister_id: cycles_bank_principal },),
+        ).await;
+        match start_canister_call {
+            Ok(_) => {},
+            Err(start_canister_call_error) => {
+                unlock_user(&user);
+                NEW_CANISTERS.with(|ncs| {
+                    ncs.borrow_mut().push(cycles_bank_principal);
+                });
+                return Err(PurchaseCyclesBankError::StartCanisterCallError(format!("{:?}", start_canister_call_error)));
+            }
+        }
+
+    }
+
+    // put some cycles
+    let put_cycles_call: CallResult<()> = call_with_payment128(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "deposit_cycles",
+        (CanisterIdRecord { canister_id: cycles_bank_principal },),
+        500000000000u128
+    ).await;
+    match put_cycles_call {
+        Ok(_) => {},
+        Err(put_cycles_call_error) => {
+            unlock_user(&user);
+            NEW_CANISTERS.with(|ncs| {
+                ncs.borrow_mut().push(cycles_bank_principal);
+            });
+            return Err(PurchaseCyclesBankError::PutCyclesCallError(format!("{:?}", put_cycles_call_error)));
+        }
+    }
 
     // change canister controllers
+    let update_settings_call: CallResult<()> = call(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "update_settings",
+        (ChangeCanisterSettingsRecord { 
+            canister_id: cycles_bank_principal,
+            settings: ManagementCanisterOptionalCanisterSettings {
+                controllers: Some(vec![user]),  // , cycles_bank_principal
+                compute_allocation : None,
+                memory_allocation : None,
+                freezing_threshold : None
+            }
+        },),
+    ).await;
+    match update_settings_call {
+        Ok(_) => {},
+        Err(update_settings_call_error) => {
+            unlock_user(&user);
+            NEW_CANISTERS.with(|ncs| {
+                ncs.borrow_mut().push(cycles_bank_principal);
+            });
+            return Err(PurchaseCyclesBankError::UpdateSettingsCallError(format!("{:?}", update_settings_call_error)));
+        }
+    }
 
     // make the cycles-bank-purchase-log
     let cycles_bank_purchase_log = CyclesBankPurchaseLog {
         cycles_bank_principal,
         cost_cycles: CYCLES_BANK_COST,
-        timestamp: time()
+        timestamp: time(),
     };
 
-    // log the cycles-bank-purchase-log within the USERS_DATA.with-closure and take the icp or cycles cost within the USERS_DATA.with-closure
-
-
+    // log the cycles-bank-purchase-log within the USERS_DATA.with-closure and collect the icp or cycles cost within the USERS_DATA.with-closure
+    USERS_DATA.with(|ud_r| {
+        let mut users_data: RefMut<HashMap<Principal, UserData>> = ud_r.borrow_mut();
+        let user_data: &mut UserData = users_data.get_mut(&user).unwrap();
+        user_data.cycles_bank_purchases.push(cycles_bank_purchase_log);
+        
+        match q.cycles_payment_or_icp_payment {   
+            CyclesPaymentOrIcpPayment::cycles_payment => {
+                user_data.cycles_balance -= CYCLES_BANK_COST;
+            },
+            CyclesPaymentOrIcpPayment::icp_payment => {
+                user_data.untaken_icp_to_collect += cycles_bank_cost_icp.unwrap() + ICP_LEDGER_TRANSFER_DEFAULT_FEE;
+            }
+        }
+    });
 
     unlock_user(&user);
     Ok(cycles_bank_purchase_log)

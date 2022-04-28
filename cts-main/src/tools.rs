@@ -128,7 +128,7 @@ pub fn unlock_user(user: &Principal) {
 }
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum CheckCurrentXdrPerMyriadPerIcpCmcRateError {
     CmcGetRateCallError(String),
     CmcGetRateCallSponseCandidError(String),
@@ -175,7 +175,6 @@ pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128
     / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
 }
 
-// test this!!! these two backwards and forwards
 pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpTokens {
     IcpTokens::from_e8s(
         ( cycles
@@ -193,16 +192,47 @@ pub struct ManagementCanisterCreateCanisterQuest {
 
 #[derive(CandidType, Deserialize)]
 pub struct ManagementCanisterOptionalCanisterSettings {
-    controllers : Option<Vec<Principal>>,
-    compute_allocation : Option<u128>,
-    memory_allocation : Option<u128>,
-    freezing_threshold : Option<u128>,
+    pub controllers : Option<Vec<Principal>>,
+    pub compute_allocation : Option<u128>,
+    pub memory_allocation : Option<u128>,
+    pub freezing_threshold : Option<u128>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterCanisterSettings {
+    pub controllers : Vec<Principal>,
+    pub compute_allocation : u128,
+    pub memory_allocation : u128,
+    pub freezing_threshold : u128
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterCanisterStatusRecord {
+    pub status : ManagementCanisterCanisterStatusVariant,
+    pub settings: ManagementCanisterCanisterSettings,
+    pub module_hash: Option<[u8; 32]>,
+    pub memory_size: u128,
+    pub cycles: u128
+}
+
+#[derive(CandidType, Deserialize, PartialEq)]
+pub enum ManagementCanisterCanisterStatusVariant {
+    running,
+    stopping,
+    stopped,
 }
 
 #[derive(CandidType, Deserialize)]
 pub struct CanisterIdRecord {
-    canister_id : Principal
+    pub canister_id : Principal
 }
+
+#[derive(CandidType, Deserialize)]
+pub struct ChangeCanisterSettingsRecord {
+    pub canister_id : Principal,
+    pub settings : ManagementCanisterOptionalCanisterSettings
+}
+
 
 #[derive(CandidType, Deserialize)]
 pub enum GetNewCanisterError {
