@@ -43,13 +43,13 @@ use ic_cdk::{
         },
     },
 };
-use ic_cdk_macros::{update, query};
+use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
 use ic_ledger_types::{
     Memo as IcpMemo,
     AccountIdentifier as IcpId,
     Subaccount as IcpIdSub,
     Tokens as IcpTokens,
-    BlockIndex as IcpBlockIndex,
+    BlockIndex as IcpBlockHeight,
     Timestamp as IcpTimestamp,
     DEFAULT_SUBACCOUNT as ICP_DEFAULT_SUBACCOUNT,
     DEFAULT_FEE as ICP_LEDGER_TRANSFER_DEFAULT_FEE,
@@ -94,6 +94,10 @@ use tools::{
     ManagementCanisterCanisterStatusVariant,
     CanisterIdRecord,
     ChangeCanisterSettingsRecord,
+    CYCLES_BALANCE_TOPUP_MEMO_START,
+    thirty_bytes_as_principal,
+    ledger_topup_cycles,
+    LedgerTopupCyclesError,
 
     
 
@@ -108,6 +112,9 @@ use tools::{
 mod t;
 
 
+pub type Cycles = u128;
+
+
 
 pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 
@@ -118,9 +125,6 @@ pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(1000000);      // calc
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
 
-
-pub const ICP_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
-pub const ICP_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 
 
 
@@ -166,6 +170,7 @@ mod cbc {
         module: Vec<u8>,
         module_hash: [u8; 32] 
     }
+
     impl CyclesBankCode {
         pub fn new(module: Vec<u8>) -> Self {
             Self {
@@ -179,7 +184,7 @@ mod cbc {
         pub fn module_hash(&self) -> &[u8; 32] {
             &self.module_hash
         }
-        pub fn change_module(&mut self, module: Vec<u8>) -> () {
+        pub fn change_module(&mut self, module: Vec<u8>) {
             *self = Self::new(module);
         }
     }
@@ -190,6 +195,7 @@ use cbc::CyclesBankCode;
 
 
 thread_local! {
+
     pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
     pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
     pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
@@ -214,11 +220,32 @@ pub struct CyclesTransfer {
     memo: CyclesTransferMemo
 }
 
-
+pub const MINIMUM_CYCLES_TRANSFER: u128 = 5000000000;
 
 #[update]
 pub fn cycles_transfer(ct: CyclesTransfer) -> () {
-    
+    let cycles: u128 = msg_cycles_accept128(msg_cycles_available128());
+    if cycles < MINIMUM_CYCLES_TRANSFER {
+        trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER))
+    }  
+
+    // check memo size 
+
+
+    if let CyclesTransferMemo::Blob(memo_bytes) = ct.memo {
+        if memo_bytes.len() != 32 || &memo_bytes[..2] != CYCLES_BALANCE_TOPUP_MEMO_START {
+            trap("unknown cycles transfer memo")
+        }   
+
+        let user: Principal = thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap());
+        USERS_DATA.with(|udr| {
+            udr.borrow_mut().entry(user).or_default().cycles_balance += cycles;
+        });
+
+
+
+
+    } 
 }
 
 
@@ -365,7 +392,7 @@ pub enum CyclesPayoutError {
     CyclesTransferCallError { call_error: String, paid_fee: bool }, // fee_paid: u128 ??
 }
 
-pub type IcpPayoutSponse = Result<IcpBlockIndex, IcpPayoutError>;
+pub type IcpPayoutSponse = Result<IcpBlockHeight, IcpPayoutError>;
 
 pub type CyclesPayoutSponse = Result<u128, CyclesPayoutError>;
 
@@ -414,8 +441,7 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                     created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
                 }
             ).await; 
-
-           let icp_payout_transfer_call_block_index: IcpBlockIndex = match icp_payout_transfer_call {
+           let icp_payout_transfer_call_block_index: IcpBlockHeight = match icp_payout_transfer_call {
                 Ok(transfer_result) => match transfer_result {
                     Ok(block_index) => block_index,
                     Err(transfer_error) => {
@@ -440,7 +466,6 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                     created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
                 }
             ).await;             
-
             match icp_payout_take_fee_transfer_call {
                 Ok(transfer_result) => match transfer_result {
                     Ok(block_index) => {},
@@ -535,36 +560,11 @@ pub struct ConvertIcpBalanceForTheCyclesWithTheCmcRateQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum ConvertIcpBalanceForTheCyclesWithTheCmcRateError {
-    CmcGetRateCallError(String),
-    CmcGetRateCallSponseCandidError(String),
+    CmcGetRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
     IcpLedgerCheckBalanceCallError(String),
     IcpBalanceTooLow { max_icp_convert_for_the_cycles: IcpTokens },
-    TopUpCyclesIcpTransferCallError(String),
-    TopUpCyclesIcpTransferError(IcpTransferError),
-    TopUpCyclesIcpNotifyQuestCandidEncodeError { candid_error: String, topup_transfer_block_height: IcpBlockIndex },
-    TopUpCyclesIcpNotifyCallError { notify_call_error: String, topup_transfer_block_height: IcpBlockIndex },
-    TopUpCyclesIcpNotifySponseCandidDecodeError { candid_error: String, topup_transfer_block_height: IcpBlockIndex },
-    TopUpCyclesIcpNotifySponseRefund(String, Option<IcpBlockIndex>),
-    UnknownIcpNotifySponse
+    LedgerTopupCyclesError(LedgerTopupCyclesError),
 }
-
-#[derive(CandidType, Deserialize)]
-struct NotifyCanisterArgs {
-    from_subaccount : Option<IcpIdSub>,
-    to_canister : Principal,
-    to_subaccount : Option<IcpIdSub>,
-    max_fee : IcpTokens,
-    block_height : IcpBlockIndex,
-}
-
-#[derive(CandidType, Deserialize)]
-enum CyclesSponse {
-    CanisterCreated(Principal),
-    // Silly requirement by the candid derivation
-    ToppedUp(()),
-    Refunded(String, Option<IcpBlockIndex>),
-}
-
 
 
 // ledger takes the fee twice out of the users icp subaccount balance
@@ -573,17 +573,12 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
     
     let user: Principal = caller();
 
+    // check minimum-conversion [a]mount
+
     let xdr_permyriad_per_icp: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate().await {
         Ok(rate) => rate,
         Err(check_current_rate_error) => {
-            match check_current_rate_error {
-                CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(call_error) => {
-                    return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallError(call_error));
-                },
-                CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(candid_error) => {
-                    return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateCallSponseCandidError(candid_error));
-                }
-            }
+            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateError(check_current_rate_error));
         }
     };
 
@@ -604,83 +599,19 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
         return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::IcpBalanceTooLow { max_icp_convert_for_the_cycles: user_icp_balance - IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) });
     }
 
-    let topup_cycles_icp_transfer_call: CallResult<IcpTransferResult> = icp_transfer(
-        MAINNET_LEDGER_CANISTER_ID,
-        IcpTransferArgs {
-            memo: ICP_TOP_UP_CANISTER_MEMO,
-            amount: q.icp,                              
-            fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-            from_subaccount: Some(principal_icp_subaccount(&user)),
-            to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&ic_cdk::api::id())),
-            created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
-        }
-    ).await; 
-    
-    let topup_cycles_icp_transfer_call_block_index: IcpBlockIndex = match topup_cycles_icp_transfer_call {
-        Ok(transfer_call_sponse) => match transfer_call_sponse {
-            Ok(block_index) => block_index,
-            Err(transfer_error) => {
-                unlock_user(&user);
-                return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpTransferError(transfer_error));
-            }
-        },
-        Err(transfer_call_error) => {
+    let topup_cycles: (/*u128*/) = match ledger_topup_cycles(q.icp, Some(principal_icp_subaccount(&user)), ic_cdk::api::id()).await {
+        Ok(/*cycles*/_) => {/*cycles*/},
+        Err(ledger_topup_cycles_error) => {
             unlock_user(&user);
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpTransferCallError(format!("{:?}", transfer_call_error)));
-        }
-    }; 
-
-    let topup_cycles_icp_notify_call_candid: Vec<u8> = match encode_one(
-        &NotifyCanisterArgs {
-            from_subaccount : Some(principal_icp_subaccount(&user)),
-            to_canister : MAINNET_CYCLES_MINTING_CANISTER_ID,
-            to_subaccount : Some(principal_icp_subaccount(&ic_cdk::api::id())),
-            max_fee : ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-            block_height : topup_cycles_icp_transfer_call_block_index,
-        }
-    ) {
-        Ok(b) => b,
-        Err(candid_error) => {
-            unlock_user(&user);
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpNotifyQuestCandidEncodeError { candid_error: format!("{}", candid_error), topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
-        }
-    }; 
-
-    let topup_cycles_icp_notify_call: CallResult<Vec<u8>> = call_raw128(
-        MAINNET_LEDGER_CANISTER_ID,
-        "notify_dfx",
-        &topup_cycles_icp_notify_call_candid,
-        0
-    ).await;
-
-    unlock_user(&user);
-
-    let topup_cycles_icp_notify_sponse: CyclesSponse = match topup_cycles_icp_notify_call {
-        Ok(b) => match decode_one(&b) {
-            Ok(cycles_sponse) => cycles_sponse,
-            Err(candid_error) => {
-                return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpNotifySponseCandidDecodeError { candid_error: format!("{}", candid_error), topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
-            }
-        },
-        Err(notify_call_error) => {
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpNotifyCallError { notify_call_error: format!("{:?}", notify_call_error), topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
+            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::LedgerTopupCyclesError(ledger_topup_cycles_error));
         }
     };
 
-    match topup_cycles_icp_notify_sponse {
-        CyclesSponse::Refunded(refund_message, optional_refund_block_height) => {
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::TopUpCyclesIcpNotifySponseRefund(refund_message, optional_refund_block_height));
-        },
-        CyclesSponse::ToppedUp(_) => {
-            USERS_DATA.with(|ud| {
-                ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += cycles;
-            });
-            return Ok(cycles);
-        },
-        _ => {
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::UnknownIcpNotifySponse);
-        }
-    }
+    USERS_DATA.with(|ud| {
+        ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += cycles;
+    });
+
+    Ok(cycles)
 }
 
 
@@ -793,7 +724,7 @@ pub struct PurchaseCyclesBankQuest {
     cycles_payment_or_icp_payment: CyclesPaymentOrIcpPayment,
 }
 
-#[derive(CandidType, Deserialize, Copy, Clone)] // do i want copy?
+#[derive(CandidType, Deserialize, Copy, Clone)]
 pub struct CyclesBankPurchaseLog {
     cycles_bank_principal: Principal,
     cost_cycles: u128,
@@ -1082,29 +1013,49 @@ pub struct CyclesTransferPurchaseLog {
     timestamp: u64,
 }
 
-// #[update]
-// pub fn see_cycles_transfer_purchases(page: u128) -> Vec<CyclesTransferPurchaseLog> {
+#[export_name = "canister_query see_cycles_transfer_purchases"]
+pub fn see_cycles_transfer_purchases<'a>(page: u128) -> &'a Vec<CyclesTransferPurchaseLog> {
+    let user_cycles_transfer_purchases: *const Vec<CyclesTransferPurchaseLog> = USERS_DATA.with(|ud| { 
+        match ud.borrow().get(&caller()) {
+            None => trap("user unknown"),
+            Some(user_data) => {
+                &user_data.cycles_transfer_purchases as *const Vec<CyclesTransferPurchaseLog>
+            },
+        }
+    });
+    unsafe { &*user_cycles_transfer_purchases }
+}
 
-// }
 
+#[export_name = "canister_query see_cycles_bank_purchases"]
+pub fn see_cycles_bank_purchases<'a>(page: u128) -> &'a Vec<CyclesBankPurchaseLog> {
+    let user_cycles_bank_purchases: *const Vec<CyclesBankPurchaseLog> = USERS_DATA.with(|ud| { 
+        match ud.borrow().get(&caller()) {
+            None => trap("user unknown"),
+            Some(user_data) => {
+                &user_data.cycles_bank_purchases as *const Vec<CyclesBankPurchaseLog>
+            },
+        }
+    });
+    unsafe { &*user_cycles_bank_purchases }
 
-// #[update]
-// pub fn see_cycles_bank_purchases(page: u128) -> Vec<CyclesBankPurchaseLog> {
-
-// }
+}
 
 
 
 #[derive(CandidType, Deserialize)]
-struct Fees {
+pub struct Fees {
     purchase_cycles_bank_cost_cycles: u128,
     purchase_cycles_transfer_cost_cycles: u128
 }
 
-// #[update]
-// pub fn see_fees() -> Fees {
-    
-// }
+#[query]
+pub fn see_fees() -> Fees {
+    Fees {
+        purchase_cycles_bank_cost_cycles: CYCLES_BANK_COST,
+        purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE, 
+    }
+}
 
 
 
@@ -1121,6 +1072,13 @@ pub fn canister_inspect_message() {
         "see_balance", 
         "collect_balance", 
         "convert_icp_balance_for_the_cycles_with_the_cmc_rate", 
+        "purchase_cycles_transfer",
+        "purchase_cycles_bank",
+        "see_cycles_transfer_purchases",
+        "see_cycles_bank_purchases"
+
+
+
     
     ].contains(&&ic_cdk::api::call::method_name()[..]) {
         if caller() == Principal::anonymous() { // check '==' plementation is correct otherwise caller().as_slice() == Principal::anonymous().as_slice()
@@ -1133,4 +1091,17 @@ pub fn canister_inspect_message() {
 }
 
 
+#[init]
+fn init() {
 
+} 
+
+#[pre_upgrade]
+fn pre_upgrade() {
+
+}
+
+#[post_upgrade]
+fn post_upgrade() {
+
+} 
