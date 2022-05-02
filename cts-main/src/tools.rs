@@ -45,6 +45,9 @@ use crate::{
     MANAGEMENT_CANISTER_PRINCIPAL,
     Cycles,
     ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+    LatestKnownCmcRate,
+    LATEST_KNOWN_CMC_RATE,
+
     
 
 
@@ -57,10 +60,11 @@ use crate::{
 
 
 
+pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
 
-pub const ICP_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
 pub const ICP_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 
+pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
 
 
 
@@ -103,7 +107,6 @@ pub fn user_icp_balance_id(user: &Principal) -> IcpId {
     IcpId::new(&id(), &principal_icp_subaccount(user))
 }
 
-pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
 
 pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
     let mut memo_bytes = [0u8; 32];
@@ -140,7 +143,7 @@ pub fn check_lock_and_lock_user(user: &Principal) {
         let users_data: &mut HashMap<Principal, UserData> = &mut ud.borrow_mut();
         let user_lock: &mut UserLock = &mut users_data.entry(*user).or_default().user_lock;
         let current_time: u64 = time();
-        if user_lock.lock == true && current_time - user_lock.last_lock_time_nanos < 3*60*1_000_000_000 {
+        if user_lock.lock == true && current_time - user_lock.last_lock_time_nanos < 9*60*1_000_000_000 {
             trap("this user is in the middle of a different call");
         }
         user_lock.lock = true;
@@ -168,14 +171,20 @@ struct IcpXdrConversionRateCertifiedResponse {
     hash_tree : Vec<u8>
 }
 
-#[derive(CandidType, Deserialize)]
-struct IcpXdrConversionRate {
-    xdr_permyriad_per_icp : u64,
-    timestamp_seconds : u64
+#[derive(CandidType, Deserialize, Copy, Clone)]
+pub struct IcpXdrConversionRate {
+    pub xdr_permyriad_per_icp : u64,
+    pub timestamp_seconds : u64
 }
 
 // cache this? for a certain-mount of the time?
 pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> Result<u64, CheckCurrentXdrPerMyriadPerIcpCmcRateError> {
+
+    let latest_known_cmc_rate: LatestKnownCmcRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
+    if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 10*60 {
+        return Ok(latest_known_cmc_rate.xdr_permyriad_per_icp);
+    }
+    
     let call_sponse_candid_bytes: Vec<u8> = match call_raw128(
         MAINNET_CYCLES_MINTING_CANISTER_ID,
         "get_icp_xdr_conversion_rate",
@@ -185,15 +194,16 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> Result<u64, Check
         Ok(b) => b,
         Err(call_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(format!("{:?}", call_error)))
     };
-    let icp_xdr_conversion_rate_with_certification: IcpXdrConversionRateCertifiedResponse = match decode_one(&call_sponse_candid_bytes) {
-        Ok(s) => s,
+    let icp_xdr_conversion_rate: IcpXdrConversionRate = match decode_one::<IcpXdrConversionRateCertifiedResponse>(&call_sponse_candid_bytes) {
+        Ok(s) => s.data,
         Err(candid_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallSponseCandidError(format!("{}", candid_error))),
     };
-    Ok(icp_xdr_conversion_rate_with_certification.data.xdr_permyriad_per_icp)
+
+    LATEST_KNOWN_CMC_RATE.with(|r| { r.set(icp_xdr_conversion_rate); });
+    Ok(icp_xdr_conversion_rate.xdr_permyriad_per_icp)
 }
 
 
-pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000u128; // 1T cycles = 1 XDR
 
 pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
     icpts.e8s() as u128 

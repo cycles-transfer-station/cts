@@ -12,7 +12,7 @@
 //#![allow(unused)] // take this out when done
 
 
-use std::cell::{RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
 use std::convert::From;
 
@@ -98,6 +98,7 @@ use tools::{
     thirty_bytes_as_principal,
     ledger_topup_cycles,
     LedgerTopupCyclesError,
+    IcpXdrConversionRate,
 
     
 
@@ -192,6 +193,8 @@ mod cbc {
 
 use cbc::CyclesBankCode;
 
+pub type LatestKnownCmcRate = IcpXdrConversionRate; 
+
 
 
 thread_local! {
@@ -199,6 +202,9 @@ thread_local! {
     pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
     pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
     pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    pub static LATEST_KNOWN_CMC_RATE: Cell<LatestKnownCmcRate> = Cell::new(LatestKnownCmcRate { xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
+
+
 }
 
 
@@ -328,25 +334,6 @@ pub async fn see_balance() -> SeeBalanceSponse {
 }
 
 
-#[update]
-pub async fn test_cts_see_balance() -> SeeBalanceSponse {
-    let cycles_balance: u128 = ic_cdk::api::canister_balance128();
-    let icp_balance: IcpTokens = match icp_account_balance(
-        MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs {
-            account : main_cts_icp_id()
-        }
-    ).await {
-        Ok(tokens) => tokens,
-        Err(balance_call_error) => {
-            return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
-        } 
-    };
-    Ok(UserBalance {
-        cycles_balance,
-        icp_balance,
-    })
-}
 
 
 
@@ -749,11 +736,6 @@ pub enum PurchaseCyclesBankError {
     UpdateSettingsCallError(String),
 
 
-
-
-
-    
-
 }
 
 
@@ -1105,3 +1087,48 @@ fn pre_upgrade() {
 fn post_upgrade() {
 
 } 
+
+
+
+
+
+#[update]
+pub async fn controller_see_balance() -> SeeBalanceSponse {
+    let cycles_balance: u128 = ic_cdk::api::canister_balance128();
+    let icp_balance: IcpTokens = match icp_account_balance(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpAccountBalanceArgs {
+            account : main_cts_icp_id()
+        }
+    ).await {
+        Ok(tokens) => tokens,
+        Err(balance_call_error) => {
+            return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
+        } 
+    };
+    Ok(UserBalance {
+        cycles_balance,
+        icp_balance,
+    })
+}
+
+
+#[update]
+pub fn controller_put_new_canisters(mut new_canisters: Vec<Principal>) {
+    NEW_CANISTERS.with(|ncs| {
+        ncs.borrow_mut().append(&mut new_canisters); // .extend_from_slice(&new_canisters) also works but it clones each item. .append moves each item
+    });
+}
+
+#[export_name = "canister_update controller_see_new_canisters"]
+pub fn controller_see_new_canisters<'a>() -> &'a Vec<Principal> {
+    let ncs_pointer = NEW_CANISTERS.with(|ncs| {
+        (&(*ncs.borrow())) as *const Vec<Principal> 
+    });
+    unsafe { &*ncs_pointer }
+}
+
+#[update]
+pub fn controller_() {
+
+}
