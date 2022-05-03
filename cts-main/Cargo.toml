@@ -17,7 +17,7 @@ ic-ledger-types = { path = "/home/STARLAB/Docs/code/DFINITY/cdk-rs/src/ic-ledger
 candid = "0.7.11"
 sha2 = "0.9.1"
 serde = "1.0.136"
-serde_cbor = "0.11"
+serde_cbor = "0.11.2"
 base64 = "0.13.0"
 
 

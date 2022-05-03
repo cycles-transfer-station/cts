@@ -10,7 +10,7 @@
 
 
 //#![allow(unused)] // take this out when done
-
+#![allow(non_camel_case_types)]
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
@@ -37,8 +37,10 @@ use ic_cdk::{
         candid::{
             CandidType,
             Deserialize,
-            utils::{encode_one, decode_one},
-            error::Error as CandidError,
+            utils::{
+                encode_one, 
+                // decode_one
+            },
 
         },
     },
@@ -62,7 +64,6 @@ use ic_ledger_types::{
     account_balance as icp_account_balance,
     AccountBalanceArgs as IcpAccountBalanceArgs
 };
-
 // because of RejectionCode version mismatch
 async fn icp_transfer(ledger_principal: Principal, icp_transfer_args: IcpTransferArgs) -> CallResult<IcpTransferResult> {
     match transfer(ledger_principal, icp_transfer_args).await {
@@ -70,6 +71,12 @@ async fn icp_transfer(ledger_principal: Principal, icp_transfer_args: IcpTransfe
         Err(transfer_call_error) => Err((RejectionCode::from(transfer_call_error.0 as i32), transfer_call_error.1))
     }
 }
+// use serde::{Deserialize, Serialize};
+
+
+
+#[cfg(test)]
+mod t;
 
 
 mod tools;
@@ -84,11 +91,11 @@ use tools::{
     unlock_user,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError,
     check_current_xdr_permyriad_per_icp_cmc_rate,
-    icptokens_to_cycles,
+    // icptokens_to_cycles,
     cycles_to_icptokens,
     get_new_canister,
     GetNewCanisterError,
-    ManagementCanisterCanisterSettings,
+    // ManagementCanisterCanisterSettings,
     ManagementCanisterOptionalCanisterSettings,
     ManagementCanisterCanisterStatusRecord,
     ManagementCanisterCanisterStatusVariant,
@@ -109,9 +116,15 @@ use tools::{
     
 };
 
-#[cfg(test)]
-mod t;
 
+mod stable;
+use stable::{
+    save_users_data,
+    read_users_data,
+    save_new_canisters,
+    read_new_canisters
+
+};
 
 pub type Cycles = u128;
 
@@ -119,16 +132,16 @@ pub type Cycles = u128;
 
 pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 
-pub const CYCLES_TRANSFER_FEE: u128 = 300_000_000_000;
-pub const CYCLES_BANK_COST: u128 = 20_000_000_000_000;
+pub const CYCLES_TRANSFER_FEE: u128 = 100_000_000_000;
+pub const CYCLES_BANK_COST: u128 = 100_000_000; // 10_000_000_000_000;
+pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 100_000_000;
 
-pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(1000000);      // calculate through the xdr conversion rate ?                                               
+pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);      // calculate through the xdr conversion rate ?                                               
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
 
 
-
-
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct UserData {
     
     pub user_lock: UserLock,
@@ -141,6 +154,7 @@ pub struct UserData {
 
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct UserLock {
     pub lock: bool,
     pub last_lock_time_nanos: u64 
@@ -163,6 +177,20 @@ impl Default for UserData {
     }
 }
 
+// impl UserData {
+
+//     pub const SERIALIZE_SIZE: usize = 50;
+
+//     pub fn serialize_forward(&self) -> [u8; Self::SERIALIZE_SIZE] {
+//         let mut b: [u8; SERIALIZE_SIZE] = [0; SERIALIZE_SIZE];
+
+//     }
+
+//     pub fn serialize_backward(&self, &[u8]) -> Self {
+
+//     }
+
+// }
 
 
 mod cbc {
@@ -214,14 +242,14 @@ thread_local! {
 
 
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
     Text(String),
     Nat64(u64),
     Blob(Vec<u8>)
 }
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub struct CyclesTransfer {
     memo: CyclesTransferMemo
 }
@@ -428,7 +456,7 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                     created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
                 }
             ).await; 
-           let icp_payout_transfer_call_block_index: IcpBlockHeight = match icp_payout_transfer_call {
+            let icp_payout_transfer_call_block_index: IcpBlockHeight = match icp_payout_transfer_call {
                 Ok(transfer_result) => match transfer_result {
                     Ok(block_index) => block_index,
                     Err(transfer_error) => {
@@ -455,14 +483,14 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             ).await;             
             match icp_payout_take_fee_transfer_call {
                 Ok(transfer_result) => match transfer_result {
-                    Ok(block_index) => {},
-                    Err(transfer_error) => {
+                    Ok(_block_index) => {},
+                    Err(_transfer_error) => {
                         USERS_DATA.with(|ud| {
                             ud.borrow_mut().get_mut(&user).unwrap().untaken_icp_to_collect += ICP_PAYOUT_FEE + ICP_LEDGER_TRANSFER_DEFAULT_FEE;
                         });
                     }  // log and take into the count 
                 },
-                Err(transfer_call_error) => { // log and take into the count
+                Err(_transfer_call_error) => { // log and take into the count
                     USERS_DATA.with(|ud| {
                         ud.borrow_mut().get_mut(&user).unwrap().untaken_icp_to_collect += ICP_PAYOUT_FEE + ICP_LEDGER_TRANSFER_DEFAULT_FEE;
                     });
@@ -554,22 +582,28 @@ pub enum ConvertIcpBalanceForTheCyclesWithTheCmcRateError {
 }
 
 
+
+
 // ledger takes the fee twice out of the users icp subaccount balance
+// now with the new cmc-notify method ledger takes only once fee
+
+// :flat-fee: 10369909-cycles? 20_000_000-cycles - 1/500 of a penny of an xdr
+
 #[update]
-pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpBalanceForTheCyclesWithTheCmcRateQuest) -> Result<u128, ConvertIcpBalanceForTheCyclesWithTheCmcRateError> {    
+pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpBalanceForTheCyclesWithTheCmcRateQuest) -> Result<Cycles, ConvertIcpBalanceForTheCyclesWithTheCmcRateError> {    
     
     let user: Principal = caller();
 
     // check minimum-conversion [a]mount
 
-    let xdr_permyriad_per_icp: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate().await {
-        Ok(rate) => rate,
-        Err(check_current_rate_error) => {
-            return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateError(check_current_rate_error));
-        }
-    };
 
-    let cycles: u128 = icptokens_to_cycles(q.icp, xdr_permyriad_per_icp);
+    // let xdr_permyriad_per_icp: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate().await {
+    //     Ok(rate) => rate,
+    //     Err(check_current_rate_error) => {
+    //         return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::CmcGetRateError(check_current_rate_error));
+    //     }
+    // };
+    // let cycles: u128 = icptokens_to_cycles(q.icp, xdr_permyriad_per_icp);
 
     check_lock_and_lock_user(&user);
 
@@ -586,8 +620,8 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
         return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::IcpBalanceTooLow { max_icp_convert_for_the_cycles: user_icp_balance - IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) });
     }
 
-    let topup_cycles: (/*u128*/) = match ledger_topup_cycles(q.icp, Some(principal_icp_subaccount(&user)), ic_cdk::api::id()).await {
-        Ok(/*cycles*/_) => {/*cycles*/},
+    let topup_cycles: Cycles = match ledger_topup_cycles(q.icp, Some(principal_icp_subaccount(&user)), ic_cdk::api::id()).await {
+        Ok(cycles) => cycles,
         Err(ledger_topup_cycles_error) => {
             unlock_user(&user);
             return Err(ConvertIcpBalanceForTheCyclesWithTheCmcRateError::LedgerTopupCyclesError(ledger_topup_cycles_error));
@@ -595,10 +629,12 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
     };
 
     USERS_DATA.with(|ud| {
-        ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += cycles;
+        ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += topup_cycles;
     });
 
-    Ok(cycles)
+    unlock_user(&user);
+
+    Ok(topup_cycles)
 }
 
 
@@ -711,7 +747,7 @@ pub struct PurchaseCyclesBankQuest {
     cycles_payment_or_icp_payment: CyclesPaymentOrIcpPayment,
 }
 
-#[derive(CandidType, Deserialize, Copy, Clone)]
+#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
 pub struct CyclesBankPurchaseLog {
     cycles_bank_principal: Principal,
     cost_cycles: u128,
@@ -848,7 +884,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : cycles_bank_principal,
             wasm_module : unsafe { &*cbc_module_pointer },
-            arg : &[0u8; 0]
+            arg : &encode_one(vec![ic_cdk::api::id()]).unwrap() // for now the cycles-bank takes controllers in the init
         },),
     ).await;   
     match put_code_call {
@@ -907,24 +943,25 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
                 return Err(PurchaseCyclesBankError::StartCanisterCallError(format!("{:?}", start_canister_call_error)));
             }
         }
-
     }
 
-    // put some cycles
-    let put_cycles_call: CallResult<()> = call_with_payment128(
-        MANAGEMENT_CANISTER_PRINCIPAL,
-        "deposit_cycles",
-        (CanisterIdRecord { canister_id: cycles_bank_principal },),
-        500000000000u128
-    ).await;
-    match put_cycles_call {
-        Ok(_) => {},
-        Err(put_cycles_call_error) => {
-            unlock_user(&user);
-            NEW_CANISTERS.with(|ncs| {
-                ncs.borrow_mut().push(cycles_bank_principal);
-            });
-            return Err(PurchaseCyclesBankError::PutCyclesCallError(format!("{:?}", put_cycles_call_error)));
+    if canister_status_record.cycles < 500_000_000_000 {
+        // put some cycles
+        let put_cycles_call: CallResult<()> = call_with_payment128(
+            MANAGEMENT_CANISTER_PRINCIPAL,
+            "deposit_cycles",
+            (CanisterIdRecord { canister_id: cycles_bank_principal },),
+            500_000_000_000 - canister_status_record.cycles
+        ).await;
+        match put_cycles_call {
+            Ok(_) => {},
+            Err(put_cycles_call_error) => {
+                unlock_user(&user);
+                NEW_CANISTERS.with(|ncs| {
+                    ncs.borrow_mut().push(cycles_bank_principal);
+                });
+                return Err(PurchaseCyclesBankError::PutCyclesCallError(format!("{:?}", put_cycles_call_error)));
+            }
         }
     }
 
@@ -935,7 +972,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
         (ChangeCanisterSettingsRecord { 
             canister_id: cycles_bank_principal,
             settings: ManagementCanisterOptionalCanisterSettings {
-                controllers: Some(vec![user]),  // , cycles_bank_principal
+                controllers: Some(vec![user, cycles_bank_principal]),
                 compute_allocation : None,
                 memory_allocation : None,
                 freezing_threshold : None
@@ -952,6 +989,20 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
             return Err(PurchaseCyclesBankError::UpdateSettingsCallError(format!("{:?}", update_settings_call_error)));
         }
     }
+
+    // // sync_controllers-method on the cycles-bank
+    // // let the user call with the frontend to sync the controllers?
+    // let sync_controllers_call: CallResult<Vec<Principal>> = call(
+    //     cycles_bank_principal,
+    //     "sync_controllers",
+    //     (,),
+    // ).await;
+    // match sync_controllers_call {
+    //     Ok(synced_controllers) => {},
+    //     Err(sync_controllers_call_error) => {
+
+    //     }
+    // }
 
     // make the cycles-bank-purchase-log
     let cycles_bank_purchase_log = CyclesBankPurchaseLog {
@@ -986,7 +1037,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
 
 
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub struct CyclesTransferPurchaseLog {
     canister: Principal,
     cycles_sent: u128,
@@ -996,7 +1047,9 @@ pub struct CyclesTransferPurchaseLog {
 }
 
 #[export_name = "canister_query see_cycles_transfer_purchases"]
-pub fn see_cycles_transfer_purchases<'a>(page: u128) -> &'a Vec<CyclesTransferPurchaseLog> {
+pub fn see_cycles_transfer_purchases<'a>() -> () {
+    let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
+    
     let user_cycles_transfer_purchases: *const Vec<CyclesTransferPurchaseLog> = USERS_DATA.with(|ud| { 
         match ud.borrow().get(&caller()) {
             None => trap("user unknown"),
@@ -1005,12 +1058,15 @@ pub fn see_cycles_transfer_purchases<'a>(page: u128) -> &'a Vec<CyclesTransferPu
             },
         }
     });
-    unsafe { &*user_cycles_transfer_purchases }
+
+    ic_cdk::api::call::reply::<(&'a Vec<CyclesTransferPurchaseLog>,)>((unsafe { &*user_cycles_transfer_purchases },));
 }
 
 
 #[export_name = "canister_query see_cycles_bank_purchases"]
-pub fn see_cycles_bank_purchases<'a>(page: u128) -> &'a Vec<CyclesBankPurchaseLog> {
+pub fn see_cycles_bank_purchases<'a>() -> () {
+    let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
+
     let user_cycles_bank_purchases: *const Vec<CyclesBankPurchaseLog> = USERS_DATA.with(|ud| { 
         match ud.borrow().get(&caller()) {
             None => trap("user unknown"),
@@ -1019,7 +1075,8 @@ pub fn see_cycles_bank_purchases<'a>(page: u128) -> &'a Vec<CyclesBankPurchaseLo
             },
         }
     });
-    unsafe { &*user_cycles_bank_purchases }
+
+    ic_cdk::api::call::reply::<(&'a Vec<CyclesBankPurchaseLog>,)>((unsafe { &*user_cycles_bank_purchases },))
 
 }
 
@@ -1080,12 +1137,24 @@ fn init() {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-
+    USERS_DATA.with(|ud| {
+        save_users_data(&*ud.borrow());
+    });
+    NEW_CANISTERS.with(|ncs| {
+        save_new_canisters(&*ncs.borrow());
+    });
 }
 
 #[post_upgrade]
 fn post_upgrade() {
+    USERS_DATA.with(|ud| {
+        *ud.borrow_mut() = read_users_data();
+    });
+    NEW_CANISTERS.with(|ncs| {
+        *ncs.borrow_mut() = read_new_canisters();
+    });
 
+    
 } 
 
 
@@ -1121,14 +1190,68 @@ pub fn controller_put_new_canisters(mut new_canisters: Vec<Principal>) {
 }
 
 #[export_name = "canister_update controller_see_new_canisters"]
-pub fn controller_see_new_canisters<'a>() -> &'a Vec<Principal> {
+pub fn controller_see_new_canisters<'a>() -> () {
     let ncs_pointer = NEW_CANISTERS.with(|ncs| {
         (&(*ncs.borrow())) as *const Vec<Principal> 
     });
-    unsafe { &*ncs_pointer }
+
+    ic_cdk::api::call::reply::<(&'a Vec<Principal>,)>((unsafe { &*ncs_pointer },));
+
 }
 
 #[update]
-pub fn controller_() {
+pub fn controller_see_stable_size() -> u64 {
+    ic_cdk::api::stable::stable64_size()
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum ControllerSeeNewCanisterStatusError {
+    CanisterStatusCallError(String)
+}
+
+#[update]
+pub async fn controller_see_new_canister_status(new_canister: Principal) -> Result<ManagementCanisterCanisterStatusRecord, ControllerSeeNewCanisterStatusError> {
+    let canister_status_call: CallResult<(ManagementCanisterCanisterStatusRecord,)> = call(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "canister_status",
+        (CanisterIdRecord { canister_id: new_canister },),
+    ).await;
+    let canister_status_record: ManagementCanisterCanisterStatusRecord = match canister_status_call {
+        Ok((canister_status_record,)) => canister_status_record,
+        Err(canister_status_call_error) => return Err(ControllerSeeNewCanisterStatusError::CanisterStatusCallError(format!("{:?}", canister_status_call_error)))
+    };
+
+    Ok(canister_status_record)
 
 }
+
+
+#[update]
+pub fn controller_put_cbc(module: Vec<u8>) -> () {
+    CYCLES_BANK_CODE.with(|cbc| {
+        cbc.borrow_mut().change_module(module);
+    });
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum ControllerDepositCyclesError {
+    DepositCyclesCallError(String)
+}
+
+
+#[update]
+pub async fn controller_deposit_cycles(cycles: Cycles, topup_canister: Principal) -> Result<(), ControllerDepositCyclesError> {
+    let put_cycles_call: CallResult<()> = call_with_payment128(
+        MANAGEMENT_CANISTER_PRINCIPAL,
+        "deposit_cycles",
+        (CanisterIdRecord { canister_id: topup_canister },),
+        cycles
+    ).await;
+    match put_cycles_call {
+        Ok(_) => Ok(()),
+        Err(put_cycles_call_error) => return Err(ControllerDepositCyclesError::DepositCyclesCallError(format!("{:?}", put_cycles_call_error)))
+    }
+}
+
