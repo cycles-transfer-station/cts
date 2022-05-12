@@ -3,15 +3,30 @@
 
 members = [
 	
-	"cycles-wallet",
+	"cycles-bank",
 
-	"cts-main",
-    "cts-cycles_transferrer",
-    "cts-cycles_market",
+	"cts",
+    "cycles_transferrer",
+    "cycles_market",
 
-	
-	
+    "users_map_canister",
+    "user_canister",
+
+    "cts_lib",
+    "global_allocator_counter",
+
+    
 ]
+
+
+
+exclude = [
+    "scripts",
+    "canister1",
+
+
+]
+
 
 
 [profile.release]

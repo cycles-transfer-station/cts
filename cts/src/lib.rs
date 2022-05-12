@@ -6,7 +6,10 @@
 // always check user lock before any awaits (or maybe after the first await if not fective?). 
 // in the cycles-market, let a seller set a minimum-purchase-quantity. which can be the full-mount that is up for the sale or less 
 // always unlock the user af-ter the last await-call()
-// does dereferencing a borrow give the ownership? try on a non-copy type
+// does dereferencing a borrow give the ownership? try on a non-copy type. yes it does a move
+
+// sending cycles to a canister is the same risk as sending icp to a canister. 
+
 
 
 //#![allow(unused)] // take this out when done
@@ -41,39 +44,47 @@ use ic_cdk::{
                 encode_one, 
                 // decode_one
             },
-
         },
     },
 };
 use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
-use ic_ledger_types::{
-    Memo as IcpMemo,
-    AccountIdentifier as IcpId,
-    Subaccount as IcpIdSub,
-    Tokens as IcpTokens,
-    BlockIndex as IcpBlockHeight,
-    Timestamp as IcpTimestamp,
-    DEFAULT_SUBACCOUNT as ICP_DEFAULT_SUBACCOUNT,
-    DEFAULT_FEE as ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-    MAINNET_CYCLES_MINTING_CANISTER_ID,
-    MAINNET_LEDGER_CANISTER_ID, 
-    transfer, // as icp_transfer,
-    TransferArgs as IcpTransferArgs, 
-    TransferResult as IcpTransferResult, 
-    TransferError as IcpTransferError,
-    account_balance as icp_account_balance,
-    AccountBalanceArgs as IcpAccountBalanceArgs
-};
-// because of RejectionCode version mismatch
-async fn icp_transfer(ledger_principal: Principal, icp_transfer_args: IcpTransferArgs) -> CallResult<IcpTransferResult> {
-    match transfer(ledger_principal, icp_transfer_args).await {
-        Ok(transfer_result) => Ok(transfer_result),
-        Err(transfer_call_error) => Err((RejectionCode::from(transfer_call_error.0 as i32), transfer_call_error.1))
+
+use global_allocator_counter::get_allocated_bytes_count;
+
+use cts_lib::{
+    types::{
+        UserData,
+        UserLock,
+        CyclesTransferPurchaseLog,
+        CyclesBankPurchaseLog,
+        CyclesTransfer,
+        CyclesTransferMemo,
+
+    },
+    tools::{
+        localkey_refcell::{with, with_mut},
+        sha256,
+
+    },
+    ic_ledger_types::{
+        IcpMemo,
+        IcpId,
+        IcpIdSub,
+        IcpTokens,
+        IcpBlockHeight,
+        IcpTimestamp,
+        ICP_DEFAULT_SUBACCOUNT,
+        ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+        MAINNET_CYCLES_MINTING_CANISTER_ID,
+        MAINNET_LEDGER_CANISTER_ID, 
+        icp_transfer,
+        IcpTransferArgs, 
+        IcpTransferResult, 
+        IcpTransferError,
+        icp_account_balance,
+        IcpAccountBalanceArgs
     }
-}
-// use serde::{Deserialize, Serialize};
-
-
+};
 
 #[cfg(test)]
 mod t;
@@ -106,13 +117,6 @@ use tools::{
     ledger_topup_cycles,
     LedgerTopupCyclesError,
     IcpXdrConversionRate,
-
-    
-
-
-
-    
-
     
 };
 
@@ -126,71 +130,15 @@ use stable::{
 
 };
 
+
+
+
+
 pub type Cycles = u128;
+pub type LatestKnownCmcRate = IcpXdrConversionRate; 
 
 
 
-pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
-
-pub const CYCLES_TRANSFER_FEE: u128 = 100_000_000_000;
-pub const CYCLES_BANK_COST: u128 = 100_000_000; // 10_000_000_000_000;
-pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 100_000_000;
-
-pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);      // calculate through the xdr conversion rate ?                                               
-pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
-pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
-
-
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct UserData {
-    
-    pub user_lock: UserLock,
-
-    pub cycles_balance: u128,
-    pub untaken_icp_to_collect: IcpTokens,
-    
-    pub cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, 
-    pub cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
-
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct UserLock {
-    pub lock: bool,
-    pub last_lock_time_nanos: u64 
-}
-
-impl Default for UserData {
-    fn default() -> Self {
-        UserData {
-            user_lock: UserLock {
-                lock: false,
-                last_lock_time_nanos: 0
-            },
-            cycles_balance: 0u128,
-            untaken_icp_to_collect: IcpTokens::ZERO,
-            cycles_transfer_purchases: Vec::<CyclesTransferPurchaseLog>::new(),
-            cycles_bank_purchases: Vec::<CyclesBankPurchaseLog>::new(),
-            
-
-        }
-    }
-}
-
-// impl UserData {
-
-//     pub const SERIALIZE_SIZE: usize = 50;
-
-//     pub fn serialize_forward(&self) -> [u8; Self::SERIALIZE_SIZE] {
-//         let mut b: [u8; SERIALIZE_SIZE] = [0; SERIALIZE_SIZE];
-
-//     }
-
-//     pub fn serialize_backward(&self, &[u8]) -> Self {
-
-//     }
-
-// }
 
 
 mod cbc {
@@ -201,9 +149,10 @@ mod cbc {
     }
 
     impl CyclesBankCode {
-        pub fn new(module: Vec<u8>) -> Self {
+        pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
+            module.shrink_to_fit();
             Self {
-                module_hash: super::tools::sha256(&module), // put this on top if move error
+                module_hash: cts_lib::tools::sha256(&module), // put this on top if move error
                 module: module,
             }
         }
@@ -221,15 +170,38 @@ mod cbc {
 
 use cbc::CyclesBankCode;
 
-pub type LatestKnownCmcRate = IcpXdrConversionRate; 
+
+
+
+
+pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
+
+pub const CYCLES_TRANSFER_FEE: u128 = 100_000_000_000;
+pub const CYCLES_BANK_COST: u128 = 100_000_000; // 10_000_000_000_000;
+pub const CYCLES_BANK_UPGRADE_COST: u128 = 50_000_000; // 5_000_000_000_000;
+
+pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 100_000_000;
+
+pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);      // calculate through the xdr conversion rate ?                                               
+pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
+pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
+
+
+
+
+
 
 
 
 thread_local! {
 
+
+    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
+    
     pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
-    pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
+
     pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
     pub static LATEST_KNOWN_CMC_RATE: Cell<LatestKnownCmcRate> = Cell::new(LatestKnownCmcRate { xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
 
 
@@ -239,20 +211,6 @@ thread_local! {
 
 
 
-
-
-
-#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
-pub enum CyclesTransferMemo {
-    Text(String),
-    Nat64(u64),
-    Blob(Vec<u8>)
-}
-
-#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
-pub struct CyclesTransfer {
-    memo: CyclesTransferMemo
-}
 
 pub const MINIMUM_CYCLES_TRANSFER: u128 = 5000000000;
 
@@ -747,14 +705,6 @@ pub struct PurchaseCyclesBankQuest {
     cycles_payment_or_icp_payment: CyclesPaymentOrIcpPayment,
 }
 
-#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
-pub struct CyclesBankPurchaseLog {
-    cycles_bank_principal: Principal,
-    cost_cycles: u128,
-    timestamp: u64,
-    // module_hash?
-}
-
 #[derive(CandidType, Deserialize)]
 pub enum PurchaseCyclesBankError {
     CyclesBalanceTooLow { current_user_cycles_balance: u128, current_cycles_bank_cost_cycles: u128 },
@@ -916,10 +866,10 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
     };
 
     // check the wasm hash of the canister
-    if canister_status_record.module_hash == None || canister_status_record.module_hash.unwrap() != CYCLES_BANK_CODE.with(|cbc_refcell| { *(*cbc_refcell.borrow()).module_hash() }) {
+    if canister_status_record.module_hash.is_none() || canister_status_record.module_hash.unwrap() != with(&CYCLES_BANK_CODE, |cbc| *cbc.module_hash()) {
         unlock_user(&user);
-        NEW_CANISTERS.with(|ncs| {
-            ncs.borrow_mut().push(cycles_bank_principal);
+        with_mut(&NEW_CANISTERS, |ncs| {
+            ncs.push(cycles_bank_principal);
         });
         return Err(PurchaseCyclesBankError::CheckModuleHashError{canister_status_record_module_hash: canister_status_record.module_hash, cbc_module_hash: CYCLES_BANK_CODE.with(|cbc_refcell| { *(*cbc_refcell.borrow()).module_hash() }) });
     }
@@ -1012,9 +962,9 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
     };
 
     // log the cycles-bank-purchase-log within the USERS_DATA.with-closure and collect the icp or cycles cost within the USERS_DATA.with-closure
-    USERS_DATA.with(|ud_r| {
-        let mut users_data: RefMut<HashMap<Principal, UserData>> = ud_r.borrow_mut();
+    with_mut(&USERS_DATA, |users_data| {
         let user_data: &mut UserData = users_data.get_mut(&user).unwrap();
+
         user_data.cycles_bank_purchases.push(cycles_bank_purchase_log);
         
         match q.cycles_payment_or_icp_payment {   
@@ -1037,15 +987,6 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
 
 
 
-#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
-pub struct CyclesTransferPurchaseLog {
-    canister: Principal,
-    cycles_sent: u128,
-    cycles_accepted: u128, // 64?
-    cycles_transfer: CyclesTransfer,
-    timestamp: u64,
-}
-
 #[export_name = "canister_query see_cycles_transfer_purchases"]
 pub fn see_cycles_transfer_purchases<'a>() -> () {
     let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
@@ -1059,6 +1000,7 @@ pub fn see_cycles_transfer_purchases<'a>() -> () {
         }
     });
 
+    // check if drop gets called after this call
     ic_cdk::api::call::reply::<(&'a Vec<CyclesTransferPurchaseLog>,)>((unsafe { &*user_cycles_transfer_purchases },));
 }
 
@@ -1067,8 +1009,8 @@ pub fn see_cycles_transfer_purchases<'a>() -> () {
 pub fn see_cycles_bank_purchases<'a>() -> () {
     let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
 
-    let user_cycles_bank_purchases: *const Vec<CyclesBankPurchaseLog> = USERS_DATA.with(|ud| { 
-        match ud.borrow().get(&caller()) {
+    let user_cycles_bank_purchases: *const Vec<CyclesBankPurchaseLog> = with(&USERS_DATA, |ud| { 
+        match ud.get(&caller()) {
             None => trap("user unknown"),
             Some(user_data) => {
                 &user_data.cycles_bank_purchases as *const Vec<CyclesBankPurchaseLog>
@@ -1085,6 +1027,7 @@ pub fn see_cycles_bank_purchases<'a>() -> () {
 #[derive(CandidType, Deserialize)]
 pub struct Fees {
     purchase_cycles_bank_cost_cycles: u128,
+    purchase_cycles_bank_upgrade_cost_cycles: u128,
     purchase_cycles_transfer_cost_cycles: u128
 }
 
@@ -1092,6 +1035,7 @@ pub struct Fees {
 pub fn see_fees() -> Fees {
     Fees {
         purchase_cycles_bank_cost_cycles: CYCLES_BANK_COST,
+        purchase_cycles_bank_upgrade_cost_cycles: CYCLES_BANK_UPGRADE_COST,
         purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE, 
     }
 }
@@ -1199,10 +1143,6 @@ pub fn controller_see_new_canisters<'a>() -> () {
 
 }
 
-#[update]
-pub fn controller_see_stable_size() -> u64 {
-    ic_cdk::api::stable::stable64_size()
-}
 
 
 #[derive(CandidType, Deserialize)]
@@ -1229,8 +1169,8 @@ pub async fn controller_see_new_canister_status(new_canister: Principal) -> Resu
 
 #[update]
 pub fn controller_put_cbc(module: Vec<u8>) -> () {
-    CYCLES_BANK_CODE.with(|cbc| {
-        cbc.borrow_mut().change_module(module);
+    with_mut(&CYCLES_BANK_CODE, |cbc| {
+        cbc.change_module(module);
     });
 }
 
@@ -1254,4 +1194,45 @@ pub async fn controller_deposit_cycles(cycles: Cycles, topup_canister: Principal
         Err(put_cycles_call_error) => return Err(ControllerDepositCyclesError::DepositCyclesCallError(format!("{:?}", put_cycles_call_error)))
     }
 }
+
+
+#[derive(CandidType, Deserialize)]
+pub struct Metrics {
+    global_allocator_counter: usize,
+    stable_size: u64,
+    cycles_balance: u128,
+    new_canisters_count: usize,
+    cbc_hash: [u8; 32],
+    users_count: usize,
+    latest_known_cmc_rate: LatestKnownCmcRate,
+    users_map_canisters_count: usize,
+
+    
+
+
+}
+
+
+#[query]
+pub fn controller_see_metrics() -> Metrics {
+    Metrics {
+        global_allocator_counter: get_allocated_bytes_count(),
+        stable_size: ic_cdk::api::stable::stable64_size(),
+        cycles_balance: ic_cdk::api::canister_balance128(),
+        new_canisters_count: with(&NEW_CANISTERS, |nc| nc.len()),
+        cbc_hash: with(&CYCLES_BANK_CODE, |cbc| *cbc.module_hash()),
+        users_count: with(&USERS_DATA, |ud| ud.len() ),
+        latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
+        users_map_canisters_count: with(&USERS_MAP_CANISTERS, |umc| umc.len()),
+
+
+
+
+
+    }
+}
+
+
+
+
 

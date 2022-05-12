@@ -1,0 +1,15 @@
+[package]
+name = "cts_lib"
+version = "0.1.0"
+edition = "2021"
+
+
+
+[dependencies]
+sha2 = "0.9.1"
+candid = "0.7.11"
+serde = "1.0.136"
+# ic-ledger-types = "0.1.1"
+ic-ledger-types = { path = "/home/STARLAB/Docs/code/DFINITY/cdk-rs/src/ic-ledger-types/" }
+ic-cdk = "0.5.0"
+

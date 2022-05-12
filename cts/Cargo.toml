@@ -1,5 +1,5 @@
 [package]
-name = "cts-main"
+name = "cts"
 version = "0.1.0"
 authors = ["levi <levifeldman37@gmail.com>"]
 edition = "2021"
@@ -11,15 +11,14 @@ crate-type = ["cdylib"]
 [dependencies]
 ic-cdk = "0.5.0"
 ic-cdk-macros = "0.5.0"
-ic-certified-map = { git = "git://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
-# ic-ledger-types = "0.1.1"
-ic-ledger-types = { path = "/home/STARLAB/Docs/code/DFINITY/cdk-rs/src/ic-ledger-types/" }
+ic-certified-map = { git = "https://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
 candid = "0.7.11"
 sha2 = "0.9.1"
 serde = "1.0.136"
 serde_cbor = "0.11.2"
 base64 = "0.13.0"
-
+global_allocator_counter = { path = "../global_allocator_counter" } 
+cts_lib = { path = "../cts_lib" }
 
 # wasabi_leb128 = "0.4.0" # want this?
 

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use sha2::Digest;
+// use sha2::Digest;
 use ic_cdk::{
     api::{
         id,
@@ -51,7 +51,7 @@ use crate::{
 
 };
 
-
+use cts_lib::tools::sha256;
 
 
 
@@ -65,17 +65,6 @@ pub const ICP_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
 
 
-
-
-
-
-
-
-pub fn sha256(bytes: &[u8]) -> [u8; 32] { // [in]ferr[ed] lifetime on the &[u8]-param?
-    let mut hasher: sha2::Sha256 = sha2::Sha256::new();
-    hasher.update(bytes);
-    hasher.finalize().into()
-}
 
 
 
