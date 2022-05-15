@@ -7,8 +7,12 @@
 // in the cycles-market, let a seller set a minimum-purchase-quantity. which can be the full-mount that is up for the sale or less 
 // always unlock the user af-ter the last await-call()
 // does dereferencing a borrow give the ownership? try on a non-copy type. yes it does a move
-
 // sending cycles to a canister is the same risk as sending icp to a canister. 
+// put a max_fee on a cycles-transfer-purchase & on a cycles-bank-purchase?
+
+
+
+
 
 
 
@@ -17,7 +21,7 @@
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
-use std::convert::From;
+
 
 use ic_cdk::{
     api::{
@@ -97,6 +101,7 @@ use tools::{
     user_cycles_balance_topup_memo_bytes,
     check_user_icp_balance,
     check_user_cycles_balance,
+    CheckUserCyclesBalanceError,
     main_cts_icp_id,
     check_lock_and_lock_user,
     unlock_user,
@@ -117,6 +122,7 @@ use tools::{
     ledger_topup_cycles,
     LedgerTopupCyclesError,
     IcpXdrConversionRate,
+    
     
 };
 
@@ -250,8 +256,9 @@ pub fn cycles_transfer(ct: CyclesTransfer) -> () {
 
 #[derive(CandidType, Deserialize)]
 pub struct TopUpCyclesBalanceData {
-    topup_cycles_transfer_memo: CyclesTransferMemo
-} 
+    topup_cycles_transfer_canister: Principal,
+    topup_cycles_transfer_memo: CyclesTransferMemo,
+}
 
 #[derive(CandidType, Deserialize)]
 pub struct TopUpIcpBalanceData {
@@ -265,11 +272,12 @@ pub struct TopUpBalanceData {
 }
 
 
-#[update]
+#[query]
 pub fn topup_balance() -> TopUpBalanceData {
     let user: Principal = caller();
     TopUpBalanceData {
         topup_cycles_balance: TopUpCyclesBalanceData {
+            topup_cycles_transfer_canister: ic_cdk::api::id(),
             topup_cycles_transfer_memo: CyclesTransferMemo::Blob(user_cycles_balance_topup_memo_bytes(&user).to_vec())
         },
         topup_icp_balance: TopUpIcpBalanceData {
@@ -296,6 +304,7 @@ pub struct UserBalance {
 #[derive(CandidType, Deserialize)]
 pub enum SeeBalanceError {
     IcpLedgerCheckBalanceCallError(String),
+    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
 }
 
 pub type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
@@ -304,14 +313,23 @@ pub type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
 pub async fn see_balance() -> SeeBalanceSponse {
     let user: Principal = caller();
     check_lock_and_lock_user(&user);
-    let cycles_balance: u128 = check_user_cycles_balance(&user);
+    
+    let cycles_balance: Cycles = match check_user_cycles_balance(&user).await {
+        Ok(cycles) => cycles,
+        Err(check_user_cycles_balance_error) => {
+            unlock_user(&user);
+            return Err(SeeBalanceError::CheckUserCyclesBalanceError(check_user_cycles_balance_error));
+        }
+    };
+    
     let icp_balance: IcpTokens = match check_user_icp_balance(&user).await {
         Ok(tokens) => tokens,
         Err(balance_call_error) => {
             unlock_user(&user);
             return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
-        } 
+        }
     };
+    
     unlock_user(&user);
     Ok(UserBalance {
         cycles_balance,
@@ -360,9 +378,10 @@ pub enum IcpPayoutError {
 #[derive(CandidType, Deserialize)]
 pub enum CyclesPayoutError {
     InvalidCyclesPayout0Amount,
+    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
     BalanceTooLow { max_cycles_payout: u128 },
     CyclesTransferCallCandidEncodeError(String),
-    CyclesTransferCallError { call_error: String, paid_fee: bool }, // fee_paid: u128 ??
+    CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
 }
 
 pub type IcpPayoutSponse = Result<IcpBlockHeight, IcpPayoutError>;
@@ -467,12 +486,23 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                 return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::InvalidCyclesPayout0Amount));
             }
 
-            let user_cycles_balance: u128 = check_user_cycles_balance(&user);
+            let user_cycles_balance: u128 = match check_user_cycles_balance(&user).await {
+                Ok(cycles) => cycles,
+                Err(check_user_cycles_balance_error) => {
+                    unlock_user(&user);           
+                    return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CheckUserCyclesBalanceError(check_user_cycles_balance_error)));
+                } 
+            };
 
             if cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
                 unlock_user(&user);
                 return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::BalanceTooLow { max_cycles_payout: user_cycles_balance - CYCLES_TRANSFER_FEE }));
             }
+            
+            // change!! take the user-cycles before the transfer, and refund in the callback 
+            with_mut(&USERS_DATA, |users_data| {
+                users_data.get_mut(&user).unwrap().cycles_balance -= cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE;
+            });
 
             let cycles_transfer_call_candid_bytes: Vec<u8> = match encode_one(&CyclesTransfer { memo: CyclesTransferMemo::Text("CTS-POUT".to_string()) }) {
                 Ok(candid_bytes) => candid_bytes,
@@ -481,7 +511,7 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
                     return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallCandidEncodeError(format!("{}", candid_error))));
                 }
             }; 
-
+            
             let cycles_transfer_call: CallResult<Vec<u8>> = call_raw128(
                 cycles_payout_quest.payout_cycles_transfer_canister,
                 "cycles_transfer",
@@ -490,25 +520,30 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
             ).await;
             
             // check if it is possible for the canister to reject/trap but still keep the cycles. if yes, [re]turn the cycles_accepted in the error. for now, going as if not possible.
+            // do some tests on a canister_error and on a canister_reject
+            // test see if msg_cycles_refunded128() gives back the full cycles mount on a CanisterError. what about on a CanisterReject?
 
             unlock_user(&user);
 
+            let cycles_accepted: u128 = cycles_payout_quest.cycles - msg_cycles_refunded128(); 
+            
+            USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += msg_cycles_refunded128(); });        
+            
             match cycles_transfer_call {
                 Ok(_) => {
-                    let cycles_accepted: u128 = cycles_payout_quest.cycles - msg_cycles_refunded128(); 
-                    USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance -= cycles_accepted + CYCLES_TRANSFER_FEE; });          // can unwrap here because of the checks [a]bove, that the user's-balance is greater than 1
                     return CollectBalanceSponse::cycles_payout(Ok(cycles_accepted));
                 },
                 Err(cycles_transfer_call_error) => {
-                    match cycles_transfer_call_error.0 {
+                    let paid_fee: bool = match cycles_transfer_call_error.0 {
                         RejectionCode::DestinationInvalid | RejectionCode::CanisterReject | RejectionCode::CanisterError => {
-                            USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance -= CYCLES_TRANSFER_FEE; });
-                            return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: true }));
+                            true
                         },
                         _ => {
-                            return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: false }));
+                            USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += CYCLES_TRANSFER_FEE; });
+                            false
                         }
-                    }
+                    };
+                    return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: paid_fee, cycles_accepted: cycles_accepted }));
                 }
             }
 
@@ -616,6 +651,7 @@ pub struct PurchaseCyclesTransferQuest {
 #[derive(CandidType, Deserialize)]
 pub enum PurchaseCyclesTransferError {
     InvalidCyclesTransfer0Amount,
+    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
     BalanceTooLow { max_cycles_for_the_transfer: u128 },
     CyclesTransferCallCandidEncodeError(String),
     CyclesTransferCallError { call_error: String, paid_fee: bool }, // fee_paid: u128 ??
@@ -630,20 +666,30 @@ pub async fn purchase_cycles_transfer(pctq: PurchaseCyclesTransferQuest) -> Resu
         return Err(PurchaseCyclesTransferError::InvalidCyclesTransfer0Amount);
     }
 
-    let user_cycles_balance: u128 = check_user_cycles_balance(&user);
+    check_lock_and_lock_user(&user);
+
+    let user_cycles_balance: u128 = match check_user_cycles_balance(&user).await {
+        Ok(cycles) => cycles,
+        Err(check_user_cycles_balance_error) => {
+            unlock_user(&user);
+            return Err(PurchaseCyclesTransferError::CheckUserCyclesBalanceError(check_user_cycles_balance_error));
+        }
+    };
 
     if user_cycles_balance < pctq.cycles + CYCLES_TRANSFER_FEE {
+        unlock_user(&user);
         return Err(PurchaseCyclesTransferError::BalanceTooLow { max_cycles_for_the_transfer: user_cycles_balance - CYCLES_TRANSFER_FEE });
     }
+
+    // change!! take the user-cycles before the transfer, and refund in the callback 
 
     let cycles_transfer_candid_bytes: Vec<u8> = match encode_one(&pctq.cycles_transfer) {
         Ok(candid_bytes) => candid_bytes,
         Err(candid_error) => {
+            unlock_user(&user);
             return Err(PurchaseCyclesTransferError::CyclesTransferCallCandidEncodeError(format!("{}", candid_error)));
         }
     };
-
-    check_lock_and_lock_user(&user);
 
     let cycles_transfer_call: CallResult<Vec<u8>> = call_raw128(
         pctq.canister,
@@ -707,6 +753,7 @@ pub struct PurchaseCyclesBankQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum PurchaseCyclesBankError {
+    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
     CyclesBalanceTooLow { current_user_cycles_balance: u128, current_cycles_bank_cost_cycles: u128 },
     IcpCheckBalanceCallError(String),
     CmcGetRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
@@ -752,7 +799,14 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
         
         CyclesPaymentOrIcpPayment::cycles_payment => {
             
-            let user_cycles_balance: u128 = check_user_cycles_balance(&user);
+            let user_cycles_balance: u128 = match check_user_cycles_balance(&user).await {
+                Ok(cycles) => cycles,
+                Err(check_user_cycles_balance_error) => {
+                    unlock_user(&user);
+                    return Err(PurchaseCyclesBankError::CheckUserCyclesBalanceError(check_user_cycles_balance_error));
+                }
+            };
+            
             if user_cycles_balance < CYCLES_BANK_COST {
                 unlock_user(&user);
                 return Err(PurchaseCyclesBankError::CyclesBalanceTooLow{ current_user_cycles_balance: user_cycles_balance, current_cycles_bank_cost_cycles: CYCLES_BANK_COST });
@@ -985,42 +1039,6 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
 
 
 
-
-
-#[export_name = "canister_query see_cycles_transfer_purchases"]
-pub fn see_cycles_transfer_purchases<'a>() -> () {
-    let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
-    
-    let user_cycles_transfer_purchases: *const Vec<CyclesTransferPurchaseLog> = USERS_DATA.with(|ud| { 
-        match ud.borrow().get(&caller()) {
-            None => trap("user unknown"),
-            Some(user_data) => {
-                &user_data.cycles_transfer_purchases as *const Vec<CyclesTransferPurchaseLog>
-            },
-        }
-    });
-
-    // check if drop gets called after this call
-    ic_cdk::api::call::reply::<(&'a Vec<CyclesTransferPurchaseLog>,)>((unsafe { &*user_cycles_transfer_purchases },));
-}
-
-
-#[export_name = "canister_query see_cycles_bank_purchases"]
-pub fn see_cycles_bank_purchases<'a>() -> () {
-    let (param,): (u128,) = ic_cdk::api::call::arg_data::<(u128,)>(); 
-
-    let user_cycles_bank_purchases: *const Vec<CyclesBankPurchaseLog> = with(&USERS_DATA, |ud| { 
-        match ud.get(&caller()) {
-            None => trap("user unknown"),
-            Some(user_data) => {
-                &user_data.cycles_bank_purchases as *const Vec<CyclesBankPurchaseLog>
-            },
-        }
-    });
-
-    ic_cdk::api::call::reply::<(&'a Vec<CyclesBankPurchaseLog>,)>((unsafe { &*user_cycles_bank_purchases },))
-
-}
 
 
 

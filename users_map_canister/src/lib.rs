@@ -21,19 +21,33 @@ use ic_certified_map::{RbTree, HashTree};
 
 use global_allocator_counter::get_allocated_bytes_count;
 
-use cts_lib::tools::localkey_refcell::{with, with_mut};
+use cts_lib::{
+    tools::localkey_refcell::{with, with_mut},
+    types::{
+        Cycles,
+    },
+    ic_ledger_types::{
+        IcpTokens
+    }
+};
+
+#[derive(CandidType, Deserialize, Copy, Clone)]
+pub struct UserData {
+    cycles_balance: Cycles,
+    untaken_icp_to_collect: IcpTokens,
+    user_canister: Option<Principal>,
+}
 
 
-
-type UsersMap = HashMap<Principal, Principal>;
+type UsersMap = HashMap<Principal, UserData>;
 
 
 pub const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024;// bytes // 1 GiB
 
 
 thread_local! {
-    pub static USERS_MAP: RefCell<UsersMap> = RefCell::new(UsersMap::new());
-    pub static CALLERS_WHITELIST: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    static USERS_MAP: RefCell<UsersMap> = RefCell::new(UsersMap::new());
+    static CALLERS_WHITELIST: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
 }
 
 
@@ -80,7 +94,7 @@ pub enum PutError {
 }
 
 #[update]
-pub fn put(user: Principal, user_canister: Principal) -> Result<(), PutError>{
+pub fn put(user: Principal, user_data: UserData) -> Result<(), PutError>{
     check_caller(&caller());
 
     if is_full() {
@@ -88,7 +102,7 @@ pub fn put(user: Principal, user_canister: Principal) -> Result<(), PutError>{
     }
 
     with_mut(&USERS_MAP, |um| { 
-        um.insert(user, user_canister); 
+        um.insert(user, user_data); 
     });
 
     Ok(())
@@ -110,10 +124,10 @@ pub fn void_user(user: Principal) {
 
 // with the certified-data certificate?
 #[query]
-pub fn get(user_id: Principal) -> Option<Principal> { // do i want Result and GetError? or -> Option<Principal> by it's self { 
+pub fn get(user: Principal) -> Option<UserData> {       // do i want Result and GetError? or -> Option<Principal> by it's self { 
     with(&USERS_MAP, |um| {
-        match um.get(&user_id) {
-            Some(p) => Some(*p),
+        match um.get(&user) {
+            Some(ud) => Some(*ud),
             None => None
         }
     })

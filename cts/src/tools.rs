@@ -45,6 +45,9 @@ use crate::{
     ICP_LEDGER_TRANSFER_DEFAULT_FEE,
     LatestKnownCmcRate,
     LATEST_KNOWN_CMC_RATE,
+    with,
+    with_mut,
+    
 
     
 
@@ -108,14 +111,35 @@ pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
         MAINNET_LEDGER_CANISTER_ID,
         IcpAccountBalanceArgs { account: user_icp_balance_id(user) }    
     ).await?;
-    icp_balance -= USERS_DATA.with(|ud| { ud.borrow_mut().entry(*user).or_default().untaken_icp_to_collect });
+    with(&USERS_DATA, |ud| { 
+        if let Some(u) = ud.get(user) {
+            *&mut icp_balance -= u.untaken_icp_to_collect;
+        } 
+    });
+    //icp_balance -= USERS_DATA.with(|ud| { ud.borrow_mut().entry(*user).or_default().untaken_icp_to_collect });
     Ok(icp_balance)
 }
 
 
-pub fn check_user_cycles_balance(user: &Principal) -> u128 {
-    USERS_DATA.with(|ud| {
-        ud.borrow_mut().entry(*user).or_default().cycles_balance
+
+#[derive(CandidType, Deserialize)]
+pub enum FindUserError {
+    
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum CheckUserCyclesBalanceError {
+    FindUserError(FindUserError),
+}
+
+pub async fn check_user_cycles_balance(user: &Principal) -> Result<Cycles, CheckUserCyclesBalanceError> {
+    with(&USERS_DATA, |users_data| {
+        if let Some(u) = users_data.get(user) {
+            Ok(u.cycles_balance)
+        } else {
+            Ok(0)
+        }
+        //ud.borrow_mut().entry(*user).or_default().cycles_balance
     })
 }
 

@@ -12,7 +12,7 @@ use candid::{
 
 
 
-
+pub type Cycles = u128;
 
 
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
@@ -105,7 +105,6 @@ impl Default for UserData {
             untaken_icp_to_collect: IcpTokens::ZERO,
             cycles_transfer_purchases: Vec::<CyclesTransferPurchaseLog>::new(),
             cycles_bank_purchases: Vec::<CyclesBankPurchaseLog>::new(),
-            
 
         }
     }
@@ -157,4 +156,8 @@ pub struct CyclesBankPurchaseLog {
 
 
 
-
+#[derive(CandidType, Deserialize)]
+pub struct UserCanisterInit {
+    pub user: Principal,
+    pub callers_whitelist: Vec<Principal>,
+}
