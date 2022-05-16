@@ -8,6 +8,7 @@ use ic_cdk::{
         call::{
             CallResult,
             call_raw128,
+            call,
         },
     },
     export::{
@@ -127,6 +128,11 @@ pub enum FindUserError {
     
 }
 
+pub async fn find_user(user: &Principal, ) -> Result<UserData, FindUserError> {
+    call(),
+}
+
+
 #[derive(CandidType, Deserialize)]
 pub enum CheckUserCyclesBalanceError {
     FindUserError(FindUserError),
@@ -154,7 +160,7 @@ pub fn check_lock_and_lock_user(user: &Principal) {
         let users_data: &mut HashMap<Principal, UserData> = &mut ud.borrow_mut();
         let user_lock: &mut UserLock = &mut users_data.entry(*user).or_default().user_lock;
         let current_time: u64 = time();
-        if user_lock.lock == true && current_time - user_lock.last_lock_time_nanos < 9*60*1_000_000_000 {
+        if user_lock.lock == true && current_time - user_lock.last_lock_time_nanos < 30*60*1_000_000_000 {
             trap("this user is in the middle of a different call");
         }
         user_lock.lock = true;

@@ -25,29 +25,27 @@ use cts_lib::{
     tools::localkey_refcell::{with, with_mut},
     types::{
         Cycles,
+        UserData,
+        UserLock
     },
     ic_ledger_types::{
         IcpTokens
     }
 };
 
-#[derive(CandidType, Deserialize, Copy, Clone)]
-pub struct UserData {
-    cycles_balance: Cycles,
-    untaken_icp_to_collect: IcpTokens,
-    user_canister: Option<Principal>,
-}
+type UsersMap = HashMap<Principal, (UserData, UserLock)>;
 
 
-type UsersMap = HashMap<Principal, UserData>;
 
 
-pub const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024;// bytes // 1 GiB
+pub const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024;// bytes // 1 GiB // each user-map-canister can hold round 10_000_000 users. test
+
+pub const CALLERS_WHITELIST: [1; Principal] = [Principal::from_slice(&[thp4z-canister-bytes])];
 
 
 thread_local! {
     static USERS_MAP: RefCell<UsersMap> = RefCell::new(UsersMap::new());
-    static CALLERS_WHITELIST: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    //static CALLERS_WHITELIST: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
 }
 
 
@@ -56,8 +54,9 @@ thread_local! {
 
 
 fn check_caller(caller: &Principal) {
-    if !with(&CALLERS_WHITELIST, |cw| { cw.contains(caller) }) {
-        trap("caller not authorized")
+    //if with(&CALLERS_WHITELIST, |cw| { cw.contains(caller) }) == false {
+    if CALLERS_WHITELIST.contains(caller) == false {
+        trap("unknown caller")
     }
 }
 
@@ -69,8 +68,8 @@ fn is_full() -> bool {
 
 
 #[init]
-fn init(callers_whitelist: Vec<Principal>) -> () {
-    with_mut(&CALLERS_WHITELIST, |cw| { *cw = callers_whitelist; });
+fn init(/*callers_whitelist: Vec<Principal>*/) -> () {
+    //with_mut(&CALLERS_WHITELIST, |cw| { *cw = callers_whitelist; });
 }
 
 
@@ -94,41 +93,69 @@ pub enum PutError {
 }
 
 #[update]
-pub fn put(user: Principal, user_data: UserData) -> Result<(), PutError>{
+pub fn put(user_id: Principal, user_data: UserData, user_lock: UserLock) -> Result<(), PutError>{
     check_caller(&caller());
 
-    if is_full() {
-        return Err(PutError::CanisterIsFull);
-    }
-
     with_mut(&USERS_MAP, |um| { 
-        um.insert(user, user_data); 
-    });
-
-    Ok(())
+        if um.contains_key(&user_id) == false {
+            if is_full() {
+                Err(PutError::CanisterIsFull)
+            }        
+        }
+        um.insert(user_id, (user_data, user_lock)); 
+        Ok(())
+    })
 }
+
 
 
 #[update]
-pub fn void_user(user: Principal) {
+pub fn void_user(user_id: Principal) -> Option<(UserData, UserLock)> {
     check_caller(&caller());
 
     with_mut(&USERS_MAP, |um| { 
-        um.remove(&user); 
-    });
+        um.remove(&user_id)
+    })
 
 
 }
 
 
-
-// with the certified-data certificate?
+/*
 #[query]
-pub fn get(user: Principal) -> Option<UserData> {       // do i want Result and GetError? or -> Option<Principal> by it's self { 
+pub fn get(user: Principal) -> Option<UserData> {
+    check_caller(&caller());
+    
     with(&USERS_MAP, |um| {
         match um.get(&user) {
-            Some(ud) => Some(*ud),
+            Some(u) => Some(*u.0),
             None => None
+        }
+    })
+}
+*/
+
+
+#[derive(CandidType, Deserialize)]
+pub enum GetAndLockError {
+    UserNotFound,
+    UserLockIsOn,
+}
+
+#[update]
+pub fn get_and_lock(user_id:&Principal) -> Result<UserData, GetAndLockError> {
+    check_caller(&caller());
+    
+    with_mut(&USERS_MAP, |um| {
+        match um.get_mut(user_id) {
+            Some(u) => {
+                if u.1.is_lock_on() == true {
+                    Err(GetAndLockError::UserLockIsOn)
+                }
+                u.1.lock();
+                Ok(*u.0)
+            },
+            None => Err(GetAndLockError::UserNotFound)
         }
     })
 }
@@ -142,10 +169,9 @@ pub fn get(user: Principal) -> Option<UserData> {       // do i want Result and 
 
 
 
-
-
 #[query]
 pub fn see_allocated_bytes() -> usize {
+    check_caller();
     get_allocated_bytes_count()
 }
 

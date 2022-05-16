@@ -9,10 +9,15 @@ use candid::{
     
 };
 
+use ic_cdk::api::time;
+
 
 
 
 pub type Cycles = u128;
+
+
+
 
 
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
@@ -31,24 +36,24 @@ pub struct CyclesTransfer {
 
 
 
-#[derive(Deserialize, serde::Serialize)]
+
+#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
 pub struct UserData {
-    
-    pub user_lock: UserLock,     
-
-    pub cycles_balance: u128,
+    pub cycles_balance: Cycles,
     pub untaken_icp_to_collect: IcpTokens,
-    
-    pub cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>, 
-    // cycles_transfer_purchases_max_len: u16, // const?
-
-
-    pub cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
-
+    pub user_canister: Option<Principal>,
 }
 
 impl UserData {
-
+    pub fn new() -> Self {
+        Self {
+            cycles_balance: 0u128,
+            untaken_icp_to_collect: IcpTokens::ZERO,
+            user_canister: None
+        }
+    }
+    
+    
     /*
     pub const SERIALIZE_SIZE: usize = 50; // variable_size? cycles_transfer_purchases_max_len
 
@@ -88,43 +93,45 @@ impl UserData {
     // }
     */
 
-    pub fn new() -> Self {
-        Self::default()
-    }
 }
 
-
-impl Default for UserData {
-    fn default() -> Self {
-        UserData {
-            user_lock: UserLock {
-                lock: false,
-                last_lock_time_nanos: 0
-            },
-            cycles_balance: 0u128,
-            untaken_icp_to_collect: IcpTokens::ZERO,
-            cycles_transfer_purchases: Vec::<CyclesTransferPurchaseLog>::new(),
-            cycles_bank_purchases: Vec::<CyclesBankPurchaseLog>::new(),
-
-        }
-    }
-}
     
 
-#[derive(serde::Deserialize, serde::Serialize)]
+
+// repr(packed) ?
+#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
 pub struct UserLock {
-    pub lock: bool,
-    pub last_lock_time_nanos: u64 
+    lock: bool,
+    last_lock_time_nanos: u64 
 }
 impl UserLock {
-    pub const SIZE: usize = 9;
-    pub fn serialize(&self) -> [u8; Self::SIZE] {
-        let mut b: [u8; Self::SIZE] = [0; Self::SIZE];
+    pub fn new() -> Self {
+        Self {
+            lock: false,
+            last_lock_time_nanos: 0
+        }
+    }
+    
+    pub const MAX_LOCK_TIME_NANOS: u64 =  30 * 60 * 1_000_000_000;
+    pub fn is_lock_on(&self) -> bool {
+        self.lock && time() - self.last_lock_time_nanos <= Self::MAX_LOCK_TIME_NANOS
+    }
+    pub fn lock(&mut self) {
+        self.lock = true;
+        self.last_lock_time_nanos = time();
+    }
+    pub fn unlock(&mut self) {
+        self.lock = false;
+    }
+    
+    pub const SERIALIZE_SIZE: usize = 9;
+    pub fn serialize(&self) -> [u8; Self::SERIALIZE_SIZE] {
+        let mut b: [u8; Self::SERIALIZE_SIZE] = [0; Self::SERIALIZE_SIZE];
         b[0] = if self.lock { 1 } else { 0 };
         b[1..9].copy_from_slice(&self.last_lock_time_nanos.to_be_bytes());
         b
     }
-    pub fn backwards(b: &[u8; Self::SIZE]) -> Result<Self, String> {
+    pub fn backwards(b: &[u8; Self::SERIALIZE_SIZE]) -> Result<Self, String> {
         Ok(Self {
             lock: match b[0] { 1 => true, 0 => false, _ => return Err("unknown lock byte".to_string()) },
             last_lock_time_nanos: u64::from_be_bytes((&b[1..9]).try_into().unwrap())

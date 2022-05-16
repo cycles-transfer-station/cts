@@ -158,7 +158,7 @@ mod cbc {
         pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
             module.shrink_to_fit();
             Self {
-                module_hash: cts_lib::tools::sha256(&module), // put this on top if move error
+                module_hash: cts_lib::tools::sha256(&module), // put this on the top if move error
                 module: module,
             }
         }
