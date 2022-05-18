@@ -36,6 +36,7 @@ pub struct CyclesTransfer {
 
 
 
+// when collecting the untaken_icp_to_collect, collect the user_data.untaken_icp_to_collect - LEDGER_TRANSFER_FEE
 
 #[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
 pub struct UserData {

@@ -93,19 +93,37 @@ pub enum PutError {
 }
 
 #[update]
-pub fn put(user_id: Principal, user_data: UserData, user_lock: UserLock) -> Result<(), PutError>{
+pub fn put(user_id: Principal, user_data: UserData, mut user_lock: Option<UserLock>) -> Result<(), PutError>{
     check_caller(&caller());
 
     with_mut(&USERS_MAP, |um| { 
         if um.contains_key(&user_id) == false {
             if is_full() {
                 Err(PutError::CanisterIsFull)
-            }        
+            }
+            if user_lock.is_none() {
+                user_lock = Some(UserLock::new());
+            }   
+        } else {
+            if user_lock.is_none() {
+                user_lock = *um.get(&user_id).unwrap().1;     // can unwrap because of the if containskey check 
+            }   
         }
-        um.insert(user_id, (user_data, user_lock)); 
+        
+        um.insert(user_id, (user_data, user_lock.unwrap())); // unwrap because makes sure the user_lock-option is at this point a Some 
         Ok(())
     })
 }
+
+#[derive(CandidType, Deserialize)]
+pub enum PlusBalanceError {
+
+}
+
+#[update]
+pub fn plus_balance(user_id: Principal, plus_cycles: Option<Cycles>, plus_icp: Option<IcpTokens>) -> Result<(), PlusBalanceError> {
+    Ok(())    
+} 
 
 
 

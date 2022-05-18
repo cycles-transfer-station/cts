@@ -34,6 +34,16 @@ pub mod localkey_refcell {
         })
     }
     
+    unsafe pub fn as_ref<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &T {
+        let pointer: *const T = with(s, |i| { i as = *const T });
+        &*pointer
+    }
+    
+    unsafe pub fn as_ref_mut<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &mut T {
+        let pointer: *mut T = with_mut(s, |i| { i as = *mut T });
+        &mut *pointer
+    }
+    
 }
 
 

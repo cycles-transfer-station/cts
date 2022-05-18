@@ -107,6 +107,13 @@ pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
 }
 
 
+pub fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<IcpTokens> {
+    icp_account_balance(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpAccountBalanceArgs { account: user_icp_balance_id(user) }    
+    ).await
+}
+
 pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
     let mut icp_balance: IcpTokens = icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,

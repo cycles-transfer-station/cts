@@ -9,7 +9,7 @@
 // does dereferencing a borrow give the ownership? try on a non-copy type. yes it does a move
 // sending cycles to a canister is the same risk as sending icp to a canister. 
 // put a max_fee on a cycles-transfer-purchase & on a cycles-bank-purchase?
-
+// 1xdr first-time-user-fee
 
 
 
@@ -66,7 +66,12 @@ use cts_lib::{
 
     },
     tools::{
-        localkey_refcell::{with, with_mut},
+        localkey_refcell::{
+            with, 
+            with_mut,
+            as_ref,
+            
+        },
         sha256,
 
     },
@@ -100,6 +105,7 @@ use tools::{
     user_icp_balance_id,
     user_cycles_balance_topup_memo_bytes,
     check_user_icp_balance,
+    check_user_icp_ledger_balance,
     check_user_cycles_balance,
     CheckUserCyclesBalanceError,
     main_cts_icp_id,
@@ -201,7 +207,7 @@ pub const ICP_TAKE_PAYOUT_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-
 
 thread_local! {
 
-
+    pub static NEW_USERS_LOCKS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
     
     pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
@@ -287,11 +293,82 @@ pub fn topup_balance() -> TopUpBalanceData {
 }
 
 
+fn lock_new_user(user_id: Principal) {
+
+}
+
+fn unlock_new_user(user_id: &Principal) {
+    // swallows missing user for now even though the code-logic says it can't happen
+    with_mut(&NEW_USERS_LOCKS, |uls| { 
+        match uls.binary_search(user_id) {
+            Ok(i) => uls.swap_remove(i),
+            Err(_) => {},
+        };
+    });
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum NewUserError{
+    UserIsLock,
+    FindUserError, 
+    CheckIcpBalanceCallError(String),
+    
+}
+
+
+// captcha?
+#[update]
+pub async fn new_user() -> Result<, NewUserError> {
+    let user_id: Principal = caller();
+    with_mut(&NEW_USERS_LOCKS, |uls| { 
+        if uls.contains(&user_id) {
+            trap("new user check is ongoing")
+        }
+        uls.push(user_id);
+    });
+    let user_data: Option<UserData> = match find_and_lock_user(&user_id).await {
+        Ok(ud) => Some(ud),
+        Err(find_and_lock_user_error) => match find_and_lock_user_error {
+            FindAndLockUserError::UserNotFound => None,
+            FindAndLockUserError::UserIsLock => {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::UserIsLock);
+            },
+            FindAndLockUserError::UsersMapCanisterCallFail => {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::FindUserError);
+            }
+        }
+    };
+    
+    let user_cycles_balance : Cycles = match user_data {
+        None => 0,
+        Some(ud) => ud.cycles_balance
+    };
+    
+    let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance(&user_id).await {
+        Ok(tokens) => tokens,
+        Err(check_balance_call_error) => {
+            unlock_new_user(&user_id);
+            return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
+        }
+    };
+    
+    let user_icp_balance: IcpTokens = user_icp_ledger_balance - match user_data { Some(ud) => ud.untaken_icp_to_collect, None => 0 };
+    
+    
+    
+    
+}
 
 
 
 
-
+// certification? or replication-calls?
+#[export_name = "canister_query see_users_map_canisters"]
+pub fn see_users_map_canisters<'a>() {
+    ic_cdk::api::call::reply::<(&'a Vec<Principal,)>>((unsafe as_ref(&USERS_MAP_CANISTERS),))
+}
 
 
 
@@ -311,26 +388,33 @@ pub type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
 
 #[update]
 pub async fn see_balance() -> SeeBalanceSponse {
-    let user: Principal = caller();
-    check_lock_and_lock_user(&user);
+    let user_id: Principal = caller();
+    //check_lock_and_lock_user(&user_id);
+    let user_data: UserData = match get_and_lock_user(&user_id).await {
+        Ok(ud) => ud,
+        Err(get_and_lock_user_error) => {
+            unlock_user(&user_id)
+            return
+        }
+    };
     
-    let cycles_balance: Cycles = match check_user_cycles_balance(&user).await {
+    let cycles_balance: Cycles = match check_user_cycles_balance(&user_id).await {
         Ok(cycles) => cycles,
         Err(check_user_cycles_balance_error) => {
-            unlock_user(&user);
+            unlock_user(&user_id);
             return Err(SeeBalanceError::CheckUserCyclesBalanceError(check_user_cycles_balance_error));
         }
     };
     
-    let icp_balance: IcpTokens = match check_user_icp_balance(&user).await {
+    let icp_balance: IcpTokens = match check_user_icp_balance(&user_id).await {
         Ok(tokens) => tokens,
         Err(balance_call_error) => {
-            unlock_user(&user);
+            unlock_user(&user_id);
             return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
         }
     };
     
-    unlock_user(&user);
+    unlock_user(&user_id);
     Ok(UserBalance {
         cycles_balance,
         icp_balance,
