@@ -99,26 +99,15 @@ pub fn user_icp_balance_id(user: &Principal) -> IcpId {
 }
 
 
-pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
-    let mut memo_bytes = [0u8; 32];
-    memo_bytes[..2].copy_from_slice(CYCLES_BALANCE_TOPUP_MEMO_START);
-    memo_bytes[2..].copy_from_slice(&principal_as_thirty_bytes(user));
-    memo_bytes
-}
-
-
 pub fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<IcpTokens> {
     icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs { account: user_icp_balance_id(user) }    
+        IcpAccountBalanceArgs { account: user_icp_balance_id(user_id) }    
     ).await
 }
 
 pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
-    let mut icp_balance: IcpTokens = icp_account_balance(
-        MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs { account: user_icp_balance_id(user) }    
-    ).await?;
+    let mut icp_balance: IcpTokens = check_user_icp_ledger_balance(user).await?;
     with(&USERS_DATA, |ud| { 
         if let Some(u) = ud.get(user) {
             *&mut icp_balance -= u.untaken_icp_to_collect;
@@ -129,6 +118,20 @@ pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
 }
 
 
+pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallResult<IcpTransferResult> {
+    icp_transfer(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpTransferArgs {
+            memo: ICP_TAKE_FEE_MEMO,
+            amount: icp,
+            fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+            from_subaccount: Some(principal_icp_subaccount(user_id)),
+            to: main_cts_icp_id(),                        
+            created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
+        }
+    ).await
+}
+
 
 #[derive(CandidType, Deserialize)]
 pub enum FindUserError {
@@ -137,6 +140,26 @@ pub enum FindUserError {
 
 pub async fn find_user(user: &Principal, ) -> Result<UserData, FindUserError> {
     call(),
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum FindAndLockUserError {
+    
+}
+
+pub type FindAndLockUserSponse = Result<(UserData, Principal), FindAndLockUserError>;
+
+pub async fn find_and_lock_user(user: &Principal) -> FindAndLockUserSponse {
+    call(),
+}
+
+
+pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
+    let mut memo_bytes = [0u8; 32];
+    memo_bytes[..2].copy_from_slice(CYCLES_BALANCE_TOPUP_MEMO_START);
+    memo_bytes[2..].copy_from_slice(&principal_as_thirty_bytes(user));
+    memo_bytes
 }
 
 
@@ -201,7 +224,10 @@ pub struct IcpXdrConversionRate {
     pub timestamp_seconds : u64
 }
 
-pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> Result<u64, CheckCurrentXdrPerMyriadPerIcpCmcRateError> {
+pub type CheckCurrentXdrPerMyriadPerIcpCmcRateSponse = Result<u64, CheckCurrentXdrPerMyriadPerIcpCmcRateError>;
+
+// how many 1/10000-xdr for one icp
+pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPerMyriadPerIcpCmcRateSponse {
 
     let latest_known_cmc_rate: LatestKnownCmcRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
     if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 10*60 {
@@ -456,6 +482,14 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
     Ok(cycles)
 }
 
+#[derive(CandidType, Deserialize)]
+pub enum LedgerCreateCanisterError {
 
+}
+
+pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, controller: Principal) -> Result<Principal, LedgerCreateCanisterError> {
+
+
+}
 
 

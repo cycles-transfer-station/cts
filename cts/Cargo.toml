@@ -19,6 +19,6 @@ serde_cbor = "0.11.2"
 base64 = "0.13.0"
 global_allocator_counter = { path = "../global_allocator_counter" } 
 cts_lib = { path = "../cts_lib" }
-
+futures = "0.3.21"
 # wasabi_leb128 = "0.4.0" # want this?
 

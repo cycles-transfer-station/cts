@@ -42,6 +42,7 @@ pub struct CyclesTransfer {
 pub struct UserData {
     pub cycles_balance: Cycles,
     pub untaken_icp_to_collect: IcpTokens,
+    pub ungiven_icp_to_give: IcpTokens,
     pub user_canister: Option<Principal>,
 }
 
