@@ -155,6 +155,18 @@ pub async fn find_and_lock_user(user: &Principal) -> FindAndLockUserSponse {
 }
 
 
+
+#[derive(CandidType, Deserialize)]
+pub enum FindAndPlusUserCyclesBalanceError {
+    UserNotFound,
+    UsersMapCanisterCallError,
+}
+
+pub async fn find_and_plus_user_cycles_balance(user_id: Principal, plus_cycles: Cycles) -> Result<(), FindAndPlusUserCyclesBalanceError> {
+
+}
+
+
 pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
     let mut memo_bytes = [0u8; 32];
     memo_bytes[..2].copy_from_slice(CYCLES_BALANCE_TOPUP_MEMO_START);
@@ -411,8 +423,6 @@ pub enum LedgerTopupCyclesError {
     CmcNotifyCallError { notify_call_error: String, topup_transfer_block_height: IcpBlockHeight },
     CmcNotifySponseCandidDecodeError { candid_error: String, candid_bytes: Vec<u8>, topup_transfer_block_height: IcpBlockHeight },
     CmcNotifyError{notify_error: NotifyError, topup_transfer_block_height: IcpBlockHeight},
-    CmcNotifySponseRefund(String, Option<IcpBlockHeight>),
-    UnknownCmcNotifySponse
 }
 
 // make a public method to re-try a block-height
@@ -484,7 +494,10 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
 
 #[derive(CandidType, Deserialize)]
 pub enum LedgerCreateCanisterError {
-
+    IcpTransferCallError(String),
+    IcpTransferError(IcpTransferError),
+    CmcNotifyCallError{call_error: String, block_height: IcpBlockHeight},   //create_canister_icp_transfer_block_height    
+    CmcNotifyError{error: CmcNotifyError, block_height: IcpBlockHeight}
 }
 
 pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, controller: Principal) -> Result<Principal, LedgerCreateCanisterError> {

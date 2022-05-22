@@ -36,6 +36,9 @@ use ic_cdk::{
         caller, 
         time, 
         call::{
+            arg_data,
+            arg_data_raw,
+            arg_data_raw_size,
             call_raw128,
             call,
             call_with_payment128,
@@ -44,6 +47,8 @@ use ic_cdk::{
             msg_cycles_refunded128,
             msg_cycles_available128,
             msg_cycles_accept128,
+            reject,
+            reply,
         },
     },
     export::{
@@ -137,6 +142,9 @@ use tools::{
     IcpXdrConversionRate,
     FindAndLockUserSponse,
     take_user_icp_ledger,
+    find_and_plus_user_cycles_balance,
+    FindAndPlusUserCyclesBalanceError,
+    
     
     
 };
@@ -201,7 +209,8 @@ pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 1; // 100_000
 pub const CYCLES_BANK_COST: u128 = 1; // 10_000_000_000_000;
 pub const CYCLES_BANK_UPGRADE_COST: u128 = 5; // 5_000_000_000_000;
 pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate through the xdr conversion rate ? // 100_000_000_000-cycles
-pub const MINIMUM_CYCLES_TRANSFER_IN: u128 = 50_000_000_000; // enough to pay for a user-data-struct for 3 years
+pub const MINIMUM_CYCLES_TRANSFER_IN: u128 = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
+pub const FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000) * with(&USERS_MAP_CANISTERS, |umcs| umcs.len()); // :do: clude wasm-instructions-counts
 pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
 
 
@@ -212,7 +221,7 @@ pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
 pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_TAKE_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
-
+pub const MAX_NEW_USER_LOCKS: usize = 5000;
 
 
 
@@ -235,32 +244,47 @@ thread_local! {
 
 
 
+// if a user for the topup is not found, the cycles-transfer-station takes a fee for the user-lookup(:fee is with the base on how many users_map_canisters there are) and refunds the rest of the cycles. 
+// make sure the minimum-in-cycles-transfer is more than the find_and_plus_user_cycles_balance_user_not_found_fee
 
 
-#[update]
-pub fn cycles_transfer(ct: CyclesTransfer) -> () {
-    let cycles: u128 = msg_cycles_accept128(msg_cycles_available128());
-    if cycles < MINIMUM_CYCLES_TRANSFER {
-        trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER))
-    }  
+#[export_name="canister_update cycles_transfer"]
+pub fn cycles_transfer() {
+    if arg_data_raw_size() > 100 {
+        trap("arg_data_raw_size can be max 100 bytes")
+    }
+    
+    let cycles_available: Cycles = msg_cycles_available128();
+    if cycles_available < MINIMUM_CYCLES_TRANSFER_IN {
+        trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER_IN))
+    }
 
-    // check memo size 
+    let (ct,): (CyclesTransfer,) = arg_data<(CyclesTransfer,)>();
 
+    match ct.memo {
+        CyclesTransferMemo::Blob(memo_bytes) => {
+            if memo_bytes.len() != 32 || &memo_bytes[..2] != CYCLES_BALANCE_TOPUP_MEMO_START {
+                trap("unknown cycles transfer memo")
+            }
 
-    if let CyclesTransferMemo::Blob(memo_bytes) = ct.memo {
-        if memo_bytes.len() != 32 || &memo_bytes[..2] != CYCLES_BALANCE_TOPUP_MEMO_START {
-            trap("unknown cycles transfer memo")
-        }   
-
-        let user: Principal = thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap());
-        USERS_DATA.with(|udr| {
-            udr.borrow_mut().entry(user).or_default().cycles_balance += cycles;
-        });
-
-
-
-
-    } 
+            let user_id: Principal = thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap());
+            
+            match find_and_plus_user_cycles_balance(&user_id, plus_cycles: cycles_available).await {
+                Ok(()) => {
+                    reply(());
+                },
+                Err(find_and_plus_user_cycles_balance_error) => match find_and_plus_user_cycles_balance_error {
+                    FindAndPlusUserCyclesBalanceError::UserNotFound => {
+                        msg_cycles_accept128(FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE);
+                        reject(&format("User for the top up not found. {} cycles taken for a nonexistentuserfee", FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE));
+                    },
+                    FindAndPlusUserCyclesBalanceError::UsersMapCanisterCallError => trap("User lookup error")
+                }
+            };
+        },
+        
+        _ => trap("CyclesTransferMemo must be the Blob variant")
+    };
 }
 
 
@@ -320,18 +344,23 @@ fn unlock_new_user(user_id: &Principal) {
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserError{
-    UserIsLock,
-    FindUserError,
-    FoundUserCanister(Principal),
     CheckIcpBalanceCallError(String),
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
-    UserBalanceTooLow{
-        membership_cost_cycles: Cycles,
+    UserIcpLedgerBalanceTooLow{
         membership_cost_icp: IcpTokens,
-        user_cycles_balance: Cycles,
+        user_icp_ledger_balance: IcpTokens,
+        icp_ledger_transfer_fee: IcpTokens
+    },
+    UserIcpBalanceTooLow{
+        membership_cost_icp: IcpTokens,
         user_icp_balance: IcpTokens,
         icp_ledger_transfer_fee: IcpTokens
     },
+    FoundUserCanister(Principal),
+    UserIsLock,
+    UsersMapCanisterCallFail,
+    LedgerCreateCanisterError(LedgerCreateCanisterError),
+    
     
 }
 
@@ -342,6 +371,7 @@ pub enum NewUserData {
 }
 
 
+// for the now a user must sign-up/register with the icp.
 #[update]
 pub async fn new_user() -> Result<NewUserData, NewUserError> {
     let user_id: Principal = caller();
@@ -350,49 +380,19 @@ pub async fn new_user() -> Result<NewUserData, NewUserError> {
         if uls.contains(&user_id) {
             trap("new user is in the middle of another call")
         }
+        if uls.len() >= MAX_NEW_USER_LOCKS { // >= in case somehow more new_user_locks end up in the list from somewhere else 
+            trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
+        }
         uls.push(user_id);
     });
     
-    //let call_batch_1: Vec<Box<dyn Future>> = vec![check_user_icp_ledger_balance(&user_id), find_and_lock_user(&user_id)];
     let (
-            find_and_lock_user_sponse                             : FindAndLockUserSponse, 
-            check_user_icp_ledger_balance_sponse                  : CallResult<IcpTokens>, 
-            check_current_xdr_permyriad_per_icp_cmc_rate_sponse   : CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
-        )
-        //: (
-        //    FindAndLockUserSponse, 
-        //    CallResult<IcpTokens>, 
-        //    CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
-        //) 
-        = futures::future::join3(
-            find_and_lock_user(&user_id), 
-            check_user_icp_ledger_balance(&user_id), 
-            check_current_xdr_permyriad_per_icp_cmc_rate()
-        ).await; 
-    
-    
-    let find_and_lock_user_option: Option<(UserData, Principal)> = match find_and_lock_user_sponse {
-        Ok((user_data, users_map_canister_id)) => {
-            if let Some(uc) = user_data.user_canister {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::FoundUserCanister(uc));
-            }
-            Some((user_data, users_map_canister_id))
-        },
-        Err(find_and_lock_user_error) => match find_and_lock_user_error {
-            FindAndLockUserError::UserNotFound => {
-                None
-            },
-            FindAndLockUserError::UserIsLock => {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::UserIsLock);
-            },
-            FindAndLockUserError::UsersMapCanisterCallFail => {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::FindUserError);
-            }
-        }
-    };
+        check_user_icp_ledger_balance_sponse                : CallResult<IcpTokens>, 
+        check_current_xdr_permyriad_per_icp_cmc_rate_sponse : CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
+    ) = futures::future::join(
+        check_user_icp_ledger_balance(&user_id), 
+        check_current_xdr_permyriad_per_icp_cmc_rate()
+    ).await; 
     
     let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
         Ok(tokens) => tokens,
@@ -412,55 +412,97 @@ pub async fn new_user() -> Result<NewUserData, NewUserError> {
     
     let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
     
+    if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
+        unlock_new_user(&user_id);
+        return Err(NewUserError::UserIcpLedgerBalanceTooLow{
+            membership_cost_icp: current_membership_cost_icp,
+            user_icp_ledger_balance,
+            icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+        });
+    }
+    
+    let find_and_lock_user_sponse: FindAndLockUserSponse = find_and_lock_user(&user_id).await; 
+    
+    let find_and_lock_user_option: Option<(UserData, Principal)> = match find_and_lock_user_sponse {
+        Ok((user_data, users_map_canister_id)) => {
+            if let Some(uc) = user_data.user_canister {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::FoundUserCanister(uc));
+            }
+            if user_icp_ledger_balance - user_data.untaken_icp_to_collect < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::UserIcpBalanceTooLow{
+                    membership_cost_icp: current_membership_cost_icp,
+                    user_icp_balance: user_icp_ledger_balance - user_data.untaken_icp_to_collect,
+                    icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+                });    
+            }
+            Some((user_data, users_map_canister_id))
+        },
+        Err(find_and_lock_user_error) => match find_and_lock_user_error {
+            FindAndLockUserError::UserNotFound => {
+                None
+            },
+            FindAndLockUserError::UserIsLock => {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::UserIsLock);
+            },
+            FindAndLockUserError::UsersMapCanisterCallFail => {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::UsersMapCanisterCallFail);
+            }
+        }
+    };
+
+    let new_user_canister: Principal = match ledger_create_canister(IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.7), Some(principal_icp_subaccount(&user_id)), id()).await {
+        Ok(canister_id) => canister_id,
+        Err(ledger_create_canister_error) => {
+            unlock_new_user(&user_id);
+            return Err(NewUserError::LedgerCreateCanisterError(ledger_create_canister_error));
+        }
+    };
+ 
+    
+ 
+ 
+ 
+ 
+ 
+ 
+ // canister-be uninstalled/empty and running, set for the code install
+    // install user-canister-code  
+    
+    // take
+    let take_user_icp_ledger_call_sponse: CallResult<IcpTransferResult> = take_user_icp_ledger(&user_id, IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3)).await;
+    let untaken_icp_to_collect: IcpTokens = match take_user_icp_ledger_call_sponse {
+        Ok(icp_transfer_result) => match icp_transfer_result {
+            Ok(_block_height) => 0,
+            Err(_icp_transfer_error) => IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3) + ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+        }, 
+        Err(_icp_transfer_call_error) => IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3) + ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+    }; 
+    
+    // put user into a users_map_canister
+    let user_data: UserData = UserData { cycles_balance: 0, untaken_icp_to_collect, user_canister: Some(new_user_canister) };
+
+    put_new_user_into_the_users_map(user_id, user_data).await;
+    
+    // make log of this new-user-registration and put it into the user_canister
+    paid_with = CyclesOrIcp::Icp;
+    
+    NewUserData {
+        users_map_canister: ,
+        user_canister: new_user_canister
+    }
+            
+
+    
     match find_and_lock_user_option {
         None => {
-            if user_icp_ledger_balance >= current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-                let new_user_canister: Principal = match ledger_create_canister(IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.7), Some(principal_icp_subaccount(&user_id)), id()).await {
-                    Ok(canister_id) => canister_id,
-                    Err(ledger_create_canister_error) => {
-                        // what about block height if error on cmc notify? make a queue for the ledger_top_up and ledger_create_canister block-heights that gets re-try at least once a day and also gets re-try on the next ledger_top_up/ledger_create_canister function call
-                        
-                    }
-                };
-                // canister-be uninstalled/empty and running, set for the code install
-                // install user-canister-code  
-                
-                // take
-                let take_user_icp_ledger_call_sponse: CallResult<IcpTransferResult> = take_user_icp_ledger(&user_id, IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3)).await;
-                let untaken_icp_to_collect: IcpTokens = match take_user_icp_ledger_call_sponse {
-                    Ok(icp_transfer_result) => match icp_transfer_result {
-                        Ok(_block_height) => 0,
-                        Err(_icp_transfer_error) => IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3) + ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-                    }, 
-                    Err(_icp_transfer_call_error) => IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.3) + ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-                }; 
-                
-                // put user into a users_map_canister
-                let user_data: UserData = UserData { cycles_balance: 0, untaken_icp_to_collect, user_canister: Some(new_user_canister) };
 
-                put_new_user_into_the_users_map(user_id, user_data).await;
-                
-                // make log of this new-user-registration and put it into the user_canister
-                paid_with = CyclesOrIcp::Icp;
-                
-                NewUserData {
-                    users_map_canister: ,
-                    user_canister: new_user_canister
-                }
-            
-            } else {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::UserBalanceTooLow{
-                    membership_cost_cycles: CYCLES_PER_USER_PER_103_MiB_PER_YEAR,
-                    membership_cost_icp: current_membership_cost_icp,
-                    user_cycles_balance: 0,
-                    user_icp_balance: user_icp_ledger_balance,
-                    icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE // 2 * ledger-transfer-fee for the new-user when paying with the icp
-                });
-            }
         },
+        
         Some((user_data, users_map_canister_id)) => {
-            let user_icp_balance: IcpTokens = user_icp_ledger_balance + user_data.ungiven_icp_to_give - user_data.untaken_icp_to_collect;
             
         }
     }
@@ -470,12 +512,7 @@ pub async fn new_user() -> Result<NewUserData, NewUserError> {
     
     
     
-    let paid_with: IcpOrCycles;
-    
-    let new_user_cycles_balance: Cycles = user_cycles_balance;
-    
-    let new_user_untaken_icp_to_collect: IcpTokens = match user_data { Some(ud) => ud.untaken_icp_to_collect, None => IcpTokens::ZERO };
-    
+
     
     
     
@@ -488,9 +525,7 @@ pub async fn new_user() -> Result<NewUserData, NewUserError> {
     
     // write the user-data to the users-map-canisters  
     
-    
-    
-    
+
 }
 
 
@@ -1297,28 +1332,17 @@ pub fn see_fees() -> Fees {
 
 
 
-
+// test this!
 #[no_mangle]
 pub fn canister_inspect_message() {
     // caution: this function is only called for ingress messages 
     
-    if [
-        "topup_balance", 
-        "see_balance", 
-        "collect_balance", 
-        "convert_icp_balance_for_the_cycles_with_the_cmc_rate", 
-        "purchase_cycles_transfer",
-        "purchase_cycles_bank",
-        "see_cycles_transfer_purchases",
-        "see_cycles_bank_purchases"
+    if caller() == Principal::anonymous() && ![""].contains(&&ic_cdk::api::call::method_name()[..] {
+        trap("caller cannot be anonymous for this method.")
+    }
 
-
-
-    
-    ].contains(&&ic_cdk::api::call::method_name()[..]) {
-        if caller() == Principal::anonymous() { // check '==' plementation is correct otherwise caller().as_slice() == Principal::anonymous().as_slice()
-            trap("caller cannot be anonymous for this method.")
-        }
+    if &ic_cdk::api::call::method_name()[..] == "cycles_transfer" {
+        trap("caller must be a canister for this method.")
     }
 
 
