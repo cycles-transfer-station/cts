@@ -203,6 +203,7 @@ use cbc::CyclesBankCode;
 
 
 
+
 // :FEES.
 pub const CYCLES_TRANSFER_FEE: u128 = 100_000_000_000;
 pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 1; // 100_000_000_000
@@ -216,8 +217,6 @@ pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
 
 
 
-
-
 pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_TAKE_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
@@ -225,17 +224,15 @@ pub const MAX_NEW_USER_LOCKS: usize = 5000;
 
 
 
+
+
 thread_local! {
 
-    pub static NEW_USERS_LOCKS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    pub static NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(Vec::new());
     pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
-    
-    pub static USERS_DATA: RefCell<HashMap<Principal, UserData>> = RefCell::new(HashMap::new());    
-
     pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     pub static CYCLES_BANK_CODE: RefCell<CyclesBankCode> = RefCell::new(CyclesBankCode::new(Vec::new()));
     pub static LATEST_KNOWN_CMC_RATE: Cell<LatestKnownCmcRate> = Cell::new(LatestKnownCmcRate { xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
-
 
 }
 
@@ -332,12 +329,47 @@ pub fn topup_balance() -> TopUpBalanceData {
 
 
 
+
+
+
+
+
+#[derive(Copy,Clone)]
+struct NewUserData {
+    lock_start_time_nanos: u64,
+    lock: bool,
+    create_user_canister_block_height: Option<IcpBlockHeight>,
+    user_canister: Option<Principal>,
+    users_map_canister: Option<Principal>,
+    user_icp_ledger_balance: Option<IcpTokens>,
+    current_xdr_icp_rate: Option<u64>
+
+    
+
+        
+}
+
+impl NewUserData {
+    pub fn new() -> Self {
+        Self {
+            lock_start_time_nanos: time(),
+            lock: true,
+            create_canister_block_height: None,
+            new_user_canister: None,
+            users_map_canister: None
+        }
+    }
+}
+
+
+
+
 fn unlock_new_user(user_id: &Principal) {
     // swallows missing user for now even though the code-logic says it can't happen
-    with_mut(&NEW_USERS_LOCKS, |uls| { 
-        match uls.binary_search(user_id) {
-            Ok(i) => uls.swap_remove(i),
-            Err(_) => {},
+    with_mut(&NEW_USERS, |nus| { 
+        match nus.get_mut(user_id) {
+            Some(new_user_data) => { new_user_data.lock = false; },
+            None => {},
         };
     });
 }
@@ -365,7 +397,7 @@ pub enum NewUserError{
 }
 
 #[derive(CandidType, Deserialize)]
-pub enum NewUserData {
+pub enum NewUserSuccessData {
     users_map_canister: Principal,
     user_canister: Principal,
 }
@@ -373,54 +405,75 @@ pub enum NewUserData {
 
 // for the now a user must sign-up/register with the icp.
 #[update]
-pub async fn new_user() -> Result<NewUserData, NewUserError> {
+pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     let user_id: Principal = caller();
     
-    with_mut(&NEW_USERS_LOCKS, |uls| { 
-        if uls.contains(&user_id) {
-            trap("new user is in the middle of another call")
+    let mut new_user_data: NewUserData; 
+    
+    with_mut(&NEW_USERS, |new_users| {
+        match new_users.get_mut(&user_id) {
+            Some(nud) => {
+                if nud.lock == true {
+                    trap("new user is in the middle of another call")
+                }
+                nud.lock = true;
+                // update nud.lock_time_start_nanos?
+                new_user_data = *nud; // copy
+            },
+            None => {
+                if new_users.len() >= MAX_NEW_USERS { // >= in case somehow more new_user_locks end up in the list from somewhere else 
+                    trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
+                }
+                let nud: NewUsersData = NewUsersData::new();
+                new_users.insert(user_id, nud);
+                new_user_data = *nud; //copy
+            }
         }
-        if uls.len() >= MAX_NEW_USER_LOCKS { // >= in case somehow more new_user_locks end up in the list from somewhere else 
-            trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
-        }
-        uls.push(user_id);
     });
-    
-    let (
-        check_user_icp_ledger_balance_sponse                : CallResult<IcpTokens>, 
-        check_current_xdr_permyriad_per_icp_cmc_rate_sponse : CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
-    ) = futures::future::join(
-        check_user_icp_ledger_balance(&user_id), 
-        check_current_xdr_permyriad_per_icp_cmc_rate()
-    ).await; 
-    
-    let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
-        Ok(tokens) => tokens,
-        Err(check_balance_call_error) => {
+
+    if new_user_data.user_icp_ledger_balance.is_none() {
+
+        let (
+            check_user_icp_ledger_balance_sponse                : CallResult<IcpTokens>, 
+            check_current_xdr_permyriad_per_icp_cmc_rate_sponse : CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
+        ) = futures::future::join(
+            check_user_icp_ledger_balance(&user_id), 
+            check_current_xdr_permyriad_per_icp_cmc_rate()
+        ).await; 
+        
+        let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
+            Ok(tokens) => tokens,
+            Err(check_balance_call_error) => {
+                
+                unlock_new_user(&user_id);
+                
+                
+                
+                
+                return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
+            }
+        };
+        
+        let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
+            Ok(rate) => rate,
+            Err(check_xdr_icp_rate_error) => {
+                unlock_new_user(&user_id);
+                return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
+            }
+        };
+        
+        let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
+        
+        if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
             unlock_new_user(&user_id);
-            return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
+            return Err(NewUserError::UserIcpLedgerBalanceTooLow{
+                membership_cost_icp: current_membership_cost_icp,
+                user_icp_ledger_balance,
+                icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+            });
         }
-    };
-    
-    let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
-        Ok(rate) => rate,
-        Err(check_xdr_icp_rate_error) => {
-            unlock_new_user(&user_id);
-            return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
-        }
-    };
-    
-    let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
-    
-    if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-        unlock_new_user(&user_id);
-        return Err(NewUserError::UserIcpLedgerBalanceTooLow{
-            membership_cost_icp: current_membership_cost_icp,
-            user_icp_ledger_balance,
-            icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
-        });
     }
-    
+        
     let find_and_lock_user_sponse: FindAndLockUserSponse = find_and_lock_user(&user_id).await; 
     
     let find_and_lock_user_option: Option<(UserData, Principal)> = match find_and_lock_user_sponse {
@@ -453,6 +506,11 @@ pub async fn new_user() -> Result<NewUserData, NewUserError> {
             }
         }
     };
+    
+    if new_user_data.create_user_canister_block_height.is_none() {
+    
+    }
+
 
     let new_user_canister: Principal = match ledger_create_canister(IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.7), Some(principal_icp_subaccount(&user_id)), id()).await {
         Ok(canister_id) => canister_id,

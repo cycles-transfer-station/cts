@@ -450,7 +450,7 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
         Err(transfer_call_error) => {
             return Err(LedgerTopupCyclesError::IcpTransferCallError(format!("{:?}", transfer_call_error)));
         }
-    }; 
+    };
 
     // :give-back: topup_cycles_icp_transfer_call_block_index on each follow[ing]-error-case.
 
@@ -491,6 +491,8 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
 
     Ok(cycles)
 }
+
+
 
 #[derive(CandidType, Deserialize)]
 pub enum LedgerCreateCanisterError {
