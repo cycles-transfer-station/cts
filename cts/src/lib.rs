@@ -19,7 +19,7 @@
 // choice for users to delete past transactions to re-claim storage-space  
 // if a user requested cycles-transfer call takes-more than half an hour to come back, the user is not refunded any cycles the callee does'nt take
 
-
+// user does the main operations through the user_canister.
 
 
 
@@ -252,6 +252,7 @@ pub fn cycles_transfer() {
     }
     
     let cycles_available: Cycles = msg_cycles_available128();
+    
     if cycles_available < MINIMUM_CYCLES_TRANSFER_IN {
         trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER_IN))
     }
@@ -332,21 +333,19 @@ pub fn topup_balance() -> TopUpBalanceData {
 
 
 
-
+pub type UsersMapCanisterId = Principal;
 
 #[derive(Copy,Clone)]
 struct NewUserData {
     lock_start_time_nanos: u64,
     lock: bool,
-    create_user_canister_block_height: Option<IcpBlockHeight>,
-    user_canister: Option<Principal>,
-    users_map_canister: Option<Principal>,
-    user_icp_ledger_balance: Option<IcpTokens>,
-    current_xdr_icp_rate: Option<u64>
-
     
+    // the options are for the memberance of the steps
+    user_icp_ledger_balance: Option<IcpTokens>,
+    current_xdr_icp_rate: Option<u64>,
+    users_map_canister_data: Option<(UserData, Option<UsersMapCanisterId>)>,    
+    create_user_canister_block_height: Option<IcpBlockHeight>,
 
-        
 }
 
 impl NewUserData {
@@ -354,9 +353,14 @@ impl NewUserData {
         Self {
             lock_start_time_nanos: time(),
             lock: true,
-            create_canister_block_height: None,
-            new_user_canister: None,
-            users_map_canister: None
+            ..
+        }
+    }
+    
+    pub fn current_membership_cost_icp(&self) -> Option<IcpTokens> {
+        match self.current_xdr_icp_rate {
+            Some(r) => Some(cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, r)),
+            None => None
         }
     }
 }
@@ -364,15 +368,6 @@ impl NewUserData {
 
 
 
-fn unlock_new_user(user_id: &Principal) {
-    // swallows missing user for now even though the code-logic says it can't happen
-    with_mut(&NEW_USERS, |nus| { 
-        match nus.get_mut(user_id) {
-            Some(new_user_data) => { new_user_data.lock = false; },
-            None => {},
-        };
-    });
-}
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserError{
@@ -431,7 +426,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         }
     });
 
-    if new_user_data.user_icp_ledger_balance.is_none() {
+    if new_user_data.user_icp_ledger_balance.is_none() || new_user_data.current_xdr_icp_rate.is_none() {
 
         let (
             check_user_icp_ledger_balance_sponse                : CallResult<IcpTokens>, 
@@ -444,20 +439,15 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
             Ok(tokens) => tokens,
             Err(check_balance_call_error) => {
-                
-                unlock_new_user(&user_id);
-                
-                
-                
-                
+                with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
                 return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
             }
         };
-        
+                
         let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
             Ok(rate) => rate,
             Err(check_xdr_icp_rate_error) => {
-                unlock_new_user(&user_id);
+                with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
                 return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
             }
         };
@@ -465,47 +455,59 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
         
         if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-            unlock_new_user(&user_id);
+            with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
             return Err(NewUserError::UserIcpLedgerBalanceTooLow{
                 membership_cost_icp: current_membership_cost_icp,
                 user_icp_ledger_balance,
                 icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
             });
         }
+
+        new_user_data.user_icp_ledger_balance = Some(user_icp_ledger_balance);
+        new_user_data.current_xdr_icp_rate = Some(current_xdr_icp_rate); 
+        // after this, use new_user_data.field to use the data
+        
     }
         
-    let find_and_lock_user_sponse: FindAndLockUserSponse = find_and_lock_user(&user_id).await; 
-    
-    let find_and_lock_user_option: Option<(UserData, Principal)> = match find_and_lock_user_sponse {
-        Ok((user_data, users_map_canister_id)) => {
-            if let Some(uc) = user_data.user_canister {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::FoundUserCanister(uc));
-            }
-            if user_icp_ledger_balance - user_data.untaken_icp_to_collect < current_membership_cost_icp + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::UserIcpBalanceTooLow{
-                    membership_cost_icp: current_membership_cost_icp,
-                    user_icp_balance: user_icp_ledger_balance - user_data.untaken_icp_to_collect,
-                    icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
-                });    
-            }
-            Some((user_data, users_map_canister_id))
-        },
-        Err(find_and_lock_user_error) => match find_and_lock_user_error {
-            FindAndLockUserError::UserNotFound => {
-                None
+    if new_user_data.users_map_canister_data == None {
+        
+        let find_user_sponse: FindUserSponse = find_user(&user_id).await; 
+        
+        let users_map_canister_data: (UserData, UsersMapCanisterId) = match find_user_sponse {
+            Ok((user_data, users_map_canister_id)) => {
+                if let Some(uc) = user_data.user_canister {
+                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
+                    return Err(NewUserError::FoundUserCanister(uc));
+                }
+                if new_user_data.user_icp_ledger_balance - user_data.untaken_icp_to_collect < new_user_data.current_membership_cost_icp().unwrap() + IcpTokens.from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {                             // can unwrap bc the code makes sure at this point there is a new_user_data.current_xdr_icp_rate 
+                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
+                    return Err(NewUserError::UserIcpBalanceTooLow{
+                        membership_cost_icp: new_user_data.current_membership_cost_icp().unwrap(),
+                        user_icp_balance: new_user_data.user_icp_ledger_balance - user_data.untaken_icp_to_collect,
+                        icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+                    });
+                }
+                (user_data, Some(users_map_canister_id))
             },
-            FindAndLockUserError::UserIsLock => {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::UserIsLock);
-            },
-            FindAndLockUserError::UsersMapCanisterCallFail => {
-                unlock_new_user(&user_id);
-                return Err(NewUserError::UsersMapCanisterCallFail);
+            Err(find_and_lock_user_error) => match find_and_lock_user_error {
+                FindAndLockUserError::UserNotFound => {
+                    let user_data: UserData = UserData::new(); 
+                    let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(user_id, user_data).await;
+                    (UserData::new(), )
+                },
+                FindAndLockUserError::UsersMapCanisterCallFail => {
+                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
+                    return Err(NewUserError::UsersMapCanisterCallFail);
+                },
+                FindAndLockUserError::UserIsLock => {
+                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
+                    return Err(NewUserError::UserIsLock);
+                }
             }
-        }
-    };
+        };
+        
+        new_user_data.users_map_canister_data = Some(users_map_canister_data);
+    }
     
     if new_user_data.create_user_canister_block_height.is_none() {
     
