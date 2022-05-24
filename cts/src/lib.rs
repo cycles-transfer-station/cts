@@ -21,6 +21,8 @@
 
 // user does the main operations through the user_canister.
 
+// each method is a contract
+
 
 
 //#![allow(unused)] // take this out when done
@@ -144,6 +146,9 @@ use tools::{
     take_user_icp_ledger,
     find_and_plus_user_cycles_balance,
     FindAndPlusUserCyclesBalanceError,
+    ICP_LEDGER_CREATE_CANISTER_MEMO,
+    CmcNotifyError,
+    CmcNotifyCreateCanisterQuest,
     
     
     
@@ -345,6 +350,7 @@ struct NewUserData {
     current_xdr_icp_rate: Option<u64>,
     users_map_canister_data: Option<(UserData, Option<UsersMapCanisterId>)>,    
     create_user_canister_block_height: Option<IcpBlockHeight>,
+    user_canister_install_code: bool
 
 }
 
@@ -353,7 +359,7 @@ impl NewUserData {
         Self {
             lock_start_time_nanos: time(),
             lock: true,
-            ..
+            ..Default::default()
         }
     }
     
@@ -386,7 +392,10 @@ pub enum NewUserError{
     FoundUserCanister(Principal),
     FindUserError,
     PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
-    LedgerCreateCanisterError(LedgerCreateCanisterError),
+    CreateUserCanisterIcpTransferError(IcpTransferError),
+    CreateUserCanisterIcpTransferCallError(String),
+    CreateUserCanisterCmcNotifyError(CmcNotifyError),
+    CreateUserCanisterCmcNotifyCallError(String),
     
     
 }
@@ -466,7 +475,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.user_icp_ledger_balance = Some(user_icp_ledger_balance);
         new_user_data.current_xdr_icp_rate = Some(current_xdr_icp_rate); 
         // after this, use new_user_data.field to use the data
-        
     }
         
     if new_user_data.users_map_canister_data == None {
@@ -533,19 +541,101 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     }
     
     if new_user_data.create_user_canister_block_height.is_none() {
+        let create_user_canister_block_height: IcpBlockHeight = match icp_transfer(
+            MAINNET_LEDGER_CANISTER_ID,
+            IcpTransferArgs {
+                memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
+                amount: IcpTokens.from_e8s(new_user_data.current_membership_cost_icp().e8s() * 0.7),                              
+                fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                from_subaccount: Some(principal_icp_subaccount(&user_id)),
+                to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
+                created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
+            }
+        ).await {
+            Ok(transfer_result) => match transfer_result {
+                Ok(block_height) => block_height,
+                Err(transfer_error) => {
+                    with_mut(&NEW_USERS, |nus| {
+                        match nus.get_mut() {
+                            Some(nud) => { 
+                                new_user_data.lock = false;
+                                *nud = new_user_data;
+                            },
+                            None => {}
+                        }
+                    });
+                    return Err(NewUserError::CreateUserCanisterIcpTransferError(transfer_error));                    
+                }
+            },
+            Err(transfer_call_error) => {
+                with_mut(&NEW_USERS, |nus| {
+                    match nus.get_mut() {
+                        Some(nud) => { 
+                            new_user_data.lock = false;
+                            *nud = new_user_data;
+                        },
+                        None => {}
+                    }
+                });
+                return Err(NewUserError::CreateUserCanisterIcpTransferCallError(format!("{:?}", transfer_call_error)));
+            }
+        };
     
+        new_user_data.create_user_canister_block_height = Some(create_user_canister_block_height);
     }
 
+    if new_user_data.users_map_canister_data.unwrap().0.user_canister.is_none() {
+        let user_canister: Principal = match call<(Result<Principal, CmcNotifyError>,)>(
+            MAINNET_CYCLES_MINTING_CANISTER_ID,
+            "notify_create_canister",
+            (CmcNotifyCreateCanisterQuest {
+                controller: id(),
+                block_index: new_user_data.create_user_canister_block_height.unwrap()
+            },)
+        ).await {
+            Ok(notify_result) => match notify_result {
+                Ok(new_canister_id) => new_canister_id,
+                Err(cmc_notify_error) => {
+                    with_mut(&NEW_USERS, |nus| {
+                        match nus.get_mut() {
+                            Some(nud) => { 
+                                new_user_data.lock = false;
+                                *nud = new_user_data;
+                            },
+                            None => {}
+                        }
+                    });
+                    return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
+                }
+            },
+            Err(cmc_notify_call_error) => {
+                with_mut(&NEW_USERS, |nus| {
+                    match nus.get_mut() {
+                        Some(nud) => { 
+                            new_user_data.lock = false;
+                            *nud = new_user_data;
+                        },
+                        None => {}
+                    }
+                });
+                return Err(NewUserError::CreateUserCanisterCmcNotifyCallError(format!("{:?}", cmc_notify_call_error)));
+            }      
+        };
+        
+        new_user_data.users_map_canister_data.unwrap().0.user_canister = Some(user_canister);
+    }
 
-    let new_user_canister: Principal = match ledger_create_canister(IcpTokens.from_e8s(current_membership_cost_icp.e8s() * 0.7), Some(principal_icp_subaccount(&user_id)), id()).await {
-        Ok(canister_id) => canister_id,
-        Err(ledger_create_canister_error) => {
-            unlock_new_user(&user_id);
-            return Err(NewUserError::LedgerCreateCanisterError(ledger_create_canister_error));
-        }
-    };
+    if new_user_data.user_canister_install_code == false {
+        
+    }
+
  
-    
+ 
+ 
+ 
+ 
+ 
+ 
  
  
  
@@ -571,29 +661,13 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     put_new_user_into_the_users_map(user_id, user_data).await;
     
     // make log of this new-user-registration and put it into the user_canister
-    paid_with = CyclesOrIcp::Icp;
+   
     
     NewUserData {
         users_map_canister: ,
         user_canister: new_user_canister
     }
             
-
-    
-    match find_and_lock_user_option {
-        None => {
-
-        },
-        
-        Some((user_data, users_map_canister_id)) => {
-            
-        }
-    }
-    
-    
-    
-    
-    
     
 
     

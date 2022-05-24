@@ -64,7 +64,8 @@ use cts_lib::tools::sha256;
 
 pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
 
-pub const ICP_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
+pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
+pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 
 pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
 
@@ -397,13 +398,20 @@ pub async fn get_new_canister() -> Result<Principal, GetNewCanisterError> {
 
 
 #[derive(CandidType, Deserialize)]
+pub struct CmcNotifyCreateCanisterQuest {
+    block_index: IcpBlockHeight,
+    controller: Principal,
+}
+
+
+#[derive(CandidType, Deserialize)]
 struct NotifyTopUpArg {
     block_index: IcpBlockHeight,
     canister_id: Principal,
 }
 
 #[derive(CandidType, Deserialize)]
-pub enum NotifyError {
+pub enum CmcNotifyError {
     Refunded { block_index: Option<IcpBlockHeight>, reason: String },
     InvalidTransaction(String),
     Other{ error_message: String, error_code: u64 },
@@ -422,7 +430,7 @@ pub enum LedgerTopupCyclesError {
     CmcNotifyTopUpQuestCandidEncodeError { candid_error: String, topup_transfer_block_height: IcpBlockHeight },
     CmcNotifyCallError { notify_call_error: String, topup_transfer_block_height: IcpBlockHeight },
     CmcNotifySponseCandidDecodeError { candid_error: String, candid_bytes: Vec<u8>, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifyError{notify_error: NotifyError, topup_transfer_block_height: IcpBlockHeight},
+    CmcNotifyError{cmc_notify_error: CmcNotifyError, topup_transfer_block_height: IcpBlockHeight},
 }
 
 // make a public method to re-try a block-height
@@ -476,8 +484,8 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
         Ok(candid_bytes) => match decode_one::<NotifyTopUpResult>(&candid_bytes) {
             Ok(notify_topup_result) => match notify_topup_result {
                 Ok(cycles) => cycles,
-                Err(notify_error) => {
-                    return Err(LedgerTopupCyclesError::CmcNotifyError{notify_error: notify_error, topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index});
+                Err(cmc_notify_error) => {
+                    return Err(LedgerTopupCyclesError::CmcNotifyError{cmc_notify_error: cmc_notify_error, topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index});
                 }
             },
             Err(candid_error) => {
