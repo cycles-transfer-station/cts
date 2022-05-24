@@ -384,8 +384,8 @@ pub enum NewUserError{
         icp_ledger_transfer_fee: IcpTokens
     },
     FoundUserCanister(Principal),
-    UserIsLock,
-    UsersMapCanisterCallFail,
+    FindUserError,
+    PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
     LedgerCreateCanisterError(LedgerCreateCanisterError),
     
     
@@ -473,7 +473,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         
         let find_user_sponse: FindUserSponse = find_user(&user_id).await; 
         
-        let users_map_canister_data: (UserData, UsersMapCanisterId) = match find_user_sponse {
+        let users_map_canister_data: (UserData, Option<UsersMapCanisterId>) = match find_user_sponse {
             Ok((user_data, users_map_canister_id)) => {
                 if let Some(uc) = user_data.user_canister {
                     with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
@@ -490,23 +490,46 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 (user_data, Some(users_map_canister_id))
             },
             Err(find_and_lock_user_error) => match find_and_lock_user_error {
-                FindAndLockUserError::UserNotFound => {
-                    let user_data: UserData = UserData::new(); 
-                    let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(user_id, user_data).await;
-                    (UserData::new(), )
+                FindUserError::UserNotFound => {
+                    (UserData::new(), None)
                 },
-                FindAndLockUserError::UsersMapCanisterCallFail => {
-                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
-                    return Err(NewUserError::UsersMapCanisterCallFail);
-                },
-                FindAndLockUserError::UserIsLock => {
-                    with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
-                    return Err(NewUserError::UserIsLock);
+                FindUserError::UsersMapCanisterCallFail => {
+                    with_mut(&NEW_USERS, |nus| {
+                        match nus.get_mut() {
+                            Some(nud) => {
+                                new_user_data.lock = false;
+                                *nud = new_user_data;
+                            },
+                            None => {}
+                        }
+                    });
+                    return Err(NewUserError::FindUserError);
                 }
             }
         };
         
         new_user_data.users_map_canister_data = Some(users_map_canister_data);
+    }
+    
+    if new_user_data.users_map_canister_data.unwrap().1.is_none() {
+        
+        let users_map_canister_id: UsersMapCanisterId = put_new_user_into_a_users_map_canister(user_id, new_user_data.users_map_canister_data.unwrap().0).await {
+            Ok(umcid) => umcid,
+            Err(put_new_user_into_a_users_map_canister_error) => {
+                with_mut(&NEW_USERS, |nus| {
+                    match nus.get_mut() {
+                        Some(nud) => { 
+                            new_user_data.lock = false;
+                            *nud = new_user_data;
+                        },
+                        None => {}
+                    }
+                });
+                return Err(NewUserError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error));
+            }
+        };
+        
+        new_user_data.users_map_canister_data.unwrap().1 = Some(users_map_canister_id);
     }
     
     if new_user_data.create_user_canister_block_height.is_none() {
