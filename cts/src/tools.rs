@@ -123,7 +123,7 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
     icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
-            memo: ICP_TAKE_FEE_MEMO,
+            memo: ICP_FEE_MEMO,
             amount: icp,
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: Some(principal_icp_subaccount(user_id)),
@@ -512,7 +512,17 @@ pub enum LedgerCreateCanisterError {
 
 pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, controller: Principal) -> Result<Principal, LedgerCreateCanisterError> {
 
+}
 
+
+#[derive(CandidType, Deserialize)]
+pub enum UsersMapCanisterWriteUserDataError {
+    UsersMapCanisterCallFail((RejectionCode, String)),
+    UserNotFoundOnThisUsersMapCanister,
+}
+
+pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
+    call<>
 }
 
 

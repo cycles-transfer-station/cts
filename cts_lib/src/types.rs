@@ -1,15 +1,16 @@
-use crate::*;
 use crate::ic_ledger_types::*;
-use serde::Serialize;
 
-use candid::{
-    Principal,
-    CandidType,
-    Deserialize,
-    
+
+use ic_cdk::{
+    api::time,
+    export::{
+        Principal,
+        candid::{
+            CandidType,
+            Deserialize,   
+        }
+    }
 };
-
-use ic_cdk::api::time;
 
 
 
@@ -42,7 +43,7 @@ pub struct CyclesTransfer {
 pub struct UserData {
     pub cycles_balance: Cycles,
     pub untaken_icp_to_collect: IcpTokens,
-    pub ungiven_icp_to_give: IcpTokens,
+    //pub ungiven_icp_to_give: IcpTokens,
     pub user_canister: Option<Principal>,
 }
 
@@ -167,6 +168,7 @@ pub struct CyclesBankPurchaseLog {
 
 #[derive(CandidType, Deserialize)]
 pub struct UserCanisterInit {
-    pub user: Principal,
+    pub user_id: Principal,
+    pub users_map_canister_id: Principal,
     pub callers_whitelist: Vec<Principal>,
 }

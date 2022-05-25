@@ -1,5 +1,7 @@
-use crate::Principal;
-use ic_cdk::api::call::{RejectionCode, CallResult};
+use ic_cdk::{
+    api::call::{RejectionCode, CallResult},
+    export::Principal,
+};
 
 
 
