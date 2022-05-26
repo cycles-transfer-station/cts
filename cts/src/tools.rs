@@ -502,6 +502,8 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
 
 
 
+
+
 #[derive(CandidType, Deserialize)]
 pub enum LedgerCreateCanisterError {
     IcpTransferCallError(String),
@@ -515,6 +517,11 @@ pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpI
 }
 
 
+
+
+
+
+
 #[derive(CandidType, Deserialize)]
 pub enum UsersMapCanisterWriteUserDataError {
     UsersMapCanisterCallFail((RejectionCode, String)),
@@ -524,5 +531,46 @@ pub enum UsersMapCanisterWriteUserDataError {
 pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
     call<>
 }
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum PutNewUserIntoAUsersMapCanisterError {
+    UsersMapCanisterPutNewUserCallFail(Principal,(RejectionCode, String)), // principal of the failiing users-map-canister
+    NewUsersMapCanister,
+    
+    
+    
+    
+    
+}
+
+pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_data: UserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
+    
+    for i in 0 .. with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
+        let umc_id:usize = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
+        match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
+            umc_id,
+            "put_new_user",
+            (user_id, user_data),
+        ).await {
+            Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
+                Ok(_) => return Ok(umc_id),
+                Err(users_map_canister_put_new_user_error) => {} // users_map_canister is full
+            },
+            Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, users_map_canister_put_new_user_call_fail));
+        }
+        
+        // create a new users_map_canister
+        
+        
+    }
+
+    
+
+}
+
+
+
 
 

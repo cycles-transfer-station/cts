@@ -20,6 +20,7 @@
 // if a user requested cycles-transfer call takes-more than half an hour to come back, the user is not refunded any cycles the callee does'nt take
 
 // user does the main operations through the user_canister.
+// the user-lock is on the user-canister
 
 // each method is a contract
 
@@ -80,13 +81,12 @@ use cts_lib::{
 
     },
     tools::{
+        sha256,
         localkey_refcell::{
+            self,
             with, 
             with_mut,
-            as_ref,
-            
         },
-        sha256,
 
     },
     ic_ledger_types::{
@@ -226,7 +226,7 @@ pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
 pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
-pub const MAX_NEW_USER_LOCKS: usize = 5000;
+pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 
 
 
@@ -303,6 +303,8 @@ pub fn cycles_transfer() {
 
 
 
+
+
 #[derive(CandidType, Deserialize)]
 pub struct TopUpCyclesBalanceData {
     topup_cycles_transfer_canister: Principal,
@@ -312,7 +314,7 @@ pub struct TopUpCyclesBalanceData {
 #[derive(CandidType, Deserialize)]
 pub struct TopUpIcpBalanceData {
     topup_icp_id: IcpId
-} 
+}
 
 #[derive(CandidType, Deserialize)]
 pub struct TopUpBalanceData {
@@ -384,6 +386,24 @@ impl NewUserData {
 
 
 
+#[derive(CandidType, Deserialize)]
+pub enum NewUserMidCallError{
+    UsersMapCanisterFindUserCallFail,
+    PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
+    CreateUserCanisterIcpTransferError(IcpTransferError),
+    CreateUserCanisterIcpTransferCallError(String),
+    CreateUserCanisterCmcNotifyError(CmcNotifyError),
+    CreateUserCanisterCmcNotifyCallError(String),
+    UserCanisterCodeNotFound,
+    UserCanisterInstallCodeCallError(String),
+    UserCanisterStatusCallError(String),
+    UserCanisterModuleVerificationError,
+    UserCanisterStartCanisterCallError(String),
+    UsersMapCanisterWriteUserDataCallError(String),
+    IcpTransferCallError(String),
+    IcpTransferError(IcpTransferError),
+    
+}
 
 
 #[derive(CandidType, Deserialize)]
@@ -401,24 +421,8 @@ pub enum NewUserError{
         user_icp_balance: IcpTokens,
         icp_ledger_transfer_fee: IcpTokens
     },
-    
-    // re-try on these errors
-    FindUserError,
-    PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
-    CreateUserCanisterIcpTransferError(IcpTransferError),
-    CreateUserCanisterIcpTransferCallError(String),
     CreateUserCanisterCmcNotifyError(CmcNotifyError),
-    CreateUserCanisterCmcNotifyCallError(String),
-    UserCanisterCodeNotFound,
-    UserCanisterInstallCodeCallError(String),
-    UserCanisterStatusCallError(String),
-    UserCanisterModuleVerificationError,
-    UserCanisterStartCanisterCallError(String),
-    UsersMapCanisterWriteUserDataCallError(String),
-    IcpTransferCallError(String),
-    IcpTransferError(IcpTransferError),
-    
-    
+    MidCallError(NewUserMidCallError),    // re-try the call on this sponse
 }
 
 #[derive(CandidType, Deserialize)]
@@ -427,6 +431,16 @@ pub enum NewUserSuccessData {
     user_canister: Principal,
 }
 
+
+fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
+    with_mut(&NEW_USERS, |new_users| {
+        match new_users.get_mut(user_id) {
+            Some(nud) => { *nud = new_user_data; },
+            None => {}
+        }
+    });
+    
+}
 
 // for the now a user must sign-up/register with the icp.
 #[update]
@@ -446,7 +460,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 new_user_data = *nud; // copy
             },
             None => {
-                if new_users.len() >= MAX_NEW_USERS { // >= in case somehow more new_user_locks end up in the list from somewhere else 
+                if new_users.len() >= MAX_NEW_USERS {
                     trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
                 }
                 let nud: NewUsersData = NewUsersData::new();
@@ -455,6 +469,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             }
         }
     });
+
 
     if new_user_data.user_icp_ledger_balance.is_none() || new_user_data.current_xdr_icp_rate.is_none() {
 
@@ -497,7 +512,8 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.current_xdr_icp_rate = Some(current_xdr_icp_rate); 
         // after this, use new_user_data.field to use the data
     }
-        
+
+
     if new_user_data.users_map_canister_data == None {
         
         let find_user_sponse: FindUserSponse = find_user(&user_id).await; 
@@ -518,21 +534,14 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 }
                 (user_data, Some(users_map_canister_id))
             },
-            Err(find_and_lock_user_error) => match find_and_lock_user_error {
+            Err(find_user_error) => match find_user_error {
                 FindUserError::UserNotFound => {
                     (UserData::new(), None)
                 },
                 FindUserError::UsersMapCanisterCallFail => {
-                    with_mut(&NEW_USERS, |nus| {
-                        match nus.get_mut() {
-                            Some(nud) => {
-                                new_user_data.lock = false;
-                                *nud = new_user_data;
-                            },
-                            None => {}
-                        }
-                    });
-                    return Err(NewUserError::FindUserError);
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterFindUserCallFail));
                 }
             }
         };
@@ -540,27 +549,22 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.users_map_canister_data = Some(users_map_canister_data);
     }
     
+
     if new_user_data.users_map_canister_data.unwrap().1.is_none() {
         
         let users_map_canister_id: UsersMapCanisterId = put_new_user_into_a_users_map_canister(user_id, new_user_data.users_map_canister_data.unwrap().0).await {
             Ok(umcid) => umcid,
             Err(put_new_user_into_a_users_map_canister_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut() {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error));
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
             }
         };
         
         new_user_data.users_map_canister_data.unwrap().1 = Some(users_map_canister_id);
     }
     
+
     if new_user_data.create_user_canister_block_height.is_none() {
         let create_user_canister_block_height: IcpBlockHeight = match icp_transfer(
             MAINNET_LEDGER_CANISTER_ID,
@@ -576,36 +580,25 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             Ok(transfer_result) => match transfer_result {
                 Ok(block_height) => block_height,
                 Err(transfer_error) => {
-                    with_mut(&NEW_USERS, |nus| {
-                        match nus.get_mut() {
-                            Some(nud) => { 
-                                new_user_data.lock = false;
-                                *nud = new_user_data;
-                            },
-                            None => {}
-                        }
-                    });
-                    return Err(NewUserError::CreateUserCanisterIcpTransferError(transfer_error));                    
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferError(transfer_error)));                    
                 }
             },
             Err(transfer_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut() {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::CreateUserCanisterIcpTransferCallError(format!("{:?}", transfer_call_error)));
+                // match on the transfer_call_error?
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferCallError(format!("{:?}", transfer_call_error))));
             }
         };
     
         new_user_data.create_user_canister_block_height = Some(create_user_canister_block_height);
     }
 
+
     if new_user_data.users_map_canister_data.unwrap().0.user_canister.is_none() {
+    
         let user_canister: Principal = match call<(Result<Principal, CmcNotifyError>,)>(
             MAINNET_CYCLES_MINTING_CANISTER_ID,
             "notify_create_canister",
@@ -617,37 +610,37 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             Ok(notify_result) => match notify_result {
                 Ok(new_canister_id) => new_canister_id,
                 Err(cmc_notify_error) => {
-                    // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map. 
-                    
-                    with_mut(&NEW_USERS, |nus| {
-                        match nus.get_mut() {
-                            Some(nud) => { 
-                                new_user_data.lock = false;
-                                *nud = new_user_data;
-                            },
-                            None => {}
-                        }
-                    });
-                    return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
+                    // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
+                    match cmc_notify_error {
+                        CmcNotifyError::TransactionTooOld(block_height) 
+                        | CmcNotifyError::InvalidTransaction(string),
+                        | CmcNotifyError::Refunded { block_index: optional_refund_block_height, reason: reason_string },
+                        => {
+                            with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
+                            return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
+                        },
+                        | CmcNotifyError::Other{ error_message, error_code }, 
+                        | CmcNotifyError::Processing,
+                        => {
+                            new_user_data.lock = false;
+                            write_new_user_data(&user_id, new_user_data);
+                            return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyError(cmc_notify_error)));   
+                        },
+                    }                    
                 }
             },
             Err(cmc_notify_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut() {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::CreateUserCanisterCmcNotifyCallError(format!("{:?}", cmc_notify_call_error)));
+                // match on the call errors?
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyCallError(format!("{:?}", cmc_notify_call_error))));
             }      
         };
         
         new_user_data.users_map_canister_data.unwrap().0.user_canister = Some(user_canister);
         new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
+
 
     if new_user_data.user_canister_uninstall_code == false {
         
@@ -658,35 +651,22 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         ).await {
             Ok(_) => {},
             Err(uninstall_code_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::UserCanisterUninstallCodeCallError(format!("{:?}", uninstall_code_call_error)));
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUninstallCodeCallError(format!("{:?}", uninstall_code_call_error))));
             }
         }
         
         new_user_data.user_canister_uninstall_code = true;
     }
 
+
     if new_user_data.user_canister_install_code == false {
     
         if with(USER_CANISTER_CODE, |ucc| { ucc.is_none() }) {
-            with_mut(&NEW_USERS, |nus| {
-                match nus.get_mut(&user_id) {
-                    Some(nud) => { 
-                        new_user_data.lock = false;
-                        *nud = new_user_data;
-                    },
-                    None => {}
-                }
-            });
-            return Err(NewUserError::UserCanisterCodeNotFound);
+            new_user_data.lock = false;
+            write_new_user_data(&user_id, new_user_data);
+            return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
         }
 
         let ucc_module_pointer: *const Vec<u8> = USER_CANISTER_CODE.with(|ucc_refcell| { (*ucc_refcell.borrow()).module() as *const Vec<u8> });
@@ -703,22 +683,16 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         ).await {
             Ok(_) => {},
             Err(put_code_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => {
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::UserCanisterInstallCodeCallError(format!("{:?}", put_code_call_error)));
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterInstallCodeCallError(format!("{:?}", put_code_call_error))));
             }
         }
         
         new_user_data.user_canister_install_code = true;
     }
     
+
     if new_user_data.user_canister_status_record.is_none() {
         
         let canister_status_record: ManagementCanisterCanisterStatusRecord = match call(
@@ -728,16 +702,9 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         ).await {
             Ok((canister_status_record,)) => canister_status_record,
             Err(canister_status_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::UserCanisterStatusCallError(format!("{:?}", canister_status_call_error)));
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError(format!("{:?}", canister_status_call_error))));
             }
         };
         
@@ -750,20 +717,13 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.user_canister_uninstall_code = false;                                  
         new_user_data.user_canister_install_code = false;
         new_user_data.user_canister_status_record = None;
-        
-        with_mut(&NEW_USERS, |nus| {
-            match nus.get_mut(&user_id) {
-                Some(nud) => { 
-                    new_user_data.lock = false;
-                    *nud = new_user_data;
-                },
-                None => {}
-            }
-        });
-        return Err(NewUserError::UserCanisterModuleVerificationError);
+        new_user_data.lock = false;
+        write_new_user_data(&user_id, new_user_data);
+        return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterModuleVerificationError));
     
     }
     
+
     if new_user_data.user_canister_status_record.unwrap().status != ManagementCanisterCanisterStatusVariant::running {
     
         match call<(,)>(
@@ -775,21 +735,15 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 new_user_data.user_canister_status_record.unwrap().status = ManagementCanisterCanisterStatusVariant::running; 
             },
             Err(start_canister_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::UserCanisterStartCanisterCallError(format!("{:?}", start_canister_call_error)));
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStartCanisterCallError(format!("{:?}", start_canister_call_error))));
             }
         }
         
     }
     
+
     if new_user_data.users_map_canister_write_user_data == false {
         
         match users_map_canister_write_user_data(
@@ -810,16 +764,9 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                         //something is wrong if this happens.
                     }
                 }
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::UsersMapCanisterWriteUserDataCallError(call_error_text));          
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterWriteUserDataCallError(call_error_text)));          
             }
         }
 
@@ -840,38 +787,24 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                     new_user_data.collect_icp = true;
                 },
                 Err(icp_transfer_error) => {
-                    match icp_transfer_error {
-                        IcpTransferError::BadFee{expected_fee: icptokens} => {},
-                        _ => {},
-                    }
-                    with_mut(&NEW_USERS, |nus| {
-                        match nus.get_mut(&user_id) {
-                            Some(nud) => { 
-                                new_user_data.lock = false;
-                                *nud = new_user_data;
-                            },
-                            None => {}
-                        }
-                    });
-                    return Err(NewUserError::IcpTransferError(icp_transfer_error));          
+                    //match icp_transfer_error {
+                    //    IcpTransferError::BadFee{expected_fee: icptokens} => {},
+                    //_ => {},
+                    //}
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::IcpTransferError(icp_transfer_error)));          
                 }
             }, 
             Err(icp_transfer_call_error) => {
-                with_mut(&NEW_USERS, |nus| {
-                    match nus.get_mut(&user_id) {
-                        Some(nud) => { 
-                            new_user_data.lock = false;
-                            *nud = new_user_data;
-                        },
-                        None => {}
-                    }
-                });
-                return Err(NewUserError::IcpTransferCallError(format!("{:?}", icp_transfer_call_error)));          
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::IcpTransferCallError(format!("{:?}", icp_transfer_call_error))));          
             }               
         }
     }
-    
-    
+
+
     with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
     
     Ok(NewUserSuccessData {
@@ -892,8 +825,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 pub fn see_users_map_canisters() {
     ic_cdk::api::call::reply::<(&Vec<Principal>,)>((unsafe { localkey_refcell::get(&USERS_MAP_CANISTERS) },))
 }
-
-
 
 
 
