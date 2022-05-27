@@ -25,6 +25,14 @@
 // each method is a contract
 
 
+// icp transfers , 0.10-xdr / 14-cents flat fee
+
+
+
+
+
+
+
 
 //#![allow(unused)] // take this out when done
 #![allow(non_camel_case_types)]
@@ -79,6 +87,9 @@ use cts_lib::{
         CyclesTransfer,
         CyclesTransferMemo,
 
+    },
+    consts::{
+        MANAGEMENT_CANISTER_ID,
     },
     tools::{
         sha256,
@@ -150,6 +161,8 @@ use tools::{
     CmcNotifyError,
     CmcNotifyCreateCanisterQuest,
     users_map_canister_write_user_data,
+    PutNewUserIntoAUsersMapCanisterError,
+    put_new_user_into_a_users_map_canister,
     
     
     
@@ -223,11 +236,11 @@ pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
 
 
 
-pub const MANAGEMENT_CANISTER_PRINCIPAL: Principal = Principal::management_canister();
+
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
-
+pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
 
 
@@ -451,7 +464,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     
     with_mut(&NEW_USERS, |new_users| {
         match new_users.get_mut(&user_id) {
-            Some(nud) => {
+            Some(mut nud) => {
                 if nud.lock == true {
                     trap("new user is in the middle of another call")
                 }
@@ -515,10 +528,8 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
 
     if new_user_data.users_map_canister_data == None {
-        
-        let find_user_sponse: FindUserSponse = find_user(&user_id).await; 
-        
-        let users_map_canister_data: (UserData, Option<UsersMapCanisterId>) = match find_user_sponse {
+                
+        let users_map_canister_data: (UserData, Option<UsersMapCanisterId>) = match find_user(&user_id).await {
             Ok((user_data, users_map_canister_id)) => {
                 if let Some(uc) = user_data.user_canister {
                     with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
@@ -1395,6 +1406,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
         }
     }
 
+    // change to a create with the ledger_canister
     let cycles_bank_principal: Principal = match get_new_canister().await {
         Ok(p) => p,
         Err(e) => {

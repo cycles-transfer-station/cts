@@ -24,51 +24,56 @@ use ic_cdk::{
 use crate::{
     USERS_DATA,
     NEW_CANISTERS,
-    UserLock,
-    UserData,
-    IcpId,
-    IcpIdSub,
-    IcpTokens,
-    IcpAccountBalanceArgs,
-    IcpBlockHeight,
-    IcpTimestamp,
-    IcpTransferArgs,
-    icp_transfer,
-    IcpTransferResult,
-    IcpTransferError,
-    IcpMemo,
-    icp_account_balance,
-    ICP_DEFAULT_SUBACCOUNT,
-    MAINNET_LEDGER_CANISTER_ID,
-    MAINNET_CYCLES_MINTING_CANISTER_ID,
-    MANAGEMENT_CANISTER_PRINCIPAL,
-    Cycles,
-    ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-    LatestKnownCmcRate,
     LATEST_KNOWN_CMC_RATE,
-    with,
-    with_mut,
-    
-
-    
-
-
+    MAX_USERS_MAP_CANISTERS
+    LatestKnownCmcRate
 };
 
-use cts_lib::tools::sha256;
+use cts_lib::{
+    types::{
+        UserLock,
+        UserData,
+        Cycles,
+        UsersMapCanisterInit,
+    },
+    consts::{
+        MANAGEMENT_CANISTER_ID
+    },
+    tools::{
+        sha256,
+        localkey_refcell::{self, with, with_mut}
+    },
+    ic_ledger_types::{
+        IcpId,
+        IcpIdSub,
+        IcpTokens,
+        IcpAccountBalanceArgs,
+        IcpBlockHeight,
+        IcpTimestamp,
+        IcpTransferArgs,
+        icp_transfer,
+        IcpTransferResult,
+        IcpTransferError,
+        IcpMemo,
+        icp_account_balance,
+        ICP_DEFAULT_SUBACCOUNT,
+        MAINNET_LEDGER_CANISTER_ID,
+        MAINNET_CYCLES_MINTING_CANISTER_ID,
+        ICP_LEDGER_TRANSFER_DEFAULT_FEE
+    }
+};
 
 
 
+
+
+pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
+pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
+pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
 
 
 
 pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
-
-pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
-pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
-
-pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
-
 
 
 
@@ -284,6 +289,13 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 }
 
 
+
+
+
+
+
+
+
 #[derive(CandidType, Deserialize)]
 pub struct ManagementCanisterCreateCanisterQuest {
     settings : Option<ManagementCanisterOptionalCanisterSettings>
@@ -340,36 +352,37 @@ pub enum GetNewCanisterError {
     CreateCanisterManagementCallError(String)
 }
 
-pub async fn get_new_canister() -> Result<Principal, GetNewCanisterError> {
+pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
     
-    if let Some(principal) = NEW_CANISTERS.with(|nc| nc.borrow_mut().pop()) {
+    if let Some(principal) = with_mut(&NEW_CANISTERS, |new_canisters| new_canisters.pop()) {
+        // get status
+        
+        // make sure is empty
+
+        // make sure is running 
+        
+        // update settings if different
+        
+        // put cycles (or take cycles? later.) if not enough
+        
+        // if any of the above fail , create with the create_canister function
+    
         return Ok(principal);
     } 
 
-    let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(
-        &ManagementCanisterCreateCanisterQuest {
-            settings: Some(ManagementCanisterOptionalCanisterSettings{
-                controllers: Some(vec![ic_cdk::api::id()]),
-                compute_allocation : None,
-                memory_allocation : None,
-                freezing_threshold : None
-            })
-        }
-    ) {
+    let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(&ManagementCanisterCreateCanisterQuest { settings: optional_canister_settings }) {
         Ok(candid_bytes) => candid_bytes,
         Err(candid_error) => {
-            return Err(GetNewCanisterError::CreateCanisterManagementCallQuestCandidError(format!("{}", candid_error)))
+            return Err(GetNewCanisterError::CreateCanisterManagementCallQuestCandidError(format!("{}", candid_error)));
         }
     };
 
-    let create_canister_management_call: CallResult<Vec<u8>> = call_raw128(
+    let canister_id: Principal = match CallResult<Vec<u8>> = call_raw128(
         MANAGEMENT_CANISTER_PRINCIPAL,
         "create_canister",
         &create_canister_management_call_quest_candid_bytes,
-        100_000_000_000/*create_canister-cost*/ + 501_000_000_000 
-    ).await;
-
-    let canister_principal: Principal = match create_canister_management_call {
+        100_000_000_000/*create_canister-cost*/ + with_cycles
+    ).await {
         Ok(call_sponse_candid_bytes) => match decode_one::<CanisterIdRecord>(&call_sponse_candid_bytes) {
             Ok(canister_id_record) => canister_id_record.canister_id,
             Err(candid_error) => {
@@ -381,7 +394,7 @@ pub async fn get_new_canister() -> Result<Principal, GetNewCanisterError> {
         }
     };
 
-    Ok(canister_principal)
+    Ok(canister_id)
 
 }
 
@@ -427,16 +440,16 @@ type NotifyTopUpResult = Result<Cycles, NotifyError>;
 pub enum LedgerTopupCyclesError {
     IcpTransferCallError(String),
     IcpTransferError(IcpTransferError),
-    CmcNotifyTopUpQuestCandidEncodeError { candid_error: String, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifyCallError { notify_call_error: String, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifySponseCandidDecodeError { candid_error: String, candid_bytes: Vec<u8>, topup_transfer_block_height: IcpBlockHeight },
+    CmcNotifyTopUpQuestCandidEncodeError{candid_error: String, topup_transfer_block_height: IcpBlockHeight },
+    CmcNotifySponseCandidDecodeError{candid_error: String, candid_bytes: Vec<u8>, topup_transfer_block_height: IcpBlockHeight },
+    CmcNotifyCallError{notify_call_error: String, topup_transfer_block_height: IcpBlockHeight },
     CmcNotifyError{cmc_notify_error: CmcNotifyError, topup_transfer_block_height: IcpBlockHeight},
 }
 
 // make a public method to re-try a block-height
 pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, topup_canister: Principal) -> Result<Cycles, LedgerTopupCyclesError> {
 
-    let topup_cycles_icp_transfer_call: CallResult<IcpTransferResult> = icp_transfer(
+    let topup_cycles_icp_transfer_call_block_index: IcpBlockHeight = match icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
             memo: ICP_TOP_UP_CANISTER_MEMO,
@@ -446,9 +459,7 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
             to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&topup_canister)),
             created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
         }
-    ).await; 
-    
-    let topup_cycles_icp_transfer_call_block_index: IcpBlockHeight = match topup_cycles_icp_transfer_call {
+    ).await {
         Ok(transfer_call_sponse) => match transfer_call_sponse {
             Ok(block_index) => block_index,
             Err(transfer_error) => {
@@ -474,13 +485,12 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
         }
     };
 
-    let topup_cycles_cmc_notify_call: CallResult<Vec<u8>> = call_raw128(
+    let cycles: Cycles = match call_raw128(
         MAINNET_CYCLES_MINTING_CANISTER_ID,
         "notify_top_up",
         &topup_cycles_cmc_notify_call_candid,
         0
-    ).await;
-    let cycles: Cycles = match topup_cycles_cmc_notify_call {
+    ).await {
         Ok(candid_bytes) => match decode_one::<NotifyTopUpResult>(&candid_bytes) {
             Ok(notify_topup_result) => match notify_topup_result {
                 Ok(cycles) => cycles,
@@ -503,7 +513,7 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
 
 
 
-
+/*
 #[derive(CandidType, Deserialize)]
 pub enum LedgerCreateCanisterError {
     IcpTransferCallError(String),
@@ -515,6 +525,8 @@ pub enum LedgerCreateCanisterError {
 pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, controller: Principal) -> Result<Principal, LedgerCreateCanisterError> {
 
 }
+*/
+
 
 
 
@@ -529,26 +541,29 @@ pub enum UsersMapCanisterWriteUserDataError {
 }
 
 pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
-    call<>
+    
 }
+
+
+
+
 
 
 
 #[derive(CandidType, Deserialize)]
 pub enum PutNewUserIntoAUsersMapCanisterError {
     UsersMapCanisterPutNewUserCallFail(Principal,(RejectionCode, String)), // principal of the failiing users-map-canister
-    NewUsersMapCanister,
-    
-    
-    
+    UsersMapCanisterPutNewUserError(UsersMapCanisterPutNewUserError),
+    CreateNewUsersMapCanisterError(CreateNewUsersMapCanisterError),
+
     
     
 }
 
 pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_data: UserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
     
-    for i in 0 .. with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
-        let umc_id:usize = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
+    for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
+        let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
         match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
             umc_id,
             "put_new_user",
@@ -556,21 +571,124 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_dat
         ).await {
             Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
                 Ok(_) => return Ok(umc_id),
-                Err(users_map_canister_put_new_user_error) => {} // users_map_canister is full
+                Err(users_map_canister_put_new_user_error) => match users_map_canister_put_new_user_error {
+                    UsersMapCanisterPutNewUserError::CanisterIsFull => continue,
+                    _ => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error)) /*error can be that the user is already in the canister. the new_user function should have locked the user and checked for the user first before calling this function.  */
+                } 
             },
-            Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, users_map_canister_put_new_user_call_fail));
+            Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, users_map_canister_put_new_user_call_fail)),
         }
-        
-        // create a new users_map_canister
-        
-        
     }
-
+    
+    // if each users_map_canister is full,
+    // create a new users_map_canister
+    let umc_id: UsersMapCanisterId = match create_new_users_map_canister().await {
+        Ok(new_users_map_canister_id) => new_users_map_canister_id,
+        Err(create_new_users_map_canister_error) => return Err(PutNewUserIntoAUsersMapCanisterError::CreateNewUsersMapCanisterError(create_new_users_map_canister_error))
+    };
+    
+    match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
+        umc_id,
+        "put_new_user",
+        (user_id, user_data),
+    ).await {
+        Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
+            Ok(_) => return Ok(umc_id),
+            Err(users_map_canister_put_new_user_error) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error))
+        },
+        Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, users_map_canister_put_new_user_call_fail)),
+    }
     
 
 }
 
 
+
+pub enum CreateNewUsersMapCanisterError {
+    MaxUsersMapCanisters,
+    CreateNewUsersMapCanisterLockIsOn,
+    GetNewCanisterError(GetNewCanisterError),
+    UsersMapCanisterCodeNotFound,
+    InstallCodeCallError(String)
+}
+
+pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, CreateNewUsersMapCanisterError> {
+    if with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) >= MAX_USERS_MAP_CANISTERS {
+        return Err(CreateNewUsersMapCanisterError::MaxUsersMapCanisters);
+    }
+    
+    if CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| l.get()) == true {
+        return Err(CreateNewUsersMapCanisterError::CreateNewUsersMapCanisterLockIsOn);
+    }
+    CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(true); });
+    
+    let new_users_map_canister_id: Principal = match get_new_canister(
+        Some(ManagementCanisterOptionalCanisterSettings{
+            controllers : None,
+            compute_allocation : None,
+            memory_allocation : 1024*1024*1024,
+            freezing_threshold : None,
+        }),
+        7_000_000_000_000
+    ).await {
+        Ok(canister_id) => canister_id,
+        Err(get_new_canister_error) => Err(return CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error))
+    }    
+    
+    // install code
+    if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.is_none()) {
+        return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
+    }
+    
+    match call<(,)>(
+        MANAGEMENT_CANISTER_ID,
+        "install_code",
+        (ManagementCanisterInstallCodeQuest{
+            mode : ManagementCanisterInstallCodeMode::install,
+            canister_id : new_users_map_canister_id,
+            wasm_module : unsafe localkey_refcell::get(&USERS_MAP_CANISTER_CODE).unwrap().module(),   // .unwrap bc we checked if .is_none() before
+            arg : &encode_one(&UsersMapCanisterInit{
+                cts_id: id()
+            }).unwrap() // unwrap or return Err(candiderror); 
+        },)
+    ).await {
+        Ok(_) => {
+            with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { users_map_canisters.push(new_users_map_canister_id); }) 
+            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+            Ok(new_users_map_canister_id)    
+        },
+        Err(install_code_call_error) => return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)))
+    }
+}
+
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum FindUserError {
+    UserNotFound,
+    UsersMapCanisterFindUserCallFail(Principal,(RejectionCode,String))
+}
+
+pub async fn find_user(user_id: Principal) -> Result<(UserData, UsersMapCanisterId), FindUserError> {
+    
+    for i in 0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
+        let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
+        match call<(Option<UserData>,)>(
+            umc_id,
+            "find_user",
+            (user_id,)
+        ).await {
+            Ok(optional_user_data) => match optional_user_data {
+                Some(user_data) => return Ok((user_data, umc_id)),
+                None => continue
+            },
+            Err(find_user_call_error) => return Err(FindUserError::UsersMapCanisterFindUserCallFail(umc_id, find_user_call_error)) 
+        }
+    }
+    
+    Err(FindUserError::UserNotFound)
+}
 
 
 

@@ -172,3 +172,8 @@ pub struct UserCanisterInit {
     pub users_map_canister_id: Principal,
     pub callers_whitelist: Vec<Principal>,
 }
+
+#[derive(CandidType, Deserialize)]
+pub struct UsersMapCanisterInit {
+    pub cts_id: Principal
+}

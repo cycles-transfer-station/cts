@@ -182,16 +182,41 @@ pub fn get_and_lock(user_id:&Principal) -> Result<UserData, GetAndLockError> {
 
 
 
-
-
-
-
-
 #[query]
 pub fn see_allocated_bytes() -> usize {
     check_caller();
     get_allocated_bytes_count()
 }
+
+
+
+
+
+
+
+
+pub enum PutNewUserError {
+    CanisterIsFull,
+    FoundUser(UserData),
+}
+
+#[update]
+pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNewUserError> {
+    if is_full() {
+        return Err(PutNewUserError::CanisterIsFull);
+    }
+    with_mut(&USERS_MAP, |users_map| {
+        match users_map.get(&user_id) {
+            Some(user_data) => return Err(PutNewUserError::FoundUser(*user_data)),
+            None => {
+                users_map.insert(user_id, user_data);
+                Ok(())
+            }
+        }
+    })
+}
+
+
 
 
 
