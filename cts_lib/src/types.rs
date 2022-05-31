@@ -170,7 +170,7 @@ pub struct CyclesBankPurchaseLog {
 pub struct UserCanisterInit {
     pub user_id: Principal,
     pub users_map_canister_id: Principal,
-    pub callers_whitelist: Vec<Principal>,
+    pub cts_id: Principal,
 }
 
 #[derive(CandidType, Deserialize)]

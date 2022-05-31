@@ -9,16 +9,18 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-ic-cdk = "0.5.0"
-ic-cdk-macros = "0.5.0"
+global_allocator_counter = { path = "../global_allocator_counter" } 
+cts_lib = { path = "../cts_lib" }
+users_map_canister = { path = "../users_map_canister" }
+
+ic-cdk = { git = "https://github.com/dfinity/cdk-rs", rev = "a080645844d2c761639707a58e51d400543eabce" }
+ic-cdk-macros = { git = "https://github.com/dfinity/cdk-rs", rev = "a080645844d2c761639707a58e51d400543eabce" }
 ic-certified-map = { git = "https://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
 candid = "0.7.11"
+
 sha2 = "0.9.1"
 serde = "1.0.136"
 serde_cbor = "0.11.2"
 base64 = "0.13.0"
-global_allocator_counter = { path = "../global_allocator_counter" } 
-cts_lib = { path = "../cts_lib" }
 futures = "0.3.21"
-# wasabi_leb128 = "0.4.0" # want this?
 

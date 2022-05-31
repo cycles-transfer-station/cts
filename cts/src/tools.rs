@@ -365,7 +365,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
         
         // put cycles (or take cycles? later.) if not enough
         
-        // if any of the above fail , create with the create_canister function
+        // if any of the above fail , create with the create_canister function and put the canister back into the new-canisters
     
         return Ok(principal);
     } 
@@ -393,6 +393,8 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
             return Err(GetNewCanisterError::CreateCanisterManagementCallError(format!("{:?}", call_error)));
         }
     };
+    
+    // are new canisters running?
 
     Ok(canister_id)
 
@@ -534,20 +536,6 @@ pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpI
 
 
 
-#[derive(CandidType, Deserialize)]
-pub enum UsersMapCanisterWriteUserDataError {
-    UsersMapCanisterCallFail((RejectionCode, String)),
-    UserNotFoundOnThisUsersMapCanister,
-}
-
-pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
-    
-}
-
-
-
-
-
 
 
 #[derive(CandidType, Deserialize)]
@@ -560,6 +548,7 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
     
 }
 
+// this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
 pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_data: UserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
     
     for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
@@ -626,7 +615,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         Some(ManagementCanisterOptionalCanisterSettings{
             controllers : None,
             compute_allocation : None,
-            memory_allocation : 1024*1024*1024,
+            memory_allocation : 1024*1024*100,
             freezing_threshold : None,
         }),
         7_000_000_000_000
@@ -637,6 +626,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     
     // install code
     if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.is_none()) {
+        with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push(new_users_map_canister_id); });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
     
@@ -657,9 +647,14 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
             CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
             Ok(new_users_map_canister_id)    
         },
-        Err(install_code_call_error) => return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)))
+        Err(install_code_call_error) => {
+            with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push(new_users_map_canister_id); });
+            return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
+        }
     }
 }
+
+
 
 
 
@@ -689,6 +684,40 @@ pub async fn find_user(user_id: Principal) -> Result<(UserData, UsersMapCanister
     
     Err(FindUserError::UserNotFound)
 }
+
+
+
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum UsersMapCanisterWriteUserDataError {
+    UsersMapCanisterCallFail((RejectionCode, String)),
+    UserNotFoundOnThisUsersMapCanister,
+}
+
+pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
+    match call<((),)>(
+        users_map_canister_id,
+        "write_user_data",
+        (user_id, user_data)
+    ).await {
+        Ok(write_user_data_sponse) => match write_user_data_sponse {
+            Ok(()) => Ok(()),
+            Err(write_user_data_error) => match write_user_data_error {
+                WriteUserDataError::UserNotFound => Err(UsersMapCanisterWriteUserDataError::UserNotFoundOnThisUsersMapCanister)
+            }
+        },
+        Err(write_user_data_call_error) => Err(UsersMapCanisterWriteUserDataError::UsersMapCanisterCallFail(write_user_data_call_error))
+    }
+}
+
+
+
+
+
+
+
 
 
 

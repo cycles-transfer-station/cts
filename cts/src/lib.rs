@@ -28,6 +28,10 @@
 // icp transfers , 0.10-xdr / 14-cents flat fee
 
 
+// tegrate with the icscan.io
+
+
+
 
 
 
@@ -119,6 +123,7 @@ use cts_lib::{
         IcpAccountBalanceArgs
     }
 };
+
 
 #[cfg(test)]
 mod t;

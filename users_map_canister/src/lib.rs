@@ -195,6 +195,18 @@ pub fn see_allocated_bytes() -> usize {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 pub enum PutNewUserError {
     CanisterIsFull,
     FoundUser(UserData),
@@ -207,7 +219,7 @@ pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNe
     }
     with_mut(&USERS_MAP, |users_map| {
         match users_map.get(&user_id) {
-            Some(user_data) => return Err(PutNewUserError::FoundUser(*user_data)),
+            Some(user_data) => Err(PutNewUserError::FoundUser(*user_data)),
             None => {
                 users_map.insert(user_id, user_data);
                 Ok(())
@@ -219,4 +231,27 @@ pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNe
 
 
 
+pub enum WriteUserDataError {
+    UserNotFound,
+}
+
+#[update]
+pub fn write_user_data(user_id: Principal, user_data: UserData) -> Result<(), WriteUserDataError> {
+    with_mut(&USERS_MAP, |users_map| {
+        match users_map.get(&user_id) {
+            Some(ud) => { 
+                *ud = user_data;
+                Ok(())
+            },
+            None => Err(WriteUserDataError::UserNotFound)
+        }
+    })
+} 
+
+
+
+#[query]
+pub fn find_user(user_id: Principal) -> Option<&UserData> {
+    with(&USERS_MAP, |users_map| users_map.get(&user_id))
+}
 
