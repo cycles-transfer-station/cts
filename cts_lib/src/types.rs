@@ -150,18 +150,18 @@ impl UserLock {
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub struct CyclesTransferPurchaseLog {
     pub canister: Principal,
-    pub cycles_sent: u128,
-    pub cycles_accepted: u128, // 64?
-    pub cycles_transfer: CyclesTransfer,
+    pub cycles_sent: Cycles,
+    pub cycles_accepted: Cycles,
+    pub cycles_transfer: CyclesTransfer, //memo?
     pub timestamp: u64,
 }
 
 #[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
 pub struct CyclesBankPurchaseLog {
     pub cycles_bank_principal: Principal,
-    pub cost_cycles: u128,
+    pub cost_cycles: Cycles,
     pub timestamp: u64,
-    // module_hash?
+    // cycles-bank-module_hash?
 }
 
 
