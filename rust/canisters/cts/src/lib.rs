@@ -80,8 +80,6 @@ use ic_cdk::{
 };
 use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
 
-use global_allocator_counter::get_allocated_bytes_count;
-
 use cts_lib::{
     types::{
         UserData,
@@ -121,7 +119,8 @@ use cts_lib::{
         IcpTransferError,
         icp_account_balance,
         IcpAccountBalanceArgs
-    }
+    },
+    global_allocator_counter::get_allocated_bytes_count,
 };
 
 
