@@ -2,10 +2,10 @@
 [workspace]
 
 members = [
-	"cts_lib",
-	"canisters/cycles-bank",
-	"canisters/cts",
-	"canisters/users_map_canister",
+    "cts_lib",
+    "canisters/cycles-bank",
+    "canisters/cts",
+    "canisters/users_map_canister",
     "canisters/user_canister",
     "canisters/cycles_transferrer",
     "canisters/cycles_market",

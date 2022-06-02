@@ -660,12 +660,12 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
 
 
 #[derive(CandidType, Deserialize)]
-pub enum FindUserError {
+pub enum UsersMapCanisterFindUserError {
     UserNotFound,
     UsersMapCanisterFindUserCallFail(Principal,(RejectionCode,String))
 }
 
-pub async fn find_user(user_id: Principal) -> Result<(UserData, UsersMapCanisterId), FindUserError> {
+pub async fn users_map_canister_find_user(user_id: Principal) -> Result<(UserData, UsersMapCanisterId), FindUserError> {
     
     for i in 0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
         let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);

@@ -274,7 +274,7 @@ thread_local! {
 
 
 #[export_name="canister_update cycles_transfer"]
-pub fn cycles_transfer() {
+pub async fn cycles_transfer() {
     if arg_data_raw_size() > 100 {
         trap("arg_data_raw_size can be max 100 bytes")
     }
@@ -553,7 +553,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
     if new_user_data.users_map_canister_data == None {
                 
-        let users_map_canister_data: (UserData, Option<UsersMapCanisterId>) = match find_user(&user_id).await {
+        let users_map_canister_data: (UserData, Option<UsersMapCanisterId>) = match users_map_canister_find_user(&user_id).await {
             Ok((user_data, users_map_canister_id)) => {
                 if let Some(uc) = user_data.user_canister {
                     with_mut(&NEW_USERS, |nus| { nus.remove(user_id); });
@@ -570,10 +570,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 (user_data, Some(users_map_canister_id))
             },
             Err(find_user_error) => match find_user_error {
-                FindUserError::UserNotFound => {
+                UsersMapCanisterFindUserError::UserNotFound => {
                     (UserData::new(), None)
                 },
-                FindUserError::UsersMapCanisterCallFail => {
+                UsersMapCanisterFindUserError::UsersMapCanisterCallFail => {
                     new_user_data.lock = false;
                     write_new_user_data(&user_id, new_user_data);
                     return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterFindUserCallFail));
@@ -855,16 +855,25 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
 
 
+
+
+
+
+
 // certification? or replication-calls?
 #[export_name = "canister_query see_users_map_canisters"]
 pub fn see_users_map_canisters() {
-    ic_cdk::api::call::reply::<(&Vec<Principal>,)>((unsafe { localkey_refcell::get(&USERS_MAP_CANISTERS) },))
+    with(&USERS_MAP_CANISTERS, |umcs| {
+        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((umcs,));
+    });
 }
 
 
 
+#[update]
+pub async fn find_user(user_id: Principal) -> Result<> {
 
-
+}
 
 
 
@@ -902,17 +911,19 @@ pub fn see_users_map_canisters() {
 #[no_mangle]
 pub fn canister_inspect_message() {
     // caution: this function is only called for ingress messages 
+    use ic_cdk::api::call::{method_name,accept_message};
     
-    if caller() == Principal::anonymous() && ![""].contains(&&ic_cdk::api::call::method_name()[..] {
+    if caller() == Principal::anonymous() 
+        && !["see_fees"].contains(&&method_name()[..] 
+        {
         trap("caller cannot be anonymous for this method.")
     }
 
-    if &ic_cdk::api::call::method_name()[..] == "cycles_transfer" {
+    if &method_name()[..] == "cycles_transfer" {
         trap("caller must be a canister for this method.")
     }
 
-
-    ic_cdk::api::call::accept_message();
+    accept_message();
 }
 
 
