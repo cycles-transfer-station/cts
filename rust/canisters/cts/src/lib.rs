@@ -323,6 +323,28 @@ pub fn cycles_transfer() {
 
 
 
+#[derive(CandidType, Deserialize)]
+pub struct Fees {
+    purchase_cycles_bank_cost_cycles: u128,
+    purchase_cycles_bank_upgrade_cost_cycles: u128,
+    purchase_cycles_transfer_cost_cycles: u128
+}
+
+#[query]
+pub fn see_fees() -> Fees {
+    Fees {
+        purchase_cycles_bank_cost_cycles: CYCLES_BANK_COST,
+        purchase_cycles_bank_upgrade_cost_cycles: CYCLES_BANK_UPGRADE_COST,
+        purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE, 
+    }
+}
+
+
+
+
+
+
+
 
 #[derive(CandidType, Deserialize)]
 pub struct TopUpCyclesBalanceData {
@@ -850,21 +872,27 @@ pub fn see_users_map_canisters() {
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct Fees {
-    purchase_cycles_bank_cost_cycles: u128,
-    purchase_cycles_bank_upgrade_cost_cycles: u128,
-    purchase_cycles_transfer_cost_cycles: u128
-}
 
-#[query]
-pub fn see_fees() -> Fees {
-    Fees {
-        purchase_cycles_bank_cost_cycles: CYCLES_BANK_COST,
-        purchase_cycles_bank_upgrade_cost_cycles: CYCLES_BANK_UPGRADE_COST,
-        purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE, 
-    }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,0 +1,27 @@
+type CyclesTransferMemo = variant {
+	Text: text;
+	Nat64: nat64;
+	Blob: blob;
+};
+
+type CyclesTransfer = record {
+    memo : CyclesTransferMemo;
+};
+
+
+
+service cycles-transfer-specification : {
+    cycles_transfer: (CyclesTransfer) -> ();
+}
+
+
+
+
+
+
+
+
+
+
+
+
