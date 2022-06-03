@@ -31,6 +31,10 @@
 // tegrate with the icscan.io
 
 
+// 10 years save the user's-cycles-balance and icp-balance if the user-canister finishes.  
+
+
+
 
 
 
@@ -157,10 +161,7 @@ use tools::{
     ledger_topup_cycles,
     LedgerTopupCyclesError,
     IcpXdrConversionRate,
-    FindAndLockUserSponse,
     take_user_icp_ledger,
-    find_and_plus_user_cycles_balance,
-    FindAndPlusUserCyclesBalanceError,
     ICP_LEDGER_CREATE_CANISTER_MEMO,
     CmcNotifyError,
     CmcNotifyCreateCanisterQuest,
@@ -295,20 +296,29 @@ pub async fn cycles_transfer() {
 
             let user_id: Principal = thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap());
             
-            match find_and_plus_user_cycles_balance(&user_id, plus_cycles: cycles_available).await {
-                Ok(()) => {
-                    reply(());
-                },
-                Err(find_and_plus_user_cycles_balance_error) => match find_and_plus_user_cycles_balance_error {
-                    FindAndPlusUserCyclesBalanceError::UserNotFound => {
+            let user_canister_id: Principal = match find_user_in_the_users_map_canisters(user_id).await {
+                Ok((user_canister_id, users_map_canister_id)) => user_canister_id,
+                Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
+                    FindUserInTheUsersMapCanistersError::UserNotFound => {
                         msg_cycles_accept128(FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE);
                         reject(&format("User for the top up not found. {} cycles taken for a nonexistentuserfee", FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE));
                     },
-                    FindAndPlusUserCyclesBalanceError::UsersMapCanisterCallError => trap("User lookup error")
+                    FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error) => reject(&format!("User lookup error. umc_id: {}, umc_call_error: {:?}", umc_id, call_error)) // reject not trap because we are after an await here
                 }
-            };
+            }
+            
+            match cycles_transfer_for_a_user().await {}
+            match call_with_payment128<(,)>(
+                user_canister_id,
+                "cycles_transfer",
+                (CyclesTransfer{ memo: CyclesTransferMemo::Blob(Vec::new()) },),
+                cycles_available
+            ).await {
+            
+            }
+
+
         },
-        
         _ => trap("CyclesTransferMemo must be the Blob variant")
     };
 }

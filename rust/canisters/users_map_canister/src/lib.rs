@@ -6,8 +6,7 @@ use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
 use ic_cdk::{
     api::{
         trap,
-        caller,
-
+        caller
     },
     export::{
         Principal,
@@ -17,28 +16,27 @@ use ic_cdk::{
         },
     }
 };
-use ic_certified_map::{RbTree, HashTree};
-
-use global_allocator_counter::get_allocated_bytes_count;
+//use ic_certified_map::{RbTree, HashTree};
 
 use cts_lib::{
     tools::localkey_refcell::{with, with_mut},
     types::{
-        Cycles,
-        UserData,
-        UserLock
+        UserId,
+        UserCanisterId
     },
-    ic_ledger_types::{
-        IcpTokens
-    }
+    global_allocator_counter::get_allocated_bytes_count
 };
 
-type UsersMap = HashMap<Principal, (UserData, UserLock)>;
+
+type UsersMap = HashMap<UserId, UserCanisterId>;
 
 
 
 
-pub const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024;// bytes // 1 GiB // each user-map-canister can hold round 10_000_000 users. test
+
+
+const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024 / 11;// bytes // 1 GiB // each user-map-canister can hold round 10_000_000 users. test
+const MAX_USERS: usize = 2_000_000;
 
 
 
@@ -55,7 +53,7 @@ fn cts_id() -> Principal {
 
 
 fn is_full() -> bool {
-    get_allocated_bytes_count() > MAX_CANISTER_SIZE
+    get_allocated_bytes_count() > MAX_CANISTER_SIZE || with(&USERS_MAP, |users_map| users_map.len()) >= MAX_USERS
 }
 
 
@@ -89,11 +87,11 @@ fn post_upgrade() {
 
 pub enum PutNewUserError {
     CanisterIsFull,
-    FoundUser(UserData),
+    FoundUser(UserCanisterId)
 }
 
 #[update]
-pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNewUserError> {
+pub fn put_new_user(user_id: UserId, user_canister_id: UserCanisterId) -> Result<(), PutNewUserError> {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
@@ -102,9 +100,9 @@ pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNe
     }
     with_mut(&USERS_MAP, |users_map| {
         match users_map.get(&user_id) {
-            Some(user_data) => Err(PutNewUserError::FoundUser(*user_data)),
+            Some(user_canister_id) => Err(PutNewUserError::FoundUser(*user_canister_id)),
             None => {
-                users_map.insert(user_id, user_data);
+                users_map.insert(user_id, user_canister_id);
                 Ok(())
             }
         }
@@ -114,63 +112,28 @@ pub fn put_new_user(user_id: Principal, user_data: UserData) -> Result<(), PutNe
 
 
 
-pub enum WriteUserDataError {
-    UserNotFound,
+#[export_name = "canister_query find_user"]
+pub fn find_user() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    let (user_id,): (UserId,) = arg_data<(UserId,)>();
+    with(&USERS_MAP, |users_map| {
+        reply<(Option<&UserCanisterId>,)>((users_map.get(&user_id),));
+    });
 }
+
+
 
 #[update]
-pub fn write_user_data(user_id: Principal, user_data: UserData) -> Result<(), WriteUserDataError> {
+pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
-    with_mut(&USERS_MAP, |users_map| {
-        match users_map.get(&user_id) {
-            Some(ud) => { 
-                *ud = user_data;
-                Ok(())
-            },
-            None => Err(WriteUserDataError::UserNotFound)
-        }
-    })
-} 
-
-
-
-#[query]
-pub fn find_user(user_id: Principal) -> Option<&UserData> {
-    if caller() != cts_id() {
-        trap("caller must be the CTS")
-    }
-    with(&USERS_MAP, |users_map| users_map.get(&user_id))
-}
-
-
-
-
-
-pub enum PlusUserCyclesBalanceError {
-    UserNotFound,
-}
-
-#[update]
-pub fn plus_user_cycles_balance(user_id: Principal, plus_cycles: Cycles) -> Result<(), PlusUserCyclesBalanceError> {
-    if caller() != cts_id() {
-        trap("caller must be the CTS")
-    }
-    with_mut(&USERS_MAP, |users_map| {
-        match users_map.get_mut(&user_id) {
-            Some(user_data) => {
-                user_data.cycles_balance += plus_cycles;
-                Ok(())
-            },
-            None => {
-                return Err(PlusUserCyclesBalanceError::UserNotFound);
-            }
-        }
+    with(&USERS_MAP, |users_map| {
+        users_map.remove(&user_id)
     })
 }
-
-
 
 
 

@@ -35,6 +35,8 @@ use cts_lib::{
         UserData,
         Cycles,
         UsersMapCanisterInit,
+        UserId,
+        UserCanisterId
     },
     consts::{
         MANAGEMENT_CANISTER_ID
@@ -138,39 +140,6 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
     ).await
 }
 
-
-#[derive(CandidType, Deserialize)]
-pub enum FindUserError {
-    
-}
-
-pub async fn find_user(user: &Principal, ) -> Result<UserData, FindUserError> {
-    call(),
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub enum FindAndLockUserError {
-    
-}
-
-pub type FindAndLockUserSponse = Result<(UserData, Principal), FindAndLockUserError>;
-
-pub async fn find_and_lock_user(user: &Principal) -> FindAndLockUserSponse {
-    call(),
-}
-
-
-
-#[derive(CandidType, Deserialize)]
-pub enum FindAndPlusUserCyclesBalanceError {
-    UserNotFound,
-    UsersMapCanisterCallError,
-}
-
-pub async fn find_and_plus_user_cycles_balance(user_id: Principal, plus_cycles: Cycles) -> Result<(), FindAndPlusUserCyclesBalanceError> {
-
-}
 
 
 pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
@@ -540,7 +509,7 @@ pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpI
 
 #[derive(CandidType, Deserialize)]
 pub enum PutNewUserIntoAUsersMapCanisterError {
-    UsersMapCanisterPutNewUserCallFail(Principal,(RejectionCode, String)), // principal of the failiing users-map-canister
+    UsersMapCanisterPutNewUserCallFail(UsersMapCanisterId,(RejectionCode, String)), // principal of the failiing users-map-canister
     UsersMapCanisterPutNewUserError(UsersMapCanisterPutNewUserError),
     CreateNewUsersMapCanisterError(CreateNewUsersMapCanisterError),
 
@@ -549,14 +518,14 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
 }
 
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
-pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_data: UserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
+pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canister_id: UserCanisterId) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
     
     for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
         let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
         match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
             umc_id,
             "put_new_user",
-            (user_id, user_data),
+            (user_id, user_canister_id),
         ).await {
             Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
                 Ok(_) => return Ok(umc_id),
@@ -579,7 +548,7 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: Principal, user_dat
     match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
         umc_id,
         "put_new_user",
-        (user_id, user_data),
+        (user_id, user_canister_id),
     ).await {
         Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
             Ok(_) => return Ok(umc_id),
@@ -659,13 +628,14 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
 
 
 
+
 #[derive(CandidType, Deserialize)]
-pub enum UsersMapCanisterFindUserError {
+pub enum FindUserInTheUsersMapCanistersError {
     UserNotFound,
-    UsersMapCanisterFindUserCallFail(Principal,(RejectionCode,String))
+    UsersMapCanisterFindUserCallFail(UsersMapCanisterId,(RejectionCode,String))
 }
 
-pub async fn users_map_canister_find_user(user_id: Principal) -> Result<(UserData, UsersMapCanisterId), FindUserError> {
+pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UserCanisterId, UsersMapCanisterId), FindUserInTheUsersMapCanistersError> {
     
     for i in 0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
         let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
@@ -675,42 +645,16 @@ pub async fn users_map_canister_find_user(user_id: Principal) -> Result<(UserDat
             (user_id,)
         ).await {
             Ok(optional_user_data) => match optional_user_data {
-                Some(user_data) => return Ok((user_data, umc_id)),
+                Some(user_canister_id) => return Ok((user_canister_id, umc_id)),
                 None => continue
             },
-            Err(find_user_call_error) => return Err(FindUserError::UsersMapCanisterFindUserCallFail(umc_id, find_user_call_error)) 
+            Err(find_user_call_error) => return Err(FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, find_user_call_error)) 
         }
     }
     
-    Err(FindUserError::UserNotFound)
+    Err(FindUserInTheUsersMapCanistersError::UserNotFound)
 }
 
-
-
-
-
-
-#[derive(CandidType, Deserialize)]
-pub enum UsersMapCanisterWriteUserDataError {
-    UsersMapCanisterCallFail((RejectionCode, String)),
-    UserNotFoundOnThisUsersMapCanister,
-}
-
-pub async fn users_map_canister_write_user_data(users_map_canister_id: UsersMapCanisterId, user_id: Principal, user_data: UserData) -> Result<(), UsersMapCanisterWriteUserDataError> {
-    match call<((),)>(
-        users_map_canister_id,
-        "write_user_data",
-        (user_id, user_data)
-    ).await {
-        Ok(write_user_data_sponse) => match write_user_data_sponse {
-            Ok(()) => Ok(()),
-            Err(write_user_data_error) => match write_user_data_error {
-                WriteUserDataError::UserNotFound => Err(UsersMapCanisterWriteUserDataError::UserNotFoundOnThisUsersMapCanister)
-            }
-        },
-        Err(write_user_data_call_error) => Err(UsersMapCanisterWriteUserDataError::UsersMapCanisterCallFail(write_user_data_call_error))
-    }
-}
 
 
 

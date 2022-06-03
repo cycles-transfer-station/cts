@@ -13,7 +13,7 @@ members = [
 
 
 exclude = [
-    "canisters/canister1",
+
 ]
 
 
