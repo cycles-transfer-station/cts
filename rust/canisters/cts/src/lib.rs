@@ -168,6 +168,8 @@ use tools::{
     users_map_canister_write_user_data,
     PutNewUserIntoAUsersMapCanisterError,
     put_new_user_into_a_users_map_canister,
+    canister_code::CanisterCode,
+    
     
     
     
@@ -193,36 +195,6 @@ pub type LatestKnownCmcRate = IcpXdrConversionRate;
 
 
 
-
-
-mod canister_code {
-
-    pub struct CanisterCode {
-        module: Vec<u8>,
-        module_hash: [u8; 32] 
-    }
-
-    impl CanisterCode {
-        pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
-            module.shrink_to_fit();
-            Self {
-                module_hash: cts_lib::tools::sha256(&module), // put this on the top if move error
-                module: module,
-            }
-        }
-        pub fn module(&self) -> &Vec<u8> {
-            &self.module
-        }
-        pub fn module_hash(&self) -> &[u8; 32] {
-            &self.module_hash
-        }
-        pub fn change_module(&mut self, module: Vec<u8>) {
-            *self = Self::new(module);
-        }
-    }
-}
-
-use canister_code::CanisterCode;
 
 
 
