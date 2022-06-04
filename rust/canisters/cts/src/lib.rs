@@ -230,16 +230,15 @@ use canister_code::CanisterCode;
 
 
 // :FEES.
-pub const CYCLES_TRANSFER_FEE: u128 = 100_000_000_000;
-pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: u128 = 1; // 100_000_000_000
-pub const CYCLES_BANK_COST: u128 = 1; // 10_000_000_000_000;
-pub const CYCLES_BANK_UPGRADE_COST: u128 = 5; // 5_000_000_000_000;
+pub const CYCLES_TRANSFER_FEE: Cycles = 100_000_000_000;
+pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = 1; // 100_000_000_000
+pub const CYCLES_BANK_COST: Cycles = 1; // 10_000_000_000_000;
+pub const CYCLES_BANK_UPGRADE_COST: Cycles = 5; // 5_000_000_000_000;
+pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
+pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000) * with(&USERS_MAP_CANISTERS, |umcs| umcs.len()); // :do: clude wasm-instructions-counts
+pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = 5_000_000_000_000;
+
 pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate through the xdr conversion rate ? // 100_000_000_000-cycles
-pub const MINIMUM_CYCLES_TRANSFER_IN: u128 = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
-pub const FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000) * with(&USERS_MAP_CANISTERS, |umcs| umcs.len()); // :do: clude wasm-instructions-counts
-pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: u128 = 5_000_000_000_000;
-
-
 
 
 
@@ -279,8 +278,8 @@ pub async fn cycles_transfer() {
     
     let cycles_available: Cycles = msg_cycles_available128();
     
-    if cycles_available < MINIMUM_CYCLES_TRANSFER_IN {
-        trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER_IN))
+    if cycles_available < MINIMUM_CYCLES_TRANSFER_INTO_USER {
+        trap(&format!("minimum cycles transfer: {}", MINIMUM_CYCLES_TRANSFER_INTO_USER))
     }
 
     if arg_data_raw_size() > 100 {
@@ -305,8 +304,8 @@ pub async fn cycles_transfer() {
         Ok((user_canister_id, users_map_canister_id)) => user_canister_id,
         Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
             FindUserInTheUsersMapCanistersError::UserNotFound => {
-                msg_cycles_accept128(FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE); // test that the cycles are taken on the reject.
-                reject(&format!("User for the top up not found. {} cycles taken for a nonexistentuserfee", FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE));
+                msg_cycles_accept128(CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE); // test that the cycles are taken on the reject.
+                reject(&format!("User for the top up not found. {} cycles taken for a nonexistentuserfee", CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE));
                 return;
             },
             FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error) => {
@@ -351,9 +350,14 @@ pub async fn cycles_transfer() {
 
 #[derive(CandidType, Deserialize)]
 pub struct Fees {
-    purchase_cycles_bank_cost_cycles: u128,
-    purchase_cycles_bank_upgrade_cost_cycles: u128,
-    purchase_cycles_transfer_cost_cycles: u128
+    purchase_cycles_bank_cost_cycles: Cycles,
+    purchase_cycles_bank_upgrade_cost_cycles: Cycles,
+    purchase_cycles_transfer_cost_cycles: Cycles,
+    convert_icp_for_the_cycles_with_the_cmc_rate_cost_cycles: Cycles,
+    minimum_cycles_transfer_into_user: Cycles,
+    cycles_transfer_into_user_user_not_found_fee_cycles: Cycles,
+    
+    
 }
 
 #[query]
@@ -361,7 +365,11 @@ pub fn see_fees() -> Fees {
     Fees {
         purchase_cycles_bank_cost_cycles: CYCLES_BANK_COST,
         purchase_cycles_bank_upgrade_cost_cycles: CYCLES_BANK_UPGRADE_COST,
-        purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE, 
+        purchase_cycles_transfer_cost_cycles: CYCLES_TRANSFER_FEE,
+        convert_icp_for_the_cycles_with_the_cmc_rate_cost_cycles: CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE,
+        minimum_cycles_transfer_into_user: MINIMUM_CYCLES_TRANSFER_INTO_USER,
+        cycles_transfer_into_user_user_not_found_fee_cycles: CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE,
+        
     }
 }
 
