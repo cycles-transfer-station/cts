@@ -33,20 +33,39 @@ use ic_cdk::{
 };
 
 
-struct UserCanisterData {
+
+
+// when collecting the untaken_icp_to_collect, collect the user_data.untaken_icp_to_collect - LEDGER_TRANSFER_FEE
+            
+
+
+struct UserData {
+    
+    cycles_balance: Cycles,
+    untaken_icp_to_collect: IcpTokens,
     cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>,
+    cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
     
 }
-impl UserCanisterData {
+impl UserData {
     fn new() -> Self {
         Self {
+            cycles_balance: 0u128,    
+            untaken_icp_to_collect: IcpTokens::ZERO,
             cycles_bank_purchases: Vec::new(),
             cycles_transfer_purchases: Vec::new(),
+            cycles_transfers_into_user: Vec::new(),
     
         }
     }
 }
+
+
+
+
+
+
 
 
 thread_local! {
@@ -54,16 +73,33 @@ thread_local! {
     static USERS_MAP_CANISTER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static CTS_ID:                Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     
-    static USER_CANISTER_DATA: RefCell<UserCanisterData> = RefCell::new(UserCanisterData::new());    
+    static USER_DATA: RefCell<UserData> = RefCell::new(UserData::new());    
     
 
 }
 
 
 
+
+
+
+
 fn user_id() -> Principal {
     USER_ID.with(|user_id| { user_id.get() })
 }
+fn cts_id() -> Principal {
+    CTS_ID.with(|cts_id| { cts_id.get() })
+}
+
+
+
+
+
+
+fn is_canister_full() -> bool {
+
+}
+
 
 
 
@@ -90,10 +126,51 @@ fn post_upgrade() {
 
 
 
-#[update]
-fn h() {
-    
+
+
+
+
+
+
+
+struct CyclesTransferIntoUser {
+    canister: Principal,
+    cycles: Cycles,
+    timestamp_nanos: u64
 }
+
+
+
+// CTS-method
+#[export_name = "canister_update cts_cycles_transfer_into_user"]
+pub fn cts_cycles_transfer_into_user() {
+
+    if caller() != cts_id() {
+        trap("this is a CTS-method.")
+    }
+    
+    if is_canister_full() {
+        reject("user is full");
+        return;
+    }
+    
+    let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data<(CyclesTransferIntoUser,)>();
+
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance += cycles_transfer_into_user.cycles;
+        user_data.cycles_transfers_into_user.push(cycles_transfer_into_user);
+    });
+    
+    reply<(,)>((,));
+    return;
+    
+    
+} 
+
+
+
+
+
 
 
 

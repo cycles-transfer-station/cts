@@ -23,6 +23,10 @@ pub type UserCanisterId = Principal;
 
 
 
+
+
+
+
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
     Text(String),
@@ -39,68 +43,10 @@ pub struct CyclesTransfer {
 
 
 
-// when collecting the untaken_icp_to_collect, collect the user_data.untaken_icp_to_collect - LEDGER_TRANSFER_FEE
 
-#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
-pub struct UserData {
-    pub cycles_balance: Cycles,
-    pub untaken_icp_to_collect: IcpTokens,
-    //pub ungiven_icp_to_give: IcpTokens,
-    pub user_canister: Option<Principal>,
-}
 
-impl UserData {
-    pub fn new() -> Self {
-        Self {
-            cycles_balance: 0u128,
-            untaken_icp_to_collect: IcpTokens::ZERO,
-            user_canister: None
-        }
-    }
-    
-    
-    /*
-    pub const SERIALIZE_SIZE: usize = 50; // variable_size? cycles_transfer_purchases_max_len
 
-    pub fn serialize_forward(&self) -> [u8; Self::SERIALIZE_SIZE] {
-        let mut b: [u8; Self::SERIALIZE_SIZE] = [0; Self::SERIALIZE_SIZE];
-        // 9
-        b[..9].copy_from_slice(self.user_lock.serialize());        
-        // 16
-        b[9..25].copy_from_slice(self.cycles_balance.to_be_bytes());
-        // 8
-        b[25..33].copy_from_slice(self.untaken_icp_to_collect.e8s().to_be_bytes());
-        // 
-        b[33..35].copy_from_slice(&(self.cycles_transfer_purchases.len() as u16).to_be_bytes());
-        for i in 0..self.cycles_transfer_purchases.len() {
-            b[
-                35+CyclesTransferPurchaseLog::SIZE*i
-                ..
-                35+CyclesTransferPurchaseLog::SIZE*i+CyclesTransferPurchaseLog::SIZE
-            ].copy_from_slice(self.cycles_transfer_purchases[i].serialize());
-        }
-        let cbps_start: usize = 35+self.cycles_transfer_purchases_max_len*CyclesTransferPurchaseLog::SIZE;
-        b[cbps_start .. cbps_start+2].copy_from_slice(&(self.cycles_bank_purchases.len() as u16).to_be_bytes());
-        for i in 0..self.cycles_bank_purchases.len() {
-            b[
-                cbps_start+2+CyclesBankPurchaseLog::SIZE*i
-                ..
-                cbps_start+2+CyclesBankPurchaseLog::SIZE*i+CyclesBankPurchaseLog::SIZE
-            ].copy_from_slice(self.cycles_bank_purchases[i].serialize());
-        }
-        
-        b
 
-    }
-
-    // pub fn serialize_backward(&self, &[u8]) -> Self {
-
-    // }
-    */
-
-}
-
-    
 
 
 // repr(packed) ?
@@ -118,6 +64,7 @@ impl UserLock {
     }
     
     pub const MAX_LOCK_TIME_NANOS: u64 =  30 * 60 * 1_000_000_000;
+    
     pub fn is_lock_on(&self) -> bool {
         self.lock && time() - self.last_lock_time_nanos <= Self::MAX_LOCK_TIME_NANOS
     }
@@ -154,7 +101,7 @@ pub struct CyclesTransferPurchaseLog {
     pub canister: Principal,
     pub cycles_sent: Cycles,
     pub cycles_accepted: Cycles,
-    pub cycles_transfer: CyclesTransfer, //memo?
+    pub cycles_transfer_memo: CyclesTransferMemo,
     pub timestamp: u64,
 }
 
