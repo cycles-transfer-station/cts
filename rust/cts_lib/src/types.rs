@@ -18,6 +18,9 @@ use ic_cdk::{
 pub type Cycles = u128;
 pub type UserId = Principal;
 pub type UserCanisterId = Principal;
+pub type UsersMapCanisterId = Principal;
+
+
 
 
 

@@ -86,13 +86,12 @@ use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
 
 use cts_lib::{
     types::{
-        UserData,
-        UserLock,
-        CyclesTransferPurchaseLog,
-        CyclesBankPurchaseLog,
+        Cycles,
         CyclesTransfer,
         CyclesTransferMemo,
-
+        UserId,
+        UserCanisterId,
+        UsersMapCanisterId,
     },
     consts::{
         MANAGEMENT_CANISTER_ID,
@@ -131,7 +130,6 @@ use cts_lib::{
 #[cfg(test)]
 mod t;
 
-
 mod tools;
 use tools::{
     principal_icp_subaccount,
@@ -169,12 +167,15 @@ use tools::{
     PutNewUserIntoAUsersMapCanisterError,
     put_new_user_into_a_users_map_canister,
     canister_code::CanisterCode,
-    
-    
+    LatestKnownCmcRate,
+
+
+
+
+
     
     
 };
-
 
 mod stable;
 use stable::{
@@ -184,16 +185,6 @@ use stable::{
     read_new_canisters
 
 };
-
-
-
-
-
-pub type UsersMapCanisterId = Principal;
-pub type Cycles = u128;
-pub type LatestKnownCmcRate = IcpXdrConversionRate; 
-
-
 
 
 
@@ -226,7 +217,7 @@ thread_local! {
 
     pub static NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(Vec::new());
     pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
-    pub static LATEST_KNOWN_CMC_RATE: Cell<LatestKnownCmcRate> = Cell::new(LatestKnownCmcRate { xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
+    pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     
     pub static CYCLES_BANK_CANISTER_CODE    : RefCell<Option<CanisterCode>> = RefCell::new(None);
     pub static USER_CANISTER_CODE           : RefCell<Option<CanisterCode>> = RefCell::new(None);

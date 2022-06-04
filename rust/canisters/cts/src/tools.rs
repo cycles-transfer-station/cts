@@ -26,7 +26,6 @@ use crate::{
     NEW_CANISTERS,
     LATEST_KNOWN_CMC_RATE,
     MAX_USERS_MAP_CANISTERS
-    LatestKnownCmcRate
 };
 
 use cts_lib::{
@@ -36,7 +35,8 @@ use cts_lib::{
         Cycles,
         UsersMapCanisterInit,
         UserId,
-        UserCanisterId
+        UserCanisterId,
+        UsersMapCanisterId
     },
     consts::{
         MANAGEMENT_CANISTER_ID
@@ -236,7 +236,7 @@ pub mod canister_code {
 
 
 
-
+ 
 
 #[derive(CandidType, Deserialize)]
 pub enum CheckCurrentXdrPerMyriadPerIcpCmcRateError {
@@ -262,7 +262,7 @@ pub type CheckCurrentXdrPerMyriadPerIcpCmcRateSponse = Result<u64, CheckCurrentX
 // how many 1/10000-xdr for one icp
 pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPerMyriadPerIcpCmcRateSponse {
 
-    let latest_known_cmc_rate: LatestKnownCmcRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
+    let latest_known_cmc_rate: IcpXdrConversionRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
     if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 10*60 {
         return Ok(latest_known_cmc_rate.xdr_permyriad_per_icp);
     }

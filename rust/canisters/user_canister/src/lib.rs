@@ -9,6 +9,9 @@ use cts_lib::{
     },
     tools::{
         localkey_refcell::{with, with_mut},
+    },
+    ic_ledger_types::{
+        IcpBlockHeight
     }
 };
 use std::{
@@ -46,6 +49,8 @@ struct UserData {
     cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>,
     cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
+    icp_transfers_out: Vec<IcpBlockHeight>,
+    icp_transfers_in: Vec<IcpBlockHeight>
     
 }
 impl UserData {
@@ -56,6 +61,8 @@ impl UserData {
             cycles_bank_purchases: Vec::new(),
             cycles_transfer_purchases: Vec::new(),
             cycles_transfers_into_user: Vec::new(),
+            icp_transfers_out: Vec::new(),
+            icp_transfers_in: Vec::new()
     
         }
     }
