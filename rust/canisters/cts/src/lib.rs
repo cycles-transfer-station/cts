@@ -288,39 +288,35 @@ pub async fn cycles_transfer() {
 
     let (ct,): (CyclesTransfer,) = arg_data<(CyclesTransfer,)>();
 
-    match ct.memo {
+    let user_id: UserId = match ct.memo {
         CyclesTransferMemo::Blob(memo_bytes) => {
-            if memo_bytes.len() != 32 || &memo_bytes[..2] != CYCLES_BALANCE_TOPUP_MEMO_START {
+            if memo_bytes.len() != 32 || &memo_bytes[..2] != USER_CYCLES_BALANCE_TOPUP_MEMO_START {
                 trap("unknown cycles transfer memo")
             }
-
-            let user_id: Principal = thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap());
-            
-            let user_canister_id: Principal = match find_user_in_the_users_map_canisters(user_id).await {
-                Ok((user_canister_id, users_map_canister_id)) => user_canister_id,
-                Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
-                    FindUserInTheUsersMapCanistersError::UserNotFound => {
-                        msg_cycles_accept128(FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE);
-                        reject(&format("User for the top up not found. {} cycles taken for a nonexistentuserfee", FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE));
-                    },
-                    FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error) => reject(&format!("User lookup error. umc_id: {}, umc_call_error: {:?}", umc_id, call_error)) // reject not trap because we are after an await here
-                }
-            }
-            
-            match cycles_transfer_for_a_user().await {}
-            match call_with_payment128<(,)>(
-                user_canister_id,
-                "cycles_transfer",
-                (CyclesTransfer{ memo: CyclesTransferMemo::Blob(Vec::new()) },),
-                cycles_available
-            ).await {
-            
-            }
-
-
+            thirty_bytes_as_principal(&memo_bytes[2..32].try_into().unwrap())
         },
         _ => trap("CyclesTransferMemo must be the Blob variant")
     };
+
+    let user_canister_id: UserCanisterId = match find_user_in_the_users_map_canisters(user_id).await {
+        Ok((user_canister_id, users_map_canister_id)) => user_canister_id,
+        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
+            FindUserInTheUsersMapCanistersError::UserNotFound => {
+                msg_cycles_accept128(FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE); // test that the cycles are taken on the reject.
+                reject(&format("User for the top up not found. {} cycles taken for a nonexistentuserfee", FIND_AND_PLUS_USER_CYCLES_BALANCE_USER_NOT_FOUND_FEE));
+            },
+            FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error) => reject(&format!("User lookup error. umc_id: {}, umc_call_error: {:?}", umc_id, call_error)) // reject not trap because we are after an await here
+        }
+    };
+    match cycles_transfer_for_a_user().await {}
+    match call<(,)>(
+        user_canister_id,
+        "user_cycles_transfer_in",
+        (,)
+    ).await {
+            
+    }
+            
 }
 
 
