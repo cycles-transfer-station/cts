@@ -46,11 +46,11 @@ struct UserData {
     
     cycles_balance: Cycles,
     untaken_icp_to_collect: IcpTokens,
-    cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>,
     cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
     icp_transfers_out: Vec<IcpBlockHeight>,
     icp_transfers_in: Vec<IcpBlockHeight>
+    cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     
 }
 impl UserData {
@@ -58,12 +58,7 @@ impl UserData {
         Self {
             cycles_balance: 0u128,    
             untaken_icp_to_collect: IcpTokens::ZERO,
-            cycles_bank_purchases: Vec::new(),
-            cycles_transfer_purchases: Vec::new(),
-            cycles_transfers_into_user: Vec::new(),
-            icp_transfers_out: Vec::new(),
-            icp_transfers_in: Vec::new()
-    
+            ..Default::default()
         }
     }
 }
@@ -75,13 +70,14 @@ impl UserData {
 
 
 
+
 thread_local! {
+    static CTS_ID:                Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USER_ID:               Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USERS_MAP_CANISTER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static CTS_ID:                Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     
     static USER_DATA: RefCell<UserData> = RefCell::new(UserData::new());    
-    
+    static USER_CANISTER_MAX_SIZE: Cell<usize> = Cell::new(0);    
 
 }
 
@@ -90,14 +86,15 @@ thread_local! {
 
 
 
-
-fn user_id() -> Principal {
-    USER_ID.with(|user_id| { user_id.get() })
-}
 fn cts_id() -> Principal {
     CTS_ID.with(|cts_id| { cts_id.get() })
 }
-
+fn user_id() -> Principal {
+    USER_ID.with(|user_id| { user_id.get() })
+}
+fn umc_id() -> Principal {
+    USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.get() })
+}
 
 
 
@@ -173,6 +170,27 @@ pub fn cts_cycles_transfer_into_user() {
     
     
 } 
+
+
+
+#[update]
+pub fn user_transfer_cycles() -> Result<> {
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
