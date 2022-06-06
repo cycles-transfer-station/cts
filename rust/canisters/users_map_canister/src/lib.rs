@@ -2,23 +2,21 @@ use std::{
     cell::RefCell,
     collections::HashMap,
 };
-use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
-use ic_cdk::{
-    api::{
-        trap,
-        caller
-    },
-    export::{
-        Principal,
-        candid::{
-            CandidType,
-            Deserialize,
-        },
-    }
-};
-//use ic_certified_map::{RbTree, HashTree};
-
 use cts_lib::{
+    ic_cdk::{
+        api::{
+            trap,
+            caller
+        },
+        export::{
+            Principal,
+            candid::{
+                CandidType,
+                Deserialize,
+            },
+        }
+    },
+    ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade},
     tools::localkey_refcell::{with, with_mut},
     types::{
         UserId,

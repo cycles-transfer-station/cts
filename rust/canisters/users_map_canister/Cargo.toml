@@ -10,11 +10,7 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
-ic-cdk = "0.5.0"
-ic-cdk-macros = "0.5.0"
-global_allocator_counter = { path = "../global_allocator_counter" } 
 cts_lib = { path = "../cts_lib" }
-ic-certified-map = { git = "https://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
 serde = "1.0.136"
 candid = "0.7.11"
 

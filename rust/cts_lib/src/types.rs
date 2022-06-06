@@ -98,24 +98,6 @@ impl UserLock {
 
 
 
-// for these two, make sure the fee for each purchase-type pays for the storage-cost of the Log for a certain amount of time, a year or 3 and then check the timestamp and delete expired ones or option to pay for longer storage
-#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
-pub struct CyclesTransferPurchaseLog {
-    pub canister: Principal,
-    pub cycles_sent: Cycles,
-    pub cycles_accepted: Cycles,
-    pub cycles_transfer_memo: CyclesTransferMemo,
-    pub timestamp: u64,
-}
-
-#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
-pub struct CyclesBankPurchaseLog {
-    pub cycles_bank_principal: Principal,
-    pub cost_cycles: Cycles,
-    pub timestamp: u64,
-    // cycles-bank-module_hash?
-}
-
 
 
 #[derive(CandidType, Deserialize)]

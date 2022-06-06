@@ -80,31 +80,6 @@ pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
 
 
 
-fn principal_as_thirty_bytes(p: &Principal) -> [u8; 30] {
-    let mut bytes: [u8; 30] = [0; 30];
-    let p_bytes: &[u8] = p.as_slice();
-    bytes[0] = p_bytes.len() as u8; 
-    bytes[1 .. p_bytes.len() + 1].copy_from_slice(p_bytes); 
-    bytes
-}
-
-pub fn thirty_bytes_as_principal(bytes: &[u8; 30]) -> Principal {
-    Principal::from_slice(&bytes[1..1 + bytes[0] as usize])
-} 
-
-
-
-pub fn principal_icp_subaccount(user: &Principal) -> IcpIdSub {
-    let mut sub_bytes = [0u8; 32];
-    sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(user));
-    IcpIdSub(sub_bytes)
-}
-
-
-
-pub fn user_icp_balance_id(user: &Principal) -> IcpId {
-    IcpId::new(&id(), &principal_icp_subaccount(user))
-}
 
 
 pub fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<IcpTokens> {

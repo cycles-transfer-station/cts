@@ -1,63 +1,76 @@
-use global_allocator_counter::get_allocated_bytes_count;
-use cts_lib::{
-    types::{
-        UserData,
-        CyclesBankPurchaseLog,
-        CyclesTransferPurchaseLog,
-        UserCanisterInit,
-
-    },
-    tools::{
-        localkey_refcell::{with, with_mut},
-    },
-    ic_ledger_types::{
-        IcpBlockHeight
-    }
-};
 use std::{
     cell::{RefCell,Cell},
     collections::HashMap,
 };
-use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
-use ic_cdk::{
-    api::{
-        trap,
-        caller,
-
-
-    },
-    export::{
-        Principal,
-        candid::{
-            CandidType,
-            Deserialize,
+use cts_lib::{
+    ic_cdk::{
+        api::{
+            trap,
+            caller,
+            call::{
+                msg_cycles_accept128,
+                msg_cycles_available128,
+                msg_cycles_refunded128
+            }
         },
-    }
+        export::{
+            Principal,
+            candid::{
+                CandidType,
+                Deserialize,
+            },
+        }
+    },
+    ic_cdk_macros::{
+        update, 
+        query, 
+        init, 
+        pre_upgrade, 
+        post_upgrade
+    },
+    ic_ledger_types::{
+        IcpBlockHeight,
+        IcpAccountBalanceArgs,
+        IcpId,
+        IcpIdSub,
+        icp_account_balance,
+        MAINNET_LEDGER_CANISTER_ID
+    },
+    types::{
+        UserCanisterInit
+    },
+    tools::{
+        localkey_refcell::{with, with_mut},
+    },
+    fees::{
+        CYCLES_TRANSFER_FEE,
+    },
+    global_allocator_counter::get_allocated_bytes_count,
 };
 
 
 
 
-// when collecting the untaken_icp_to_collect, collect the user_data.untaken_icp_to_collect - LEDGER_TRANSFER_FEE
-            
 
-
+// when collecting the cts_take_icp, collect the user_data.cts_take_icp - LEDGER_TRANSFER_FEE
 struct UserData {
     
     cycles_balance: Cycles,
-    untaken_icp_to_collect: IcpTokens,
-    cycles_transfer_purchases: Vec<CyclesTransferPurchaseLog>,
+    cts_take_icp: IcpTokens,
+    cycles_transfer_purchases: HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>,
     cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
     icp_transfers_out: Vec<IcpBlockHeight>,
     icp_transfers_in: Vec<IcpBlockHeight>
     cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     
 }
+
 impl UserData {
     fn new() -> Self {
         Self {
             cycles_balance: 0u128,    
-            untaken_icp_to_collect: IcpTokens::ZERO,
+            cts_take_icp: IcpTokens::ZERO,
+            cycles_transfer_purchases: Hashmap::new(),
             ..Default::default()
         }
     }
@@ -67,24 +80,49 @@ impl UserData {
 
 
 
+const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
+
 
 
 
 
 thread_local! {
     static CTS_ID:                Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static USER_ID:               Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USERS_MAP_CANISTER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    
-    static USER_DATA: RefCell<UserData> = RefCell::new(UserData::new());    
-    static USER_CANISTER_MAX_SIZE: Cell<usize> = Cell::new(0);    
+    static USER_ID:               Cell<Principal> = Cell::new(Principal::from_slice(&[]));
+    static USER_ICP_ID: Cell<Option<IcpId>>       = Cell::new(None); // option cause no way to const an IcpId while checking the crc32 checksum
+    static USER_DATA: RefCell<UserData>           = RefCell::new(UserData::new());    
+    static USER_CANISTER_MAX_SIZE: Cell<usize>    = Cell::new(0);
+    static CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER: Cell<u64> = Cell::new(0);
+
+}
+
+
+
+#[init]
+fn init(user_canister_init: UserCanisterInit) {
+    CTS_ID.with(|cts_id| { cts_id.set(user_canister_init.cts_id); });
+    USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.set(user_canister_init.users_map_canister_id); });
+    USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
+    USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::user::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
+     
+}
+
+#[pre_upgrade]
+fn pre_upgrade() {
+
+}
+
+#[post_upgrade]
+fn post_upgrade() {
 
 }
 
 
 
 
-
+// ------------------------------------
+// inline always?
 
 fn cts_id() -> Principal {
     CTS_ID.with(|cts_id| { cts_id.get() })
@@ -95,37 +133,56 @@ fn user_id() -> Principal {
 fn umc_id() -> Principal {
     USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.get() })
 }
+fn user_icp_id() -> IcpId {
+    USER_ICP_ID.with(|user_icp_id| { user_icp_id.get().unwrap() }) // unwrap because we put the Some(icp_id) in the canister_init
+}
 
-
-
+// ------------------------------------
 
 
 fn is_canister_full() -> bool {
 
 }
 
+fn get_new_cycles_transfer_purchase_log_id() -> u64 {
+    CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER.with(|counter| {
+        counter.set(counter.get() + 1);
+        counter.get()
+    })
+}
+    
 
 
 
-#[init]
-fn init(user_canister_init: UserCanisterInit) {
-    USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
-    USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.set(user_canister_init.users_map_canister_id); });
-    CTS_ID.with(|cts_id| { cts_id.set(user_canister_init.cts_id); });
-     
+
+
+
+
+pub enum UserCyclesBalanceError {}
+
+#[query]
+pub fn user_cycles_balance() -> Result<Cycles, UserCyclesBalanceError> {
+    Ok(with(&USER_DATA, |user_data| user_data.cycles_balance))
 }
 
 
-#[pre_upgrade]
-fn pre_upgrade() {
 
+pub enum UserIcpBalanceError {
+    IcpLedgerAccountBalanceCallError(String),
 }
 
-
-
-#[post_upgrade]
-fn post_upgrade() {
-
+#[update]
+pub async fn user_icp_balance() -> Result<IcpTokens, UserIcpBalanceError> {
+    let user_icp_ledger_balance: IcpTokens = match icp_account_balance(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpAccountBalanceArg{
+            account: user_icp_id()
+        }
+    ).await {
+        Ok(icp_tokens) => icp_tokens,
+        Err(call_error) => Err(UserIcpBalanceError::IcpLedgerAccountBalanceCallError(format!("{:?}", call_error)))
+    };
+    Ok(user_icp_ledger_balance - with(&USER_DATA, |user_data| user_data.cts_take_icp))
 }
 
 
@@ -143,8 +200,6 @@ struct CyclesTransferIntoUser {
     timestamp_nanos: u64
 }
 
-
-
 // CTS-method
 #[export_name = "canister_update cts_cycles_transfer_into_user"]
 pub fn cts_cycles_transfer_into_user() {
@@ -160,8 +215,13 @@ pub fn cts_cycles_transfer_into_user() {
     
     let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data<(CyclesTransferIntoUser,)>();
 
+    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    if cycles != cycles_transfer_into_user.cycles {
+        trap("something is not what i thought.")
+    }
+    
     with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance += cycles_transfer_into_user.cycles;
+        user_data.cycles_balance += cycles;
         user_data.cycles_transfers_into_user.push(cycles_transfer_into_user);
     });
     
@@ -173,21 +233,131 @@ pub fn cts_cycles_transfer_into_user() {
 
 
 
-#[update]
-pub fn user_transfer_cycles() -> Result<> {
 
+
+
+
+
+
+
+pub type CyclesTransferPurchaseLogId = u64;
+
+// for these two, make sure the fee for each purchase-type pays for the storage-cost of the Log for a certain amount of time, a year or 3 and then check the timestamp and delete expired ones or option to pay for longer storage
+#[derive(CandidType, Deserialize, Clone, serde::Serialize)]
+pub struct CyclesTransferPurchaseLog {
+    pub canister_id: Principal,
+    pub cycles_sent: Cycles,
+    pub cycles_accepted: Option<Cycles>, // option cause this field is only filled in the callback and that might not come back because of the callee holding-back the callback cross-upgrades
+    pub cycles_transfer_memo: CyclesTransferMemo,
+    pub timestamp_nanos: u64, // time sent
 }
 
+#[derive(CandidType, Deserialize)]
+pub struct UserTransferCyclesQuest {
+    cycles: Cycles,
+    canister_id: Principal,  
+    cycles_transfer_memo: CyclesTransferMemo
+}
 
+#[derive(CandidType, Deserialize)]
+pub enum UserTransferCyclesError {
+    InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
+    CheckUserCyclesBalanceError(UserCyclesBalanceError),
+    BalanceTooLow { user_cycles_balance: Cycles, cycles_transfer_fee: Cycles },
+    CyclesTransferCallCandidEncodeError(String),
+    CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
+}
 
+#[update]
+pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTransferPurchaseLog, UserTransferCyclesError> {
+    
+    if caller() != user_id() {
+        trap("caller must be the user")
+    }
+    
+    if q.cycles < MINIMUM_USER_TRANSFER_CYCLES {
+        return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
+    }
 
+    let user_cycles_balance: Cycles = with(&USER_DATA, |user_data| user_data.cycles_balance);
+    if q.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
+        return Err(UserTransferCyclesError::BalanceTooLow { user_cycles_balance: user_cycles_balance, cycles_transfer_fee: CYCLES_TRANSFER_FEE });
+    }
+    std::mem::drop(user_cycles_balance);
+    
+    let cycles_transfer_call_candid_bytes = match encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo }) {
+        Ok(cb) => cb,
+        Err(ce) => return Err(UserTransferCyclesError::CyclesTransferCallCandidEncodeError("{:?}", ce))
+    }; // maybe unwrap it and let it panick and roll back if error
+    
+    let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
+    
+    // take the user-cycles before the transfer, and refund in the callback 
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance -= q.cycles + CYCLES_TRANSFER_FEE;
+        user_data.cycles_transfer_purchases.insert(
+            cycles_transfer_purchase_log_id,
+            CyclesTransferPurchaseLog{
+                canister_id: q.canister_id,
+                cycles_sent: q.cycles,
+                cycles_accepted: None,
+                cycles_transfer_memo: q.cycles_transfer_memo,
+                timestamp_nanos: time(), // time sent
+            }
+        );
+    });
+    
+    
+    let cycles_transfer_call: impl Future<Output = CallResult<Vec<u8>>> = call_raw128(
+        q.canister_id,
+        "cycles_transfer",
+        &cycles_transfer_call_candid_bytes,
+        q.cycles
+    );
+    
+    std::mem::drop(cycles_transfer_call_candid_bytes);
+    std::mem::drop(q);
+    
+    let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call.await;
+    
+    let cycles_refund: Cycles = msg_cycles_refunded128();
+    
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance += cycles_refund;
+    });
+    
+    let final_cycles_transfer_purchase_log: CyclesTransferPurchaseLog = with_mut(&USER_DATA, |user_data| {
+        match user_data.cycles_transfer_purchases.get(&cycles_transfer_purchase_log_id) {
+            Some(cycles_transfer_purchase_log) => {
+                cycles_transfer_purchase_log.cycles_accepted = Some(cycles_transfer_purchase_log.cycles_sent - cycles_refund);
+                cycles_transfer_purchase_log.clone()
+            },
+            None => trap("not sure what happen")
+        }
+    });
 
+    match cycles_transfer_call_result {
+        Ok(_) => {
+            return Ok(final_cycles_transfer_purchase_log);
+        },
+        
+        // up to here
+        Err(cycles_transfer_call_error) => {
+            let paid_fee: bool = match cycles_transfer_call_error.0 {
+                RejectionCode::DestinationInvalid | RejectionCode::CanisterReject | RejectionCode::CanisterError => {
+                    true
+                },
+                _ => {
+                    USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += CYCLES_TRANSFER_FEE; });
+                    false
+                }
+            };
+            return CollectBalanceSponse::cycles_payout(Err(UserTransferCyclesError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: paid_fee, cycles_accepted: cycles_accepted }));
+        }
+    }
+    
 
-
-
-
-
-
+}
 
 
 
@@ -243,58 +413,15 @@ pub fn see_cycles_bank_purchases<'a>() -> () {
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct UserBalance {
-    cycles_balance: u128,
-    icp_balance: IcpTokens, 
-}
 
-#[derive(CandidType, Deserialize)]
-pub enum SeeBalanceError {
-    IcpLedgerCheckBalanceCallError(String),
-    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
-}
 
-pub type SeeBalanceSponse = Result<UserBalance, SeeBalanceError>;
 
-#[update]
-pub async fn see_balance() -> SeeBalanceSponse {
-    if caller() != user_id() {
-        trap("caller must be the user")
-    }
-    
-    let user_id: Principal = caller();
-    //check_lock_and_lock_user(&user_id);
-    let user_data: UserData = match get_and_lock_user(&user_id).await {
-        Ok(ud) => ud,
-        Err(get_and_lock_user_error) => {
-            unlock_user(&user_id)
-            return
-        }
-    };
-    
-    let cycles_balance: Cycles = match check_user_cycles_balance(&user_id).await {
-        Ok(cycles) => cycles,
-        Err(check_user_cycles_balance_error) => {
-            unlock_user(&user_id);
-            return Err(SeeBalanceError::CheckUserCyclesBalanceError(check_user_cycles_balance_error));
-        }
-    };
-    
-    let icp_balance: IcpTokens = match check_user_icp_balance(&user_id).await {
-        Ok(tokens) => tokens,
-        Err(balance_call_error) => {
-            unlock_user(&user_id);
-            return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
-        }
-    };
-    
-    unlock_user(&user_id);
-    Ok(UserBalance {
-        cycles_balance,
-        icp_balance,
-    })
-}
+
+
+
+
+
+
 
 
 
@@ -312,11 +439,6 @@ pub struct IcpPayoutQuest {
     payout_icp_id: IcpId
 }
 
-#[derive(CandidType, Deserialize)]
-pub struct CyclesPayoutQuest {
-    cycles: u128,
-    payout_cycles_transfer_canister: Principal         // the memo is: cts-payout    
-}
 
 #[derive(CandidType, Deserialize)]
 pub enum CollectBalanceQuest {
@@ -335,18 +457,10 @@ pub enum IcpPayoutError {
 
 }
 
-#[derive(CandidType, Deserialize)]
-pub enum CyclesPayoutError {
-    InvalidCyclesPayout0Amount,
-    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
-    BalanceTooLow { max_cycles_payout: u128 },
-    CyclesTransferCallCandidEncodeError(String),
-    CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
-}
 
 pub type IcpPayoutSponse = Result<IcpBlockHeight, IcpPayoutError>;
 
-pub type CyclesPayoutSponse = Result<u128, CyclesPayoutError>;
+
 
 #[derive(CandidType, Deserialize)]
 pub enum CollectBalanceSponse {
@@ -443,76 +557,11 @@ pub async fn collect_balance(collect_balance_quest: CollectBalanceQuest) -> Coll
 
 
 
-        CollectBalanceQuest::cycles_payout(cycles_payout_quest) => {
-
-            if cycles_payout_quest.cycles == 0 {
-                unlock_user(&user);
-                return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::InvalidCyclesPayout0Amount));
-            }
-
-            let user_cycles_balance: u128 = match check_user_cycles_balance(&user).await {
-                Ok(cycles) => cycles,
-                Err(check_user_cycles_balance_error) => {
-                    unlock_user(&user);           
-                    return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CheckUserCyclesBalanceError(check_user_cycles_balance_error)));
-                } 
-            };
-
-            if cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
-                unlock_user(&user);
-                return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::BalanceTooLow { max_cycles_payout: user_cycles_balance - CYCLES_TRANSFER_FEE }));
-            }
-            
-            // change!! take the user-cycles before the transfer, and refund in the callback 
-            with_mut(&USERS_DATA, |users_data| {
-                users_data.get_mut(&user).unwrap().cycles_balance -= cycles_payout_quest.cycles + CYCLES_TRANSFER_FEE;
-            });
-
-            let cycles_transfer_call_candid_bytes: Vec<u8> = match encode_one(&CyclesTransfer { memo: CyclesTransferMemo::Text("CTS-POUT".to_string()) }) {
-                Ok(candid_bytes) => candid_bytes,
-                Err(candid_error) => {
-                    unlock_user(&user);
-                    return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallCandidEncodeError(format!("{}", candid_error))));
-                }
-            }; 
-            
-            let cycles_transfer_call: CallResult<Vec<u8>> = call_raw128(
-                cycles_payout_quest.payout_cycles_transfer_canister,
-                "cycles_transfer",
-                &cycles_transfer_call_candid_bytes,
-                cycles_payout_quest.cycles
-            ).await;
-            
-            // check if it is possible for the canister to reject/trap but still keep the cycles. if yes, [re]turn the cycles_accepted in the error. for now, going as if not possible.
-            // do some tests on a canister_error and on a canister_reject
-            // test see if msg_cycles_refunded128() gives back the full cycles mount on a CanisterError. what about on a CanisterReject?
-
-            unlock_user(&user);
-
-            let cycles_accepted: u128 = cycles_payout_quest.cycles - msg_cycles_refunded128(); 
-            
-            USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += msg_cycles_refunded128(); });        
-            
-            match cycles_transfer_call {
-                Ok(_) => {
-                    return CollectBalanceSponse::cycles_payout(Ok(cycles_accepted));
-                },
-                Err(cycles_transfer_call_error) => {
-                    let paid_fee: bool = match cycles_transfer_call_error.0 {
-                        RejectionCode::DestinationInvalid | RejectionCode::CanisterReject | RejectionCode::CanisterError => {
-                            true
-                        },
-                        _ => {
-                            USERS_DATA.with(|ud| { ud.borrow_mut().get_mut(&user).unwrap().cycles_balance += CYCLES_TRANSFER_FEE; });
-                            false
-                        }
-                    };
-                    return CollectBalanceSponse::cycles_payout(Err(CyclesPayoutError::CyclesTransferCallError{ call_error: format!("{:?}", cycles_transfer_call_error), paid_fee: paid_fee, cycles_accepted: cycles_accepted }));
-                }
-            }
-        }
     }
 }
+
+
+
 
 
 
@@ -601,23 +650,10 @@ pub async fn convert_icp_balance_for_the_cycles_with_the_cmc_rate(q: ConvertIcpB
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct PurchaseCyclesTransferQuest {
-    canister: Principal,
-    cycles: u128,
-    cycles_transfer: CyclesTransfer,
-    // public: bool,
-}
 
-#[derive(CandidType, Deserialize)]
-pub enum PurchaseCyclesTransferError {
-    InvalidCyclesTransfer0Amount,
-    CheckUserCyclesBalanceError(CheckUserCyclesBalanceError),
-    BalanceTooLow { max_cycles_for_the_transfer: u128 },
-    CyclesTransferCallCandidEncodeError(String),
-    CyclesTransferCallError { call_error: String, paid_fee: bool }, // fee_paid: u128 ??
 
-}
+
+
 
 #[update]
 pub async fn purchase_cycles_transfer(pctq: PurchaseCyclesTransferQuest) -> Result<CyclesTransferPurchaseLog, PurchaseCyclesTransferError> {
@@ -705,6 +741,28 @@ pub async fn purchase_cycles_transfer(pctq: PurchaseCyclesTransferQuest) -> Resu
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
+pub struct CyclesBankPurchaseLog {
+    pub cycles_bank_principal: Principal,
+    pub cost_cycles: Cycles,
+    pub timestamp: u64,
+    // cycles-bank-module_hash?
+}
+
+
+
 #[derive(CandidType, Deserialize)]
 pub enum CyclesPaymentOrIcpPayment {
     cycles_payment,
@@ -736,7 +794,6 @@ pub enum PurchaseCyclesBankError {
 
 }
 
-
 #[derive(CandidType, Deserialize)]
 pub struct ManagementCanisterInstallCodeQuest<'a> {
     mode : ManagementCanisterInstallCodeMode,
@@ -751,7 +808,6 @@ pub enum ManagementCanisterInstallCodeMode {
     reinstall, 
     upgrade
 }
-
 
 #[update]
 pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBankPurchaseLog, PurchaseCyclesBankError> {

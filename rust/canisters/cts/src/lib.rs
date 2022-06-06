@@ -42,47 +42,10 @@
 
 
 
-//#![allow(unused)] // take this out when done
+//#![allow(unused)] 
 #![allow(non_camel_case_types)]
 
-use std::cell::{Cell, RefCell, RefMut};
-use std::collections::HashMap;
-
-
-use ic_cdk::{
-    api::{
-        trap,
-        caller, 
-        time, 
-        call::{
-            arg_data,
-            arg_data_raw,
-            arg_data_raw_size,
-            call_raw128,
-            call,
-            call_with_payment128,
-            CallResult,
-            RejectionCode,
-            msg_cycles_refunded128,
-            msg_cycles_available128,
-            msg_cycles_accept128,
-            reject,
-            reply,
-        },
-    },
-    export::{
-        Principal,
-        candid::{
-            CandidType,
-            Deserialize,
-            utils::{
-                encode_one, 
-                // decode_one
-            },
-        },
-    },
-};
-use ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade};
+use std::{cell::{Cell, RefCell, RefMut}, collections::HashMap};
 
 use cts_lib::{
     types::{
@@ -96,14 +59,56 @@ use cts_lib::{
     consts::{
         MANAGEMENT_CANISTER_ID,
     },
+    fees::{
+
+    },
     tools::{
         sha256,
         localkey_refcell::{
             self,
             with, 
             with_mut,
+        }
+    },
+    ic_cdk::{
+        api::{
+            trap,
+            caller, 
+            time, 
+            call::{
+                arg_data,
+                arg_data_raw,
+                arg_data_raw_size,
+                call_raw128,
+                call,
+                call_with_payment128,
+                CallResult,
+                RejectionCode,
+                msg_cycles_refunded128,
+                msg_cycles_available128,
+                msg_cycles_accept128,
+                reject,
+                reply,
+            },
         },
-
+        export::{
+            Principal,
+            candid::{
+                CandidType,
+                Deserialize,
+                utils::{
+                    encode_one, 
+                    // decode_one
+                },
+            },
+        },
+    },
+    ic_cdk_macros::{
+        update, 
+        query, 
+        init, 
+        pre_upgrade, 
+        post_upgrade
     },
     ic_ledger_types::{
         IcpMemo,
@@ -192,21 +197,14 @@ use stable::{
 
 
 
-// :FEES.
-pub const CYCLES_TRANSFER_FEE: Cycles = 100_000_000_000;
-pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = 1; // 100_000_000_000
-pub const CYCLES_BANK_COST: Cycles = 1; // 10_000_000_000_000;
-pub const CYCLES_BANK_UPGRADE_COST: Cycles = 5; // 5_000_000_000_000;
 pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
 pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000) * with(&USERS_MAP_CANISTERS, |umcs| umcs.len()); // :do: clude wasm-instructions-counts
 pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = 5_000_000_000_000;
 
-pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate through the xdr conversion rate ? // 100_000_000_000-cycles
 
 
 
-pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
-pub const ICP_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));
+
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
@@ -280,14 +278,15 @@ pub async fn cycles_transfer() {
     
     // take a fee for the cycles_transfer_into_user? not for now
     
-    match call<(,)>(
+    match call_with_payment128<(,)>(
         user_canister_id,
         "cts_cycles_transfer_into_user",
         (CyclesTransferIntoUser{ 
             canister: caller(), // check that this is the original caller
             cycles: cycles_available,
             timestamp_nanos: timestamp_nanos
-        },)
+        },),
+        
     ).await {
         Ok((,)) => {
             msg_cycles_accept128(cycles_available);
