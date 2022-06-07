@@ -1,11 +1,6 @@
-use crate::{
-    UserData,
-
-};
-
 use std::collections::HashMap;
 
-use ic_cdk::{
+use cts_lib::ic_cdk::{
     api::{
         stable::{
             // stable_bytes,
@@ -35,6 +30,8 @@ const STABLE_HEADER_SIZE_BYTES: u64 = 1 * KIB;
 
 
 
+
+
 //test this if len is more than 64*KIB
 fn stable64_get(start: u64, len: u64) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![0; len.try_into().unwrap()];
@@ -56,6 +53,8 @@ fn make_sure_stable_memory_is_big_enough(min_bytes: u64) -> Result<(), StableMem
 
 
 
+
+/*
 pub fn save_users_data<'a>(users_data: &'a HashMap<Principal, UserData>) {
     let mut b: Vec<u8> = Vec::new();
     serde_cbor::to_writer(&mut b, users_data);
@@ -101,3 +100,4 @@ pub fn read_new_canisters() -> Vec<Principal> {
 
     ncs
 }
+*/

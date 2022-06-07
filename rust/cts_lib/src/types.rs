@@ -1,11 +1,9 @@
-use crate::ic_ledger_types::*;
-
-
-use ic_cdk::{
+use crate::ic_cdk::{
     api::time,
     export::{
         Principal,
         candid::{
+            self,
             CandidType,
             Deserialize,   
         }
@@ -99,15 +97,135 @@ impl UserLock {
 
 
 
+mod management_canister {
+    use super::*;
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct ManagementCanisterInstallCodeQuest<'a> {
+        mode : ManagementCanisterInstallCodeMode,
+        canister_id : Principal,
+        wasm_module : &'a [u8],
+        arg : &'a [u8],
+    }
 
-#[derive(CandidType, Deserialize)]
-pub struct UserCanisterInit {
-    pub user_id: UserId,
-    pub users_map_canister_id: UsersMapCanisterId,
-    pub cts_id: Principal,
+    #[derive(CandidType, Deserialize)]
+    pub enum ManagementCanisterInstallCodeMode {
+        install, 
+        reinstall, 
+        upgrade
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct ManagementCanisterCreateCanisterQuest {
+        settings : Option<ManagementCanisterOptionalCanisterSettings>
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct ManagementCanisterOptionalCanisterSettings {
+        pub controllers : Option<Vec<Principal>>,
+        pub compute_allocation : Option<u128>,
+        pub memory_allocation : Option<u128>,
+        pub freezing_threshold : Option<u128>,
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct ManagementCanisterCanisterSettings {
+        pub controllers : Vec<Principal>,
+        pub compute_allocation : u128,
+        pub memory_allocation : u128,
+        pub freezing_threshold : u128
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct ManagementCanisterCanisterStatusRecord {
+        pub status : ManagementCanisterCanisterStatusVariant,
+        pub settings: ManagementCanisterCanisterSettings,
+        pub module_hash: Option<[u8; 32]>,
+        pub memory_size: u128,
+        pub cycles: u128
+    }
+
+    #[derive(CandidType, Deserialize, PartialEq)]
+    pub enum ManagementCanisterCanisterStatusVariant {
+        running,
+        stopping,
+        stopped,
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CanisterIdRecord {
+        pub canister_id : Principal
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct ChangeCanisterSettingsRecord {
+        pub canister_id : Principal,
+        pub settings : ManagementCanisterOptionalCanisterSettings
+    }
+
+
 }
 
-#[derive(CandidType, Deserialize)]
-pub struct UsersMapCanisterInit {
-    pub cts_id: Principal
+
+
+
+
+
+
+
+
+
+
+mod user_canister {
+    use super::*;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct UserCanisterInit {
+        pub user_id: UserId,
+        pub users_map_canister_id: UsersMapCanisterId,
+        pub cts_id: Principal,
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransferIntoUser {
+        canister: Principal,
+        cycles: Cycles,
+        timestamp_nanos: u64
+    }
+
+        
 }
+
+
+
+
+
+
+mod users_map_canister {
+    use super::*;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct UsersMapCanisterInit {
+        pub cts_id: Principal
+    }
+
+    #[derive(CandidType,Deserialize)]
+    pub enum PutNewUserError {
+        CanisterIsFull,
+        FoundUser(UserCanisterId)
+    }
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+

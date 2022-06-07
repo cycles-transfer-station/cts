@@ -4,6 +4,7 @@ use std::{
 };
 use cts_lib::{
     ic_cdk::{
+        self,
         api::{
             trap,
             caller
@@ -82,7 +83,7 @@ fn post_upgrade() {
 
 
 
-
+#[derive(CandidType,Deserialize)]
 pub enum PutNewUserError {
     CanisterIsFull,
     FoundUser(UserCanisterId)

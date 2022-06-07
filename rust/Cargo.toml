@@ -9,6 +9,9 @@ members = [
     "canisters/user_canister",
     "canisters/cycles_transferrer",
     "canisters/cycles_market",
+    
+    "canisters/testcanister1",
+    "canisters/testcanister2",
 ]
 
 

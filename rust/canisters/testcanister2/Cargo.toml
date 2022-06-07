@@ -1,16 +1,15 @@
 [package]
-name = "users_map_canister"
+name = "testcanister2"
 version = "0.1.0"
 edition = "2021"
+
+
+
 
 
 [lib]
 crate-type = ["cdylib"]
 
-
-
 [dependencies]
 cts_lib = { path = "../../cts_lib" }
-serde = "1.0.136"
 candid = "0.7.11"
-

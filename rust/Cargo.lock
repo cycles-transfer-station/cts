@@ -213,10 +213,6 @@ dependencies = [
  "candid",
  "cts_lib",
  "futures",
- "global_allocator_counter",
- "ic-cdk 0.5.0",
- "ic-cdk-macros 0.5.0",
- "ic-certified-map",
  "serde",
  "serde_cbor",
  "sha2",
@@ -227,7 +223,9 @@ name = "cts_lib"
 version = "0.1.0"
 dependencies = [
  "candid",
- "ic-cdk 0.5.0",
+ "ic-cdk 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
+ "ic-cdk-macros 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
+ "ic-certified-map",
  "ic-ledger-types",
  "serde",
  "sha2",
@@ -246,16 +244,16 @@ dependencies = [
 name = "cycles_market"
 version = "0.1.0"
 dependencies = [
- "ic-cdk 0.5.0",
- "ic-cdk-macros 0.5.0",
+ "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ic-cdk-macros 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "cycles_transferrer"
 version = "0.1.0"
 dependencies = [
- "ic-cdk 0.5.0",
- "ic-cdk-macros 0.5.0",
+ "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ic-cdk-macros 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -432,10 +430,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "global_allocator_counter"
-version = "0.1.0"
-
-[[package]]
 name = "half"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -475,9 +469,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e511d1a019e620d5a3dc43bead7d3c46912bf4f4bfb1d602059046c7a22bb1e"
+checksum = "953c6f940bbf1f79460849fa61cd3ac04768f8f0deb743d185860892f65cbff2"
 dependencies = [
  "candid",
  "cfg-if",
@@ -486,9 +480,8 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bf92c1ce281995ec4cecca2a0da8f3420af546ed807dceb46441197642f3c1f"
+version = "0.5.1"
+source = "git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742#468cc63b89453ec9c334e49a81060c7c7aa4b742"
 dependencies = [
  "candid",
  "cfg-if",
@@ -512,12 +505,26 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk-macros"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d2d6181f0a29fefb75493822339591b6244098c5ab9eb67790cc6b805d3a42b"
+checksum = "2f50910f1df55124b5374847fd2b4e3515c426f6d1ce1a23503208e80832fbc2"
 dependencies = [
  "candid",
- "ic-cdk 0.5.0",
+ "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "syn",
+]
+
+[[package]]
+name = "ic-cdk-macros"
+version = "0.5.1"
+source = "git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742#468cc63b89453ec9c334e49a81060c7c7aa4b742"
+dependencies = [
+ "candid",
+ "ic-cdk 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
  "proc-macro2",
  "quote",
  "serde",
@@ -537,15 +544,16 @@ dependencies = [
 
 [[package]]
 name = "ic-ledger-types"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b6ed965b39ea4cf482053bfebc8bbe40329b664e0de64109530d6c33d6c708e"
+checksum = "3e5538e50e22dcdc395c0e3161b62fae088c4ff74342aaee4770ac0caddbce69"
 dependencies = [
  "candid",
  "crc32fast",
  "hex",
- "ic-cdk 0.4.0",
+ "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
+ "serde_bytes",
  "sha2",
 ]
 
@@ -1036,6 +1044,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "testcanister1"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+]
+
+[[package]]
+name = "testcanister2"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1103,9 +1127,6 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cts_lib",
- "global_allocator_counter",
- "ic-cdk 0.5.0",
- "ic-cdk-macros 0.5.0",
  "serde",
 ]
 
@@ -1115,10 +1136,6 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cts_lib",
- "global_allocator_counter",
- "ic-cdk 0.5.0",
- "ic-cdk-macros 0.5.0",
- "ic-certified-map",
  "serde",
 ]
 

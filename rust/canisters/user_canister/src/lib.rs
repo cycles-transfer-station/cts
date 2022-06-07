@@ -4,6 +4,7 @@ use std::{
 };
 use cts_lib::{
     ic_cdk::{
+        self,
         api::{
             trap,
             caller,
@@ -37,7 +38,10 @@ use cts_lib::{
         MAINNET_LEDGER_CANISTER_ID
     },
     types::{
-        UserCanisterInit
+        user_canister::{
+            UserCanisterInit,
+            CyclesTransferIntoUser
+        }
     },
     tools::{
         localkey_refcell::{with, with_mut},
@@ -194,12 +198,6 @@ pub async fn user_icp_balance() -> Result<IcpTokens, UserIcpBalanceError> {
 
 
 
-struct CyclesTransferIntoUser {
-    canister: Principal,
-    cycles: Cycles,
-    timestamp_nanos: u64
-}
-
 // CTS-method
 #[export_name = "canister_update cts_cycles_transfer_into_user"]
 pub fn cts_cycles_transfer_into_user() {
@@ -214,18 +212,13 @@ pub fn cts_cycles_transfer_into_user() {
     }
     
     let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data<(CyclesTransferIntoUser,)>();
-
-    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    if cycles != cycles_transfer_into_user.cycles {
-        trap("something is not what i thought.")
-    }
     
     with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance += cycles;
+        user_data.cycles_balance += cycles_transfer_into_user.cycles;
         user_data.cycles_transfers_into_user.push(cycles_transfer_into_user);
     });
     
-    reply<(,)>((,));
+    reply<()>(());
     return;
     
     
@@ -792,21 +785,6 @@ pub enum PurchaseCyclesBankError {
     UpdateSettingsCallError(String),
 
 
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ManagementCanisterInstallCodeQuest<'a> {
-    mode : ManagementCanisterInstallCodeMode,
-    canister_id : Principal,
-    wasm_module : &'a [u8],
-    arg : &'a [u8],
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum ManagementCanisterInstallCodeMode {
-    install, 
-    reinstall, 
-    upgrade
 }
 
 #[update]

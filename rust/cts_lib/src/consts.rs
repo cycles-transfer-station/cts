@@ -1,5 +1,10 @@
-use ic_cdk::export::Principal;
-
+use crate::{
+    ic_cdk::export::Principal,
+    ic_ledger_types::{
+        IcpMemo
+    }
+};
+ 
 
 
 

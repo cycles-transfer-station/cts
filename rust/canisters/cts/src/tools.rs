@@ -1,49 +1,70 @@
 use std::collections::HashMap;
 // use sha2::Digest;
-use ic_cdk::{
-    api::{
-        id,
-        time,
-        trap,
-        call::{
-            CallResult,
-            call_raw128,
-            call,
-        },
-    },
-    export::{
-        Principal,
-        candid::{
-            CandidType,
-            Deserialize,
-            utils::{encode_one, decode_one},
-        },
-    }
-};
 
 use crate::{
-    USERS_DATA,
     NEW_CANISTERS,
     LATEST_KNOWN_CMC_RATE,
-    MAX_USERS_MAP_CANISTERS
+    MAX_USERS_MAP_CANISTERS,
+    USERS_MAP_CANISTERS,
+    CREATE_NEW_USERS_MAP_CANISTER_LOCK,
+    USERS_MAP_CANISTER_CODE,
 };
-
+//use candid::{CandidType,Deserialize};
 use cts_lib::{
     types::{
         UserLock,
-        UserData,
         Cycles,
-        UsersMapCanisterInit,
+        users_map_canister::{
+            UsersMapCanisterInit,
+            PutNewUserError as UsersMapCanisterPutNewUserError
+        },
         UserId,
         UserCanisterId,
-        UsersMapCanisterId
+        UsersMapCanisterId,
+        management_canister::{
+            ManagementCanisterInstallCodeMode,
+            ManagementCanisterInstallCodeQuest,
+            ManagementCanisterCreateCanisterQuest,
+            ManagementCanisterCanisterSettings,
+            ManagementCanisterOptionalCanisterSettings,
+            ManagementCanisterCanisterStatusRecord,
+            ManagementCanisterCanisterStatusVariant,
+            CanisterIdRecord,
+            ChangeCanisterSettingsRecord,
+            
+        }
     },
     consts::{
-        MANAGEMENT_CANISTER_ID
+        MANAGEMENT_CANISTER_ID,
+        ICP_FEE_MEMO
     },
     tools::{
         sha256,
-        localkey_refcell::{self, with, with_mut}
+        localkey_refcell::{self, with, with_mut},
+        user_icp_id,
+        principal_icp_subaccount,
+        principal_as_thirty_bytes,
+    },
+    ic_cdk::{
+        api::{
+            id,
+            time,
+            trap,
+            call::{
+                CallResult,
+                call_raw128,
+                call,
+                RejectionCode,
+            },
+        },
+        export::{
+            Principal,
+            candid::{
+                CandidType,
+                Deserialize,
+                utils::{encode_one, decode_one},
+            },
+        }
     },
     ic_ledger_types::{
         IcpId,
@@ -73,9 +94,7 @@ pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 
 pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
 
-
-
-pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
+pub const USER_CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"UT";
 
 
 
@@ -85,20 +104,11 @@ pub const CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"TP";
 pub fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<IcpTokens> {
     icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs { account: user_icp_balance_id(user_id) }    
+        IcpAccountBalanceArgs { account: user_icp_id(&id(), user_id) }    
     ).await
 }
 
-pub async fn check_user_icp_balance(user: &Principal) -> CallResult<IcpTokens> {
-    let mut icp_balance: IcpTokens = check_user_icp_ledger_balance(user).await?;
-    with(&USERS_DATA, |ud| { 
-        if let Some(u) = ud.get(user) {
-            *&mut icp_balance -= u.untaken_icp_to_collect;
-        } 
-    });
-    //icp_balance -= USERS_DATA.with(|ud| { ud.borrow_mut().entry(*user).or_default().untaken_icp_to_collect });
-    Ok(icp_balance)
-}
+
 
 
 pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallResult<IcpTransferResult> {
@@ -119,52 +129,18 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
 
 pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
     let mut memo_bytes = [0u8; 32];
-    memo_bytes[..2].copy_from_slice(CYCLES_BALANCE_TOPUP_MEMO_START);
+    memo_bytes[..2].copy_from_slice(USER_CYCLES_BALANCE_TOPUP_MEMO_START);
     memo_bytes[2..].copy_from_slice(&principal_as_thirty_bytes(user));
     memo_bytes
 }
 
 
-#[derive(CandidType, Deserialize)]
-pub enum CheckUserCyclesBalanceError {
-    FindUserError(FindUserError),
-}
-
-pub async fn check_user_cycles_balance(user: &Principal) -> Result<Cycles, CheckUserCyclesBalanceError> {
-    with(&USERS_DATA, |users_data| {
-        if let Some(u) = users_data.get(user) {
-            Ok(u.cycles_balance)
-        } else {
-            Ok(0)
-        }
-        //ud.borrow_mut().entry(*user).or_default().cycles_balance
-    })
-}
 
 
 pub fn main_cts_icp_id() -> IcpId {  // do once
     IcpId::new(&id(), &ICP_DEFAULT_SUBACCOUNT)
 }
 
-
-pub fn check_lock_and_lock_user(user: &Principal) {
-    USERS_DATA.with(|ud| {
-        let users_data: &mut HashMap<Principal, UserData> = &mut ud.borrow_mut();
-        let user_lock: &mut UserLock = &mut users_data.entry(*user).or_default().user_lock;
-        let current_time: u64 = time();
-        if user_lock.lock == true && current_time - user_lock.last_lock_time_nanos < 30*60*1_000_000_000 {
-            trap("this user is in the middle of a different call");
-        }
-        user_lock.lock = true;
-        user_lock.last_lock_time_nanos = current_time;
-    });
-}
-
-pub fn unlock_user(user: &Principal) {
-    USERS_DATA.with(|ud| {
-        ud.borrow_mut().get_mut(user).unwrap().user_lock.lock = false;
-    });
-}
 
 
 
@@ -262,6 +238,7 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
 
 
 
+
 pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
     icpts.e8s() as u128 
     * xdr_permyriad_per_icp as u128 
@@ -286,53 +263,6 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct ManagementCanisterCreateCanisterQuest {
-    settings : Option<ManagementCanisterOptionalCanisterSettings>
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ManagementCanisterOptionalCanisterSettings {
-    pub controllers : Option<Vec<Principal>>,
-    pub compute_allocation : Option<u128>,
-    pub memory_allocation : Option<u128>,
-    pub freezing_threshold : Option<u128>,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ManagementCanisterCanisterSettings {
-    pub controllers : Vec<Principal>,
-    pub compute_allocation : u128,
-    pub memory_allocation : u128,
-    pub freezing_threshold : u128
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ManagementCanisterCanisterStatusRecord {
-    pub status : ManagementCanisterCanisterStatusVariant,
-    pub settings: ManagementCanisterCanisterSettings,
-    pub module_hash: Option<[u8; 32]>,
-    pub memory_size: u128,
-    pub cycles: u128
-}
-
-#[derive(CandidType, Deserialize, PartialEq)]
-pub enum ManagementCanisterCanisterStatusVariant {
-    running,
-    stopping,
-    stopped,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct CanisterIdRecord {
-    pub canister_id : Principal
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ChangeCanisterSettingsRecord {
-    pub canister_id : Principal,
-    pub settings : ManagementCanisterOptionalCanisterSettings
-}
 
 
 #[derive(CandidType, Deserialize)]
@@ -367,8 +297,8 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
         }
     };
 
-    let canister_id: Principal = match CallResult<Vec<u8>> = call_raw128(
-        MANAGEMENT_CANISTER_PRINCIPAL,
+    let canister_id: Principal = match call_raw128(
+        MANAGEMENT_CANISTER_ID,
         "create_canister",
         &create_canister_management_call_quest_candid_bytes,
         100_000_000_000/*create_canister-cost*/ + with_cycles
@@ -424,7 +354,7 @@ pub enum CmcNotifyError {
     TransactionTooOld(IcpBlockHeight),
 }
 
-type NotifyTopUpResult = Result<Cycles, NotifyError>;
+type NotifyTopUpResult = Result<Cycles, CmcNotifyError>;
 
 
 
@@ -444,7 +374,7 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
     let topup_cycles_icp_transfer_call_block_index: IcpBlockHeight = match icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
-            memo: ICP_TOP_UP_CANISTER_MEMO,
+            memo: ICP_LEDGER_TOP_UP_CANISTER_MEMO,
             amount: icp,                              
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: from_subaccount,
@@ -540,10 +470,11 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
 
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
 pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canister_id: UserCanisterId) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
+    use cts_lib::types::users_map_canister::{PutNewUserError as UsersMapCanisterPutNewUserError};
     
     for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
         let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
-        match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
+        match call::<(Result<(), UsersMapCanisterPutNewUserError>,)>(
             umc_id,
             "put_new_user",
             (user_id, user_canister_id),
@@ -566,7 +497,7 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canist
         Err(create_new_users_map_canister_error) => return Err(PutNewUserIntoAUsersMapCanisterError::CreateNewUsersMapCanisterError(create_new_users_map_canister_error))
     };
     
-    match call<(Result<(), UsersMapCanisterPutNewUserError>,)>(
+    match call::<(Result<(), UsersMapCanisterPutNewUserError>,)>(
         umc_id,
         "put_new_user",
         (user_id, user_canister_id),
@@ -612,7 +543,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     ).await {
         Ok(canister_id) => canister_id,
         Err(get_new_canister_error) => Err(return CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error))
-    }    
+    };    
     
     // install code
     if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.is_none()) {
@@ -620,20 +551,20 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
     
-    match call<(,)>(
+    match call::<()>(
         MANAGEMENT_CANISTER_ID,
         "install_code",
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe localkey_refcell::get(&USERS_MAP_CANISTER_CODE).unwrap().module(),   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe { localkey_refcell::get(&USERS_MAP_CANISTER_CODE).unwrap().module() },   // .unwrap bc we checked if .is_none() before
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
         },)
     ).await {
         Ok(_) => {
-            with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { users_map_canisters.push(new_users_map_canister_id); }) 
+            with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { users_map_canisters.push(new_users_map_canister_id); }); 
             CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
             Ok(new_users_map_canister_id)    
         },
@@ -660,12 +591,12 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(Us
     
     for i in 0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
         let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
-        match call<(Option<UserData>,)>(
+        match call::<(Option<UserCanisterId>,)>(
             umc_id,
             "find_user",
             (user_id,)
         ).await {
-            Ok(optional_user_data) => match optional_user_data {
+            Ok(optional_user_canister_id) => match optional_user_canister_id {
                 Some(user_canister_id) => return Ok((user_canister_id, umc_id)),
                 None => continue
             },
