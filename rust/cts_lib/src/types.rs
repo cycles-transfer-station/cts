@@ -97,7 +97,7 @@ impl UserLock {
 
 
 
-mod management_canister {
+pub mod management_canister {
     use super::*;
     
     #[derive(CandidType, Deserialize)]
@@ -128,7 +128,7 @@ mod management_canister {
         pub freezing_threshold : Option<u128>,
     }
 
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct ManagementCanisterCanisterSettings {
         pub controllers : Vec<Principal>,
         pub compute_allocation : u128,
@@ -136,7 +136,7 @@ mod management_canister {
         pub freezing_threshold : u128
     }
 
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct ManagementCanisterCanisterStatusRecord {
         pub status : ManagementCanisterCanisterStatusVariant,
         pub settings: ManagementCanisterCanisterSettings,
@@ -145,7 +145,7 @@ mod management_canister {
         pub cycles: u128
     }
 
-    #[derive(CandidType, Deserialize, PartialEq)]
+    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
     pub enum ManagementCanisterCanisterStatusVariant {
         running,
         stopping,
@@ -176,7 +176,7 @@ mod management_canister {
 
 
 
-mod user_canister {
+pub mod user_canister {
     use super::*;
 
     #[derive(CandidType, Deserialize)]
@@ -201,7 +201,7 @@ mod user_canister {
 
 
 
-mod users_map_canister {
+pub mod users_map_canister {
     use super::*;
 
     #[derive(CandidType, Deserialize)]
