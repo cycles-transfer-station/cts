@@ -6,12 +6,21 @@ use cts_lib::{
     ic_cdk::{
         self,
         api::{
+            id,
+            time,
             trap,
             caller,
             call::{
                 msg_cycles_accept128,
                 msg_cycles_available128,
-                msg_cycles_refunded128
+                msg_cycles_refunded128,
+                RejectionCode,
+                reject,
+                reply,
+                CallResult,
+                arg_data,
+                
+                
             }
         },
         export::{
@@ -19,6 +28,7 @@ use cts_lib::{
             candid::{
                 CandidType,
                 Deserialize,
+                utils::encode_one,
             },
         }
     },
@@ -30,6 +40,7 @@ use cts_lib::{
         post_upgrade
     },
     ic_ledger_types::{
+        IcpTokens,
         IcpBlockHeight,
         IcpAccountBalanceArgs,
         IcpId,
@@ -38,6 +49,11 @@ use cts_lib::{
         MAINNET_LEDGER_CANISTER_ID
     },
     types::{
+        Cycles,
+        CyclesTransfer,
+        CyclesTransferMemo,
+        
+        
         user_canister::{
             UserCanisterInit,
             CyclesTransferIntoUser
@@ -64,8 +80,8 @@ struct UserData {
     cycles_transfer_purchases: HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>,
     cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
     icp_transfers_out: Vec<IcpBlockHeight>,
-    icp_transfers_in: Vec<IcpBlockHeight>
-    cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
+    icp_transfers_in: Vec<IcpBlockHeight>,
+    //cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
     
 }
 
@@ -74,8 +90,12 @@ impl UserData {
         Self {
             cycles_balance: 0u128,    
             cts_take_icp: IcpTokens::ZERO,
-            cycles_transfer_purchases: Hashmap::new(),
-            ..Default::default()
+            cycles_transfer_purchases: HashMap::new(),
+            cycles_transfers_into_user: Vec::new(),
+            icp_transfers_out: Vec::new(),
+            icp_transfers_in: Vec::new(),
+            //cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
+            
         }
     }
 }
@@ -108,7 +128,7 @@ fn init(user_canister_init: UserCanisterInit) {
     CTS_ID.with(|cts_id| { cts_id.set(user_canister_init.cts_id); });
     USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.set(user_canister_init.users_map_canister_id); });
     USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
-    USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::user::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
+    USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::tools::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
      
 }
 
@@ -145,7 +165,8 @@ fn user_icp_id() -> IcpId {
 
 
 fn is_canister_full() -> bool {
-
+    // FOR THE DO!
+    false
 }
 
 fn get_new_cycles_transfer_purchase_log_id() -> u64 {
@@ -161,7 +182,7 @@ fn get_new_cycles_transfer_purchase_log_id() -> u64 {
 
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCyclesBalanceError {}
 
 #[query]
@@ -170,7 +191,7 @@ pub fn user_cycles_balance() -> Result<Cycles, UserCyclesBalanceError> {
 }
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserIcpBalanceError {
     IcpLedgerAccountBalanceCallError(String),
 }
@@ -179,12 +200,12 @@ pub enum UserIcpBalanceError {
 pub async fn user_icp_balance() -> Result<IcpTokens, UserIcpBalanceError> {
     let user_icp_ledger_balance: IcpTokens = match icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArg{
+        IcpAccountBalanceArgs{
             account: user_icp_id()
         }
     ).await {
         Ok(icp_tokens) => icp_tokens,
-        Err(call_error) => Err(UserIcpBalanceError::IcpLedgerAccountBalanceCallError(format!("{:?}", call_error)))
+        Err(call_error) => return Err(UserIcpBalanceError::IcpLedgerAccountBalanceCallError(format!("{:?}", call_error)))
     };
     Ok(user_icp_ledger_balance - with(&USER_DATA, |user_data| user_data.cts_take_icp))
 }
@@ -211,14 +232,14 @@ pub fn cts_cycles_transfer_into_user() {
         return;
     }
     
-    let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data<(CyclesTransferIntoUser,)>();
+    let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data::<(CyclesTransferIntoUser,)>();
     
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance += cycles_transfer_into_user.cycles;
         user_data.cycles_transfers_into_user.push(cycles_transfer_into_user);
     });
     
-    reply<()>(());
+    reply::<()>(());
     return;
     
     
@@ -276,7 +297,10 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     if q.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
         return Err(UserTransferCyclesError::BalanceTooLow { user_cycles_balance: user_cycles_balance, cycles_transfer_fee: CYCLES_TRANSFER_FEE });
     }
-    std::mem::drop(user_cycles_balance);
+    
+    
+    panic!("")
+    /*
     
     let cycles_transfer_call_candid_bytes = match encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo }) {
         Ok(cb) => cb,
@@ -301,7 +325,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     });
     
     
-    let cycles_transfer_call: impl Future<Output = CallResult<Vec<u8>>> = call_raw128(
+    let cycles_transfer_call = CallResult<Vec<u8>>> = call_raw128(
         q.canister_id,
         "cycles_transfer",
         &cycles_transfer_call_candid_bytes,
@@ -349,6 +373,9 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
         }
     }
     
+    */    
+
+    
 
 }
 
@@ -363,6 +390,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
 
 
 
+/*
 
 
 #[export_name = "canister_query see_cycles_transfer_purchases"]
@@ -398,15 +426,6 @@ pub fn see_cycles_bank_purchases<'a>() -> () {
     ic_cdk::api::call::reply::<(&'a Vec<CyclesBankPurchaseLog>,)>((unsafe { &*user_cycles_bank_purchases },))
 
 }
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1039,9 +1058,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<CyclesBa
     Ok(cycles_bank_purchase_log)
 }
 
-
-
-
+*/
 
 
 

@@ -102,10 +102,10 @@ pub mod management_canister {
     
     #[derive(CandidType, Deserialize)]
     pub struct ManagementCanisterInstallCodeQuest<'a> {
-        mode : ManagementCanisterInstallCodeMode,
-        canister_id : Principal,
-        wasm_module : &'a [u8],
-        arg : &'a [u8],
+        pub mode : ManagementCanisterInstallCodeMode,
+        pub canister_id : Principal,
+        pub wasm_module : &'a [u8],
+        pub arg : &'a [u8],
     }
 
     #[derive(CandidType, Deserialize)]
@@ -117,7 +117,7 @@ pub mod management_canister {
     
     #[derive(CandidType, Deserialize)]
     pub struct ManagementCanisterCreateCanisterQuest {
-        settings : Option<ManagementCanisterOptionalCanisterSettings>
+        pub settings : Option<ManagementCanisterOptionalCanisterSettings>
     }
 
     #[derive(CandidType, Deserialize)]
@@ -188,9 +188,9 @@ pub mod user_canister {
     
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferIntoUser {
-        canister: Principal,
-        cycles: Cycles,
-        timestamp_nanos: u64
+        pub canister: Principal,
+        pub cycles: Cycles,
+        pub timestamp_nanos: u64
     }
 
         

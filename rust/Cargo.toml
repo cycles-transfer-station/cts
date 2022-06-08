@@ -3,7 +3,6 @@
 
 members = [
     "cts_lib",
-    "canisters/cycles-bank",
     "canisters/cts",
     "canisters/users_map_canister",
     "canisters/user_canister",
@@ -12,11 +11,6 @@ members = [
     
     "canisters/testcanister1",
     "canisters/testcanister2",
-]
-
-
-exclude = [
-
 ]
 
 

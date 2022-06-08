@@ -212,9 +212,9 @@ use stable::{
 
 
 pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
-pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000) * with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u128); // :do: clude wasm-instructions-counts
+pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000 + 1_000_000_000); // * with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u128); // :do: clude wasm-instructions-counts 1000000000 placeholder
 pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = 5_000_000_000_000;
-
+pub const CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE: Cycles = 3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
 
 
 
@@ -227,7 +227,7 @@ pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3
 
 thread_local! {
 
-    pub static NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
+    static NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
     pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
     pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
@@ -438,12 +438,13 @@ impl NewUserData {
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserMidCallError{
-    UsersMapCanisterFindUserCallFail,
+    UsersMapCanisterFindUserCallFail(UsersMapCanisterId, String),
     PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
     CreateUserCanisterIcpTransferError(IcpTransferError),
     CreateUserCanisterIcpTransferCallError(String),
     CreateUserCanisterCmcNotifyError(CmcNotifyError),
     CreateUserCanisterCmcNotifyCallError(String),
+    UserCanisterUninstallCodeCallError(String),
     UserCanisterCodeNotFound,
     UserCanisterInstallCodeCallError(String),
     UserCanisterStatusCallError(String),
@@ -498,17 +499,15 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
     let user_id: Principal = caller();
     
-    let mut new_user_data: NewUserData; 
-    
-    with_mut(&NEW_USERS, |new_users| {
+    let mut new_user_data: NewUserData = with_mut(&NEW_USERS, |new_users| {
         match new_users.get_mut(&user_id) {
-            Some(mut nud) => {
+            Some(nud) => {
                 if nud.lock == true {
                     trap("new user is in the middle of another call")
                 }
                 nud.lock = true;
                 // update nud.lock_time_start_nanos?
-                new_user_data = nud.clone();
+                nud.clone()
             },
             None => {
                 if new_users.len() >= MAX_NEW_USERS {
@@ -516,7 +515,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 }
                 let nud: NewUserData = NewUserData::new();
                 new_users.insert(user_id, nud.clone());
-                new_user_data = nud;
+                nud
             }
         }
     });
@@ -581,10 +580,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 FindUserInTheUsersMapCanistersError::UserNotFound => {
                     new_user_data.look_if_user_is_in_the_users_map_canisters = true;                    
                 },
-                FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail => {
+                FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error_string) => {
                     new_user_data.lock = false;
                     write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterFindUserCallFail));
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterFindUserCallFail(umc_id, call_error_string)));
                 }
             }
         };
@@ -597,7 +596,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             MAINNET_LEDGER_CANISTER_ID,
             IcpTransferArgs {
                 memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
-                amount: IcpTokens::from_e8s((new_user_data.current_membership_cost_icp().unwrap().e8s() as f64 * 0.7) as ),                              
+                amount: cycles_to_icptokens(CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate.unwrap()),
                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                 from_subaccount: Some(principal_icp_subaccount(&user_id)),
                 to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
@@ -634,19 +633,17 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 block_index: new_user_data.create_user_canister_block_height.unwrap()
             },)
         ).await {
-            Ok(notify_result) => match notify_result {
+            Ok((notify_result,)) => match notify_result {
                 Ok(new_canister_id) => new_canister_id,
                 Err(cmc_notify_error) => {
                     // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
                     match cmc_notify_error {
-                        CmcNotifyError::TransactionTooOld(_)
-                        | CmcNotifyError::InvalidTransaction(_)
-                        | CmcNotifyError::Refunded{ block_index, reason }
-                        => {
+                        CmcNotifyError::TransactionTooOld(_) | CmcNotifyError::Refunded{ .. } => {
                             with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
                             return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
                         },
-                        | CmcNotifyError::Other{ error_message, error_code }
+                        CmcNotifyError::InvalidTransaction(_) // 
+                        | CmcNotifyError::Other{ .. }
                         | CmcNotifyError::Processing
                         => {
                             new_user_data.lock = false;
@@ -668,13 +665,26 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
 
+    if new_user_data.users_map_canister.is_none() {
+        
+        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(user_id, new_user_data.user_canister.unwrap()).await {
+            Ok(umcid) => umcid,
+            Err(put_new_user_into_a_users_map_canister_error) => {
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
+            }
+        };
+        
+        new_user_data.users_map_canister = Some(users_map_canister_id);
+    }
 
     if new_user_data.user_canister_uninstall_code == false {
         
-        match call::<()>(
+        match call::<(CanisterIdRecord,), ()>(
             MANAGEMENT_CANISTER_ID,
             "uninstall_code",
-            (CanisterIdRecord { canister_id: new_user_data.users_map_canister_data.unwrap().0.user_canister.unwrap() },),
+            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },),
         ).await {
             Ok(_) => {},
             Err(uninstall_code_call_error) => {
@@ -688,27 +698,33 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     }
 
 
+
     if new_user_data.user_canister_install_code == false {
     
-        if with(USER_CANISTER_CODE, |ucc| { ucc.is_none() }) {
+        if with(&USER_CANISTER_CODE, |ucc| { ucc.is_none() }) {
             new_user_data.lock = false;
             write_new_user_data(&user_id, new_user_data);
             return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
         }
 
-        let ucc_module_pointer: *const Vec<u8> = USER_CANISTER_CODE.with(|ucc_refcell| { (*ucc_refcell.borrow()).module() as *const Vec<u8> });
+        let ucc_module_pointer: *const Vec<u8> = with(&USER_CANISTER_CODE, |ucc| { ucc.as_ref().unwrap().module() as *const Vec<u8> });
 
-        match call::<()>(
+        match call::<(ManagementCanisterInstallCodeQuest,), ()>(
             MANAGEMENT_CANISTER_ID,
             "install_code",
             (ManagementCanisterInstallCodeQuest {
                 mode : ManagementCanisterInstallCodeMode::install,
-                canister_id : new_user_data.users_map_canister_data.unwrap().0.user_canister.unwrap(),
+                canister_id : new_user_data.user_canister.unwrap(),
                 wasm_module : unsafe { &*ucc_module_pointer },
-                arg : &encode_one(&UserCanisterInit{  }).unwrap() 
+                arg : &encode_one(&UserCanisterInit{ 
+                    cts_id: id(), 
+                    user_id: user_id,
+                    users_map_canister_id: new_user_data.users_map_canister.unwrap()
+
+                }).unwrap() 
             },),
         ).await {
-            Ok(_) => {},
+            Ok(()) => {},
             Err(put_code_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
@@ -725,7 +741,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         let canister_status_record: ManagementCanisterCanisterStatusRecord = match call(
             MANAGEMENT_CANISTER_ID,
             "canister_status",
-            (CanisterIdRecord { canister_id: new_user_data.users_map_canister_data.unwrap().0.user_canister.unwrap() },),
+            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },),
         ).await {
             Ok((canister_status_record,)) => canister_status_record,
             Err(canister_status_call_error) => {
@@ -739,7 +755,12 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     }
         
     // no async in this if-block so no NewUserData field needed. can make it for the optimization though
-    if new_user_data.user_canister_status_record.unwrap().module_hash.is_none() || new_user_data.user_canister_status_record.unwrap().module_hash.unwrap() != with(&USER_CANISTER_CODE, |ucc| *ucc.module_hash()) {
+    if with(&USER_CANISTER_CODE, |ucc| { ucc.is_none() }) {
+        new_user_data.lock = false;
+        write_new_user_data(&user_id, new_user_data);
+        return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
+    }
+    if new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.is_none() || *(new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap()) != with(&USER_CANISTER_CODE, |ucc| *(ucc.as_ref().unwrap().module_hash())) {
         // go back a couple of steps
         new_user_data.user_canister_uninstall_code = false;                                  
         new_user_data.user_canister_install_code = false;
@@ -751,15 +772,15 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     }
     
 
-    if new_user_data.user_canister_status_record.unwrap().status != ManagementCanisterCanisterStatusVariant::running {
+    if new_user_data.user_canister_status_record.as_ref().unwrap().status != ManagementCanisterCanisterStatusVariant::running {
     
-        match call::<()>(
+        match call::<(CanisterIdRecord,), ()>(
             MANAGEMENT_CANISTER_ID,
             "start_canister",
-            (CanisterIdRecord { canister_id: new_user_data.users_map_canister_data.unwrap().0.user_canister.unwrap() },)
+            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },)
         ).await {
             Ok(_) => {
-                new_user_data.user_canister_status_record.unwrap().status = ManagementCanisterCanisterStatusVariant::running; 
+                new_user_data.user_canister_status_record.as_mut().unwrap().status = ManagementCanisterCanisterStatusVariant::running; 
             },
             Err(start_canister_call_error) => {
                 new_user_data.lock = false;
@@ -769,23 +790,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         }
         
     }
-    
-    
-    
-    if new_user_data.users_map_canister.is_none() {
-        
-        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(user_id, new_user_data.users_map_canister_data.unwrap().0).await {
-            Ok(umcid) => umcid,
-            Err(put_new_user_into_a_users_map_canister_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
-            }
-        };
-        
-        new_user_data.users_map_canister = Some(users_map_canister_id);
-    }
-    
 
     
     
@@ -797,7 +801,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     
     
     if new_user_data.collect_icp == false {
-        match take_user_icp_ledger(&user_id, IcpTokens::from_e8s(new_user_data.current_membership_cost_icp().unwrap().e8s() * 0.3)).await {
+        match take_user_icp_ledger(&user_id, cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR - CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate.unwrap())).await {
             Ok(icp_transfer_result) => match icp_transfer_result {
                 Ok(_block_height) => {
                     new_user_data.collect_icp = true;
@@ -824,8 +828,8 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
     
     Ok(NewUserSuccessData {
-        users_map_canister: new_user_data.users_map_canister_data.unwrap().1.unwrap(),
-        user_canister: new_user_data.users_map_canister_data.unwrap().0.user_canister.unwrap()
+        users_map_canister: new_user_data.users_map_canister.unwrap(),
+        user_canister: new_user_data.user_canister.unwrap()
     })
 }
 
@@ -1016,6 +1020,18 @@ pub fn controller_put_cbcc(module: Vec<u8>) -> () {
         *cbcc = Some(CanisterCode::new(module));
     });
 }
+#[update]
+pub fn controller_put_ucc(module: Vec<u8>) -> () {
+    with_mut(&USER_CANISTER_CODE, |ucc| {
+        *ucc = Some(CanisterCode::new(module));
+    });
+}
+#[update]
+pub fn controller_put_umcc(module: Vec<u8>) -> () {
+    with_mut(&USERS_MAP_CANISTER_CODE, |umcc| {
+        *umcc = Some(CanisterCode::new(module));
+    });
+}
 
 
 #[derive(CandidType, Deserialize)]
@@ -1045,7 +1061,7 @@ pub struct Metrics {
     stable_size: u64,
     cycles_balance: u128,
     new_canisters_count: usize,
-    cbc_hash: Option<[u8; 32]>,
+    cbcc_hash: Option<[u8; 32]>,
     users_map_canister_code_hash: Option<[u8; 32]>,
     user_canister_code_hash: Option<[u8; 32]>,
     //users_count: usize,
@@ -1065,9 +1081,9 @@ pub fn controller_see_metrics() -> Metrics {
         stable_size: ic_cdk::api::stable::stable64_size(),
         cycles_balance: ic_cdk::api::canister_balance128(),
         new_canisters_count: with(&NEW_CANISTERS, |nc| nc.len()),
-        cbc_hash: with(&CYCLES_BANK_CANISTER_CODE, |cbc| match cbc { Some(c) => *c.module_hash(), None => None }),
-        users_map_canister_code_hash: with(&USERS_MAP_CANISTER_CODE, |umcc| match umcc { Some(c) => *c.module_hash(), None => None }),
-        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| match ucc { Some(c) => *c.module_hash(), None => None }),
+        cbcc_hash: with(&CYCLES_BANK_CANISTER_CODE, |cbc| match cbc.as_ref() { Some(c) => Some(*c.module_hash()), None => None }),
+        users_map_canister_code_hash: with(&USERS_MAP_CANISTER_CODE, |umcc| match umcc { Some(c) => Some(*c.module_hash()), None => None }),
+        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| match ucc { Some(c) => Some(*c.module_hash()), None => None }),
         //users_count: with(&USERS_DATA, |ud| ud.len() ),
         latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
         users_map_canisters_count: with(&USERS_MAP_CANISTERS, |umc| umc.len()),

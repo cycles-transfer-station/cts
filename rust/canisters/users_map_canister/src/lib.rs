@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell,RefCell},
     collections::HashMap,
 };
 use cts_lib::{
@@ -7,7 +7,12 @@ use cts_lib::{
         self,
         api::{
             trap,
-            caller
+            caller,
+            call::{
+                reply,
+                reject,
+                arg_data,
+            }
         },
         export::{
             Principal,
@@ -21,7 +26,10 @@ use cts_lib::{
     tools::localkey_refcell::{with, with_mut},
     types::{
         UserId,
-        UserCanisterId
+        UserCanisterId,
+        users_map_canister::{
+            UsersMapCanisterInit
+        },
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -116,9 +124,9 @@ pub fn find_user() {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
-    let (user_id,): (UserId,) = arg_data<(UserId,)>();
+    let (user_id,): (UserId,) = arg_data::<(UserId,)>();
     with(&USERS_MAP, |users_map| {
-        reply<(Option<&UserCanisterId>,)>((users_map.get(&user_id),));
+        reply::<(Option<&UserCanisterId>,)>((users_map.get(&user_id),));
     });
 }
 
@@ -129,7 +137,7 @@ pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
-    with(&USERS_MAP, |users_map| {
+    with_mut(&USERS_MAP, |users_map| {
         users_map.remove(&user_id)
     })
 }

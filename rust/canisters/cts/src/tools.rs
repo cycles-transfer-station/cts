@@ -119,7 +119,7 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
             amount: icp,
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: Some(principal_icp_subaccount(user_id)),
-            to: main_cts_icp_id(),                        
+            to: main_cts_icp_id(),
             created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
         }
     ).await
@@ -334,8 +334,8 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
 
 #[derive(CandidType, Deserialize)]
 pub struct CmcNotifyCreateCanisterQuest {
-    block_index: IcpBlockHeight,
-    controller: Principal,
+    pub block_index: IcpBlockHeight,
+    pub controller: Principal,
 }
 
 
@@ -463,8 +463,6 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
     UsersMapCanisterPutNewUserCallFail(UsersMapCanisterId, String), // principal of the failiing users-map-canister
     UsersMapCanisterPutNewUserError(UsersMapCanisterPutNewUserError),
     CreateNewUsersMapCanisterError(CreateNewUsersMapCanisterError),
-
-    
     
 }
 
@@ -479,7 +477,7 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canist
             "put_new_user",
             (user_id, user_canister_id),
         ).await {
-            Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
+            Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
                 Ok(_) => return Ok(umc_id),
                 Err(users_map_canister_put_new_user_error) => match users_map_canister_put_new_user_error {
                     UsersMapCanisterPutNewUserError::CanisterIsFull => continue,
@@ -502,7 +500,7 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canist
         "put_new_user",
         (user_id, user_canister_id),
     ).await {
-        Ok(users_map_canister_put_new_user_sponse) => match users_map_canister_put_new_user_sponse {
+        Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
             Ok(_) => return Ok(umc_id),
             Err(users_map_canister_put_new_user_error) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error))
         },
@@ -558,7 +556,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe { localkey_refcell::get(&USERS_MAP_CANISTER_CODE).unwrap().module() },   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe { localkey_refcell::get(&USERS_MAP_CANISTER_CODE).as_ref().unwrap().module() },   // .unwrap bc we checked if .is_none() before
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
@@ -597,7 +595,7 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(Us
             "find_user",
             (user_id,)
         ).await {
-            Ok(optional_user_canister_id) => match optional_user_canister_id {
+            Ok((optional_user_canister_id,)) => match optional_user_canister_id {
                 Some(user_canister_id) => return Ok((user_canister_id, umc_id)),
                 None => continue
             },
