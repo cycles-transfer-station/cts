@@ -10,7 +10,6 @@ use cts_lib::{
             caller,
             call::{
                 reply,
-                reject,
                 arg_data,
             }
         },
@@ -22,7 +21,7 @@ use cts_lib::{
             },
         }
     },
-    ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade},
+    ic_cdk_macros::{update, init, pre_upgrade, post_upgrade},
     tools::localkey_refcell::{with, with_mut},
     types::{
         UserId,

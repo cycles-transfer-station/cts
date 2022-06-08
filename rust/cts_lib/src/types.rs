@@ -3,7 +3,6 @@ use crate::ic_cdk::{
     export::{
         Principal,
         candid::{
-            self,
             CandidType,
             Deserialize,   
         }
@@ -108,6 +107,7 @@ pub mod management_canister {
         pub arg : &'a [u8],
     }
 
+    #[allow(non_camel_case_types)]
     #[derive(CandidType, Deserialize)]
     pub enum ManagementCanisterInstallCodeMode {
         install, 
@@ -145,6 +145,7 @@ pub mod management_canister {
         pub cycles: u128
     }
 
+    #[allow(non_camel_case_types)]
     #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
     pub enum ManagementCanisterCanisterStatusVariant {
         running,

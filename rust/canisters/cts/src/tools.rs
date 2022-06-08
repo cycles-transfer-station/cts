@@ -468,7 +468,6 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
 
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
 pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canister_id: UserCanisterId) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
-    use cts_lib::types::users_map_canister::{PutNewUserError as UsersMapCanisterPutNewUserError};
     
     for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
         let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);

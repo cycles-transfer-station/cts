@@ -425,13 +425,6 @@ impl NewUserData {
             ..Default::default()
         }
     }
-    
-    pub fn current_membership_cost_icp(&self) -> Option<IcpTokens> {
-        match self.current_xdr_icp_rate {
-            Some(r) => Some(cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, r)),
-            None => None
-        }
-    }
 }
 
 
