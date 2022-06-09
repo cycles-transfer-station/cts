@@ -52,11 +52,13 @@ use cts_lib::{
         Cycles,
         CyclesTransfer,
         CyclesTransferMemo,
-        
-        
         user_canister::{
             UserCanisterInit,
-            CyclesTransferIntoUser
+            CyclesTransferIntoUser,
+            UserTransferCyclesQuest
+        },
+        users_map_canister::{
+            UserTransferCyclesError as UsersMapCanisterUserTransferCyclesError
         }
     },
     tools::{
@@ -266,12 +268,7 @@ pub struct CyclesTransferPurchaseLog {
     pub timestamp_nanos: u64, // time sent
 }
 
-#[derive(CandidType, Deserialize)]
-pub struct UserTransferCyclesQuest {
-    cycles: Cycles,
-    canister_id: Principal,  
-    cycles_transfer_memo: CyclesTransferMemo
-}
+
 
 #[derive(CandidType, Deserialize)]
 pub enum UserTransferCyclesError {
@@ -283,7 +280,7 @@ pub enum UserTransferCyclesError {
 }
 
 #[update]
-pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTransferPurchaseLog, UserTransferCyclesError> {
+pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTransferPurchaseLogId, UserTransferCyclesError> {
     
     if caller() != user_id() {
         trap("caller must be the user")
@@ -292,24 +289,14 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     if q.cycles < MINIMUM_USER_TRANSFER_CYCLES {
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
     }
-
+    
     let user_cycles_balance: Cycles = with(&USER_DATA, |user_data| user_data.cycles_balance);
     if q.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
         return Err(UserTransferCyclesError::BalanceTooLow { user_cycles_balance: user_cycles_balance, cycles_transfer_fee: CYCLES_TRANSFER_FEE });
     }
     
-    
-    panic!("")
-    /*
-    
-    let cycles_transfer_call_candid_bytes = match encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo }) {
-        Ok(cb) => cb,
-        Err(ce) => return Err(UserTransferCyclesError::CyclesTransferCallCandidEncodeError("{:?}", ce))
-    }; // maybe unwrap it and let it panick and roll back if error
-    
-    let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
-    
     // take the user-cycles before the transfer, and refund in the callback 
+    let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance -= q.cycles + CYCLES_TRANSFER_FEE;
         user_data.cycles_transfer_purchases.insert(
@@ -323,6 +310,25 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
             }
         );
     });
+    
+    match call::<(&UserTransferCyclesQuest,), (Result<(), UsersMapCanisterUserTransferCyclesError>,)>(
+        umc_id(),
+        "user_transfer_cycles",
+        (&q,)
+    ).await {
+        Ok((user_transfer_cycles_umc_sponse,)) => match user_transfer_cycles_umc_sponse {
+            Ok(()) => 
+        }, 
+        Err(user_transfer_cycles_umc_call_error) => {},
+    }
+    
+    /*
+    
+    let cycles_transfer_call_candid_bytes = match encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo }) {
+        Ok(cb) => cb,
+        Err(ce) => return Err(UserTransferCyclesError::CyclesTransferCallCandidEncodeError("{:?}", ce))
+    }; // maybe unwrap it and let it panick and roll back if error
+    
     
     
     let cycles_transfer_call = CallResult<Vec<u8>>> = call_raw128(

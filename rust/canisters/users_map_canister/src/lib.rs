@@ -27,8 +27,12 @@ use cts_lib::{
         UserId,
         UserCanisterId,
         users_map_canister::{
-            UsersMapCanisterInit
+            UsersMapCanisterInit,
+            UserTransferCyclesError,
         },
+        user_canister::{
+            UserTransferCyclesQuest
+        }
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -140,6 +144,35 @@ pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
         users_map.remove(&user_id)
     })
 }
+
+
+
+
+
+
+
+
+#[update]
+pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<(), UserTransferCyclesError> { // Ok(()) means the cycles_transfer is in the call-queue
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

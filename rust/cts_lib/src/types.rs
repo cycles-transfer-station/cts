@@ -173,10 +173,6 @@ pub mod management_canister {
 
 
 
-
-
-
-
 pub mod user_canister {
     use super::*;
 
@@ -193,7 +189,13 @@ pub mod user_canister {
         pub cycles: Cycles,
         pub timestamp_nanos: u64
     }
-
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct UserTransferCyclesQuest {
+        pub cycles: Cycles,
+        pub canister_id: Principal,
+        pub cycles_transfer_memo: CyclesTransferMemo
+    }
         
 }
 
@@ -216,6 +218,10 @@ pub mod users_map_canister {
         FoundUser(UserCanisterId)
     }
 
+    #[derive(CandidType, Deserialize)]
+    pub enum UserTransferCyclesError {
+        
+    }
 
 
 }

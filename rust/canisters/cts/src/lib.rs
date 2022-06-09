@@ -227,7 +227,7 @@ pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3
 
 thread_local! {
 
-    static NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
+    static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
     pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
     pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
@@ -905,6 +905,8 @@ pub fn canister_inspect_message() {
         {
         trap("caller cannot be anonymous for this method.")
     }
+    
+    // check the size of the arg_data_raw_size()
 
     if &method_name()[..] == "cycles_transfer" {
         trap("caller must be a canister for this method.")
