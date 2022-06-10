@@ -184,7 +184,7 @@ pub mod user_canister {
     }
     
     #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransferIntoUser {
+    pub struct CTSCyclesTransferIntoUser {
         pub canister: Principal,
         pub cycles: Cycles,
         pub timestamp_nanos: u64
@@ -196,7 +196,21 @@ pub mod user_canister {
         pub canister_id: Principal,
         pub cycles_transfer_memo: CyclesTransferMemo
     }
-        
+    
+    pub type CyclesTransferPurchaseLogId = u64;
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CTSUserTransferCyclesCallback {
+        pub user_id: UserId,
+        pub cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
+        pub cycles_refunded: Cycles,
+        pub call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum CTSUserTransferCyclesCallbackError {
+        WrongUserId,
+    }
 }
 
 
@@ -219,9 +233,13 @@ pub mod users_map_canister {
     }
 
     #[derive(CandidType, Deserialize)]
-    pub enum UserTransferCyclesError {
-        
+    pub struct UCUserTransferCyclesQuest {
+        pub user_transfer_cycles_quest: user_canister::UserTransferCyclesQuest,
+        pub cycles_transfer_purchase_log_id: user_canister::CyclesTransferPurchaseLogId
     }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum UCUserTransferCyclesError {}
 
 
 }

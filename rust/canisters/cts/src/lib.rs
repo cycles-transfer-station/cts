@@ -68,7 +68,9 @@ use cts_lib::{
         },
         user_canister::{
             UserCanisterInit,
-            CyclesTransferIntoUser,
+            CTSCyclesTransferIntoUser,
+            CTSUserTransferCyclesCallback,
+            CTSUserTransferCyclesCallbackError
         }
     },
     consts::{
@@ -285,8 +287,8 @@ pub async fn cycles_transfer() {
                 reject(&format!("User for the top up not found. {} cycles taken for a nonexistentuserfee", CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE));
                 return;
             },
-            FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error) => {
-                reject(&format!("User lookup error. umc_id: {}, umc_call_error: {:?}", umc_id, call_error)); // reject not trap because we are after an await here
+            FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
+                reject(&format!("User lookup error. umc_call_errors: {:?}", umc_call_errors)); // reject not trap because we are after an await here
                 return;
             }
         }
@@ -294,10 +296,10 @@ pub async fn cycles_transfer() {
     
     // take a fee for the cycles_transfer_into_user? 
     
-    match call::<(CyclesTransferIntoUser,), ()>(
+    match call::<(CTSCyclesTransferIntoUser,), ()>(
         user_canister_id,
         "cts_cycles_transfer_into_user",
-        (CyclesTransferIntoUser{ 
+        (CTSCyclesTransferIntoUser{ 
             canister: original_caller,
             cycles: cycles_available,
             timestamp_nanos: timestamp_nanos
@@ -431,7 +433,7 @@ impl NewUserData {
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserMidCallError{
-    UsersMapCanisterFindUserCallFail(UsersMapCanisterId, String),
+    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, String)>),
     PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
     CreateUserCanisterIcpTransferError(IcpTransferError),
     CreateUserCanisterIcpTransferCallError(String),
@@ -573,10 +575,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 FindUserInTheUsersMapCanistersError::UserNotFound => {
                     new_user_data.look_if_user_is_in_the_users_map_canisters = true;                    
                 },
-                FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, call_error_string) => {
+                FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
                     new_user_data.lock = false;
                     write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanisterFindUserCallFail(umc_id, call_error_string)));
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanistersFindUserCallFails(umc_call_errors)));
                 }
             }
         };
@@ -855,7 +857,8 @@ pub fn see_users_map_canisters() {
 
 
 #[update]
-pub async fn find_user_canister(user_id: Principal) -> Result<UserCanisterId, FindUserInTheUsersMapCanistersError> {
+pub async fn find_user_canister() -> Result<UserCanisterId, FindUserInTheUsersMapCanistersError> {
+    let user_id: UserId = caller();
     match find_user_in_the_users_map_canisters(user_id).await {
         Ok((user_canister_id, _users_map_canister_id)) => Ok(user_canister_id),
         Err(e) => Err(e)

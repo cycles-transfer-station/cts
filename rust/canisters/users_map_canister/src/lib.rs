@@ -28,10 +28,11 @@ use cts_lib::{
         UserCanisterId,
         users_map_canister::{
             UsersMapCanisterInit,
-            UserTransferCyclesError,
+            UCUserTransferCyclesQuest,
+            UCUserTransferCyclesError,
         },
         user_canister::{
-            UserTransferCyclesQuest
+            CyclesTransferPurchaseLogId
         }
     },
     global_allocator_counter::get_allocated_bytes_count
@@ -151,12 +152,12 @@ pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
 
 
 
-
+/*
 #[update]
-pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<(), UserTransferCyclesError> { // Ok(()) means the cycles_transfer is in the call-queue
+pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<(), UCUserTransferCyclesError> { // Ok(()) means the cycles_transfer is in the call-queue
 
 }
-
+*/
 
 
 

@@ -1,3 +1,5 @@
+// this canister can safe stop before upgrade
+
 use std::{
     cell::{RefCell,Cell},
     collections::HashMap,
@@ -19,6 +21,7 @@ use cts_lib::{
                 reply,
                 CallResult,
                 arg_data,
+                call
                 
                 
             }
@@ -54,11 +57,18 @@ use cts_lib::{
         CyclesTransferMemo,
         user_canister::{
             UserCanisterInit,
-            CyclesTransferIntoUser,
-            UserTransferCyclesQuest
+            CTSCyclesTransferIntoUser,
+            UserTransferCyclesQuest,
+            CyclesTransferPurchaseLogId,
+            CTSUserTransferCyclesCallback,
+            CTSUserTransferCyclesCallbackError,
+        
         },
         users_map_canister::{
-            UserTransferCyclesError as UsersMapCanisterUserTransferCyclesError
+            self,
+            UCUserTransferCyclesQuest,
+            UCUserTransferCyclesError
+            
         }
     },
     tools::{
@@ -75,12 +85,15 @@ use cts_lib::{
 
 
 // when collecting the cts_take_icp, collect the user_data.cts_take_icp - LEDGER_TRANSFER_FEE
+// cycles transfer purchases that are complete dont need an id.
+
+
 struct UserData {
     
     cycles_balance: Cycles,
     cts_take_icp: IcpTokens,
     cycles_transfer_purchases: HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>,
-    cycles_transfers_into_user: Vec<CyclesTransferIntoUser>,
+    cycles_transfers_into_user: Vec<CTSCyclesTransferIntoUser>,
     icp_transfers_out: Vec<IcpBlockHeight>,
     icp_transfers_in: Vec<IcpBlockHeight>,
     //cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
@@ -184,6 +197,7 @@ fn get_new_cycles_transfer_purchase_log_id() -> u64 {
 
 
 
+
 #[derive(CandidType, Deserialize)]
 pub enum UserCyclesBalanceError {}
 
@@ -191,6 +205,13 @@ pub enum UserCyclesBalanceError {}
 pub fn user_cycles_balance() -> Result<Cycles, UserCyclesBalanceError> {
     Ok(with(&USER_DATA, |user_data| user_data.cycles_balance))
 }
+
+
+
+
+
+
+
 
 
 #[derive(CandidType, Deserialize)]
@@ -234,7 +255,7 @@ pub fn cts_cycles_transfer_into_user() {
         return;
     }
     
-    let (cycles_transfer_into_user,): (CyclesTransferIntoUser,) = arg_data::<(CyclesTransferIntoUser,)>();
+    let (cycles_transfer_into_user,): (CTSCyclesTransferIntoUser,) = arg_data::<(CTSCyclesTransferIntoUser,)>();
     
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance += cycles_transfer_into_user.cycles;
@@ -255,9 +276,6 @@ pub fn cts_cycles_transfer_into_user() {
 
 
 
-
-pub type CyclesTransferPurchaseLogId = u64;
-
 // for these two, make sure the fee for each purchase-type pays for the storage-cost of the Log for a certain amount of time, a year or 3 and then check the timestamp and delete expired ones or option to pay for longer storage
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub struct CyclesTransferPurchaseLog {
@@ -266,17 +284,17 @@ pub struct CyclesTransferPurchaseLog {
     pub cycles_accepted: Option<Cycles>, // option cause this field is only filled in the callback and that might not come back because of the callee holding-back the callback cross-upgrades
     pub cycles_transfer_memo: CyclesTransferMemo,
     pub timestamp_nanos: u64, // time sent
+    pub call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means the cycles_transfer-call replied.
 }
-
-
 
 #[derive(CandidType, Deserialize)]
 pub enum UserTransferCyclesError {
     InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
     CheckUserCyclesBalanceError(UserCyclesBalanceError),
     BalanceTooLow { user_cycles_balance: Cycles, cycles_transfer_fee: Cycles },
-    CyclesTransferCallCandidEncodeError(String),
-    CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
+    //CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
+    UCUserTransferCyclesError(UCUserTransferCyclesError),
+    UCUserTransferCyclesCallError(String)
 }
 
 #[update]
@@ -294,6 +312,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     if q.cycles + CYCLES_TRANSFER_FEE > user_cycles_balance {
         return Err(UserTransferCyclesError::BalanceTooLow { user_cycles_balance: user_cycles_balance, cycles_transfer_fee: CYCLES_TRANSFER_FEE });
     }
+    std::mem::drop(user_cycles_balance);
     
     // take the user-cycles before the transfer, and refund in the callback 
     let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
@@ -304,24 +323,98 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
             CyclesTransferPurchaseLog{
                 canister_id: q.canister_id,
                 cycles_sent: q.cycles,
-                cycles_accepted: None,
-                cycles_transfer_memo: q.cycles_transfer_memo,
+                cycles_accepted: None,   // None means the cycles_transfer-call did not come back yet(did not give-back a reply-or-reject-sponse) 
+                cycles_transfer_memo: q.cycles_transfer_memo.clone(),
                 timestamp_nanos: time(), // time sent
+                call_error: None
             }
         );
     });
     
-    match call::<(&UserTransferCyclesQuest,), (Result<(), UsersMapCanisterUserTransferCyclesError>,)>(
+    let q_cycles: Cycles = q.cycles;
+    
+    let cancel_user_transfer_cycles = || {
+        with_mut(&USER_DATA, |user_data| {
+            user_data.cycles_balance += q_cycles + CYCLES_TRANSFER_FEE;
+            user_data.cycles_transfer_purchases.remove(&cycles_transfer_purchase_log_id);
+        });
+    };
+        
+    match call::<(UCUserTransferCyclesQuest,), (Result<(), UCUserTransferCyclesError>,)>(
         umc_id(),
-        "user_transfer_cycles",
-        (&q,)
+        "uc_user_transfer_cycles",
+        (UCUserTransferCyclesQuest{
+            user_transfer_cycles_quest: q,            // move
+            cycles_transfer_purchase_log_id: cycles_transfer_purchase_log_id 
+        },)
     ).await {
-        Ok((user_transfer_cycles_umc_sponse,)) => match user_transfer_cycles_umc_sponse {
-            Ok(()) => 
+        Ok((uc_user_transfer_cycles_sponse,)) => match uc_user_transfer_cycles_sponse {
+            Ok(()) => return Ok(cycles_transfer_purchase_log_id),
+            Err(uc_user_transfer_cycles_error) => {
+                // error here means the cycles-transfer call wasn't schedule
+                // make-vanish the log 
+                //fn cancel_user_cycles_transfer(cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId, q_cycles: Cycles) {
+                //    with_mut(&USER_DATA, |user_data| {
+                //        user_data.cycles_balance += q_cycles + CYCLES_TRANSFER_FEE;
+                //        user_data.cycles_transfer_purchases.remove(&cycles_transfer_purchase_log_id);
+                //    });
+                //}
+                //cancel_user_cycles_transfer(cycles_transfer_purchase_log_id, q_cycles);
+                cancel_user_transfer_cycles();
+                return Err(UserTransferCyclesError::UCUserTransferCyclesError(uc_user_transfer_cycles_error));
+            }
         }, 
-        Err(user_transfer_cycles_umc_call_error) => {},
+        Err(uc_user_transfer_cycles_call_error) => {
+            //cancel_user_cycles_transfer(cycles_transfer_purchase_log_id, q_cycles);
+            cancel_user_transfer_cycles();
+            return Err(UserTransferCyclesError::UCUserTransferCyclesCallError(format!("{:?}", uc_user_transfer_cycles_call_error)));
+        },
     }
     
+}
+
+
+
+
+
+#[update]
+pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallback) -> Result<(), CTSUserTransferCyclesCallbackError> {
+    
+    if caller() != cts_id() {
+        trap("caller must be the cts for this method.")
+    }
+    
+    if cts_q.user_id != user_id() {
+        return Err(CTSUserTransferCyclesCallbackError::WrongUserId)
+    }
+
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance += cts_q.cycles_refunded + match cts_q.call_error {
+            Some(ref call_error) => match call_error.0 {
+                0 | 1 | 2 => CYCLES_TRANSFER_FEE,
+                _ => 0
+            },
+            None => 0    
+        };
+        match user_data.cycles_transfer_purchases.get_mut(&cts_q.cycles_transfer_purchase_log_id) {
+            Some(cycles_transfer_purchase_log) => {
+                cycles_transfer_purchase_log.cycles_accepted = Some(cycles_transfer_purchase_log.cycles_sent - cts_q.cycles_refunded);
+                cycles_transfer_purchase_log.call_error = cts_q.call_error;
+            },
+            None => {}
+        }
+    });
+    
+    Ok(())
+}
+
+
+
+
+
+
+
+
     /*
     
     let cycles_transfer_call_candid_bytes = match encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo }) {
@@ -379,12 +472,10 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
         }
     }
     
-    */    
-
-    
 
 }
 
+*/    
 
 
 
