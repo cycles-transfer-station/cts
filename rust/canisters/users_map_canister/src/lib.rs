@@ -26,6 +26,10 @@ use cts_lib::{
     types::{
         UserId,
         UserCanisterId,
+        cts::{
+            UMCUserTransferCyclesQuest,
+            UMCUserTransferCyclesError
+        },
         users_map_canister::{
             UsersMapCanisterInit,
             UCUserTransferCyclesQuest,
@@ -51,10 +55,43 @@ const MAX_USERS: usize = 2_000_000;
 
 
 
+
+
 thread_local! {
     static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USERS_MAP: RefCell<UsersMap> = RefCell::new(UsersMap::new());
 }
+
+
+// ------------------------------------------------------------------------------------
+
+
+
+#[init]
+fn init(users_map_canister_init: UsersMapCanisterInit) {
+    CTS_ID.with(|cts_id| { cts_id.set(users_map_canister_init.cts_id); });
+}
+
+#[pre_upgrade]
+fn pre_upgrade() {
+
+}
+
+#[post_upgrade]
+fn post_upgrade() {
+    
+}
+
+#[no_mangle]
+pub fn canister_inspect_message() {
+    trap("This canister is talked-to by the cts-canisters")
+}
+
+
+
+
+// ------------------------------------------------------------------------------------
+
 
 
 
@@ -69,28 +106,7 @@ fn is_full() -> bool {
 
 
 
-
-
-
-
-#[init]
-fn init(users_map_canister_init: UsersMapCanisterInit) -> () {
-    CTS_ID.with(|cts_id| { cts_id.set(users_map_canister_init.cts_id); });
-}
-
-#[pre_upgrade]
-fn pre_upgrade() {
-
-}
-
-#[post_upgrade]
-fn post_upgrade() {
-    
-}
-
-
-
-
+// ------------------------------------------------------------------------------------
 
 
 
@@ -149,22 +165,44 @@ pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
 
 
 
+// ------------------------------------------------------------------------------------
 
 
 
-/*
+
+
+
+// Ok(()) means the cycles_transfer is in the call-queue
+
 #[update]
-pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<(), UCUserTransferCyclesError> { // Ok(()) means the cycles_transfer is in the call-queue
-
+pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<(), UCUserTransferCyclesError> {
+    // caller-check
+    with(&USERS_MAP, |users_map| { 
+        match users_map.get(&uc_q.user_id) { 
+            Some(user_canister_id) => { 
+                if *user_canister_id != caller() { 
+                    trap("caller of this method must be the user-canister") 
+                }
+            }, 
+            None => trap("user_id not found in this canister") 
+        } 
+    });
+    
+    match call::<(UMCUserTransferCyclesQuest,), (Result<(), UMCUserTransferCyclesError>,)>(
+        cts_id(),
+        "umc_user_transfer_cycles",
+        (UMCUserTransferCyclesQuest{
+            user_canister_id: caller(),
+            uc_user_transfer_cycles_quest: uc_q
+        },)
+    ).await {
+        Ok((umc_user_transfer_cycles_sponse,)) => match umc_user_transfer_cycles_sponse {
+            Ok(()) => return Ok(()),
+            Err(umc_user_transfer_cycles_error) => return Err(UCUserTransferCyclesError::UMCUserTransferCyclesError(umc_user_transfer_cycles_error)) 
+        },
+        Err(umc_user_transfer_cycles_call_error) => return Err(UCUserTransferCyclesError::UMCUserTransferCyclesCallError(format!("{:?}", umc_user_transfer_cycles_call_error)))
+    }
 }
-*/
-
-
-
-
-
-
-
 
 
 

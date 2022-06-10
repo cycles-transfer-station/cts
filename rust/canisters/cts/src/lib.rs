@@ -66,12 +66,20 @@ use cts_lib::{
             ChangeCanisterSettingsRecord,
             
         },
+        cts::{
+            UMCUserTransferCyclesQuest,
+            UMCUserTransferCyclesError
+        },
         user_canister::{
             UserCanisterInit,
             CTSCyclesTransferIntoUser,
             CTSUserTransferCyclesCallback,
             CTSUserTransferCyclesCallbackError
-        }
+        },
+        cycles_transferrer::{
+            CTSUserTransferCyclesQuest,
+            CTSUserTransferCyclesError
+        },
     },
     consts::{
         MANAGEMENT_CANISTER_ID,
@@ -220,7 +228,6 @@ pub const CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE: Cycles = 3_000
 
 
 
-
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
@@ -240,7 +247,75 @@ thread_local! {
     
     pub static NEW_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     
+    static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
 }
+
+
+
+
+
+
+
+
+/*
+#[init]
+fn init() {
+
+} 
+
+#[pre_upgrade]
+fn pre_upgrade() {
+    USERS_DATA.with(|ud| {
+        save_users_data(&*ud.borrow());
+    });
+    NEW_CANISTERS.with(|ncs| {
+        save_new_canisters(&*ncs.borrow());
+    });
+}
+
+#[post_upgrade]
+fn post_upgrade() {
+    USERS_DATA.with(|ud| {
+        *ud.borrow_mut() = read_users_data();
+    });
+    NEW_CANISTERS.with(|ncs| {
+        *ncs.borrow_mut() = read_new_canisters();
+    });
+
+    
+} 
+*/
+
+// test this!
+#[no_mangle]
+pub fn canister_inspect_message() {
+    // caution: this function is only called for ingress messages 
+    use ic_cdk::api::call::{method_name,accept_message};
+    
+    if caller() == Principal::anonymous() 
+        && !["see_fees"].contains(&&method_name()[..])
+        {
+        trap("caller cannot be anonymous for this method.")
+    }
+    
+    // check the size of the arg_data_raw_size()
+
+    if &method_name()[..] == "cycles_transfer" {
+        trap("caller must be a canister for this method.")
+    }
+
+    accept_message();
+}
+
+
+
+
+
+
+
+// ----------------------------------------------------------------------------------------
+
 
 
 
@@ -249,7 +324,6 @@ thread_local! {
 
 // if a user for the topup is not found, the cycles-transfer-station takes a fee for the user-lookup(:fee is with the base on how many users_map_canisters there are) and refunds the rest of the cycles. 
 // make sure the minimum-in-cycles-transfer is more than the find_and_plus_user_cycles_balance_user_not_found_fee
-
 
 #[export_name="canister_update cycles_transfer"]
 pub async fn cycles_transfer() {
@@ -837,9 +911,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
 
 
-
-
-
 // certification? or replication-calls?
 #[export_name = "canister_query see_users_map_canisters"]
 pub fn see_users_map_canisters() {
@@ -875,79 +946,94 @@ pub async fn find_user_canister() -> Result<UserCanisterId, FindUserInTheUsersMa
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// test this!
-#[no_mangle]
-pub fn canister_inspect_message() {
-    // caution: this function is only called for ingress messages 
-    use ic_cdk::api::call::{method_name,accept_message};
-    
-    if caller() == Principal::anonymous() 
-        && !["see_fees"].contains(&&method_name()[..])
-        {
-        trap("caller cannot be anonymous for this method.")
-    }
-    
-    // check the size of the arg_data_raw_size()
-
-    if &method_name()[..] == "cycles_transfer" {
-        trap("caller must be a canister for this method.")
-    }
-
-    accept_message();
+// round-robin on the cycles-transferrer-canisters
+fn get_next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
+    with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| { 
+        match ctcs.len() {
+            0 => None,
+            1 => Some(ctcs[0]),
+            l => {
+                CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|ctcs_rrc| { 
+                    match ctcs_rrc.get() {
+                        c @ 0..=(l-1) => {
+                            match c {
+                                l-1       => { ctcs_rrc.set(0);   },
+                                0..=(l-2) => { ctcs_rrc.set(c+1); },
+                            }
+                            Some(ctcs[c])
+                        }, 
+                        _ => {
+                            ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match 
+                            Some(ctcs[0])
+                        }
+                    } 
+                })
+            }
+        } 
+    })
 }
 
-/*
-#[init]
-fn init() {
-
-} 
-
-#[pre_upgrade]
-fn pre_upgrade() {
-    USERS_DATA.with(|ud| {
-        save_users_data(&*ud.borrow());
-    });
-    NEW_CANISTERS.with(|ncs| {
-        save_new_canisters(&*ncs.borrow());
-    });
+#[update]
+pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Result<(), UMCUserTransferCyclesError> {
+    // caller-check
+    if with(&USERS_MAP_CANISTERS, |umcs| { !umcs.contains(&caller()) }) {
+        trap("Caller of this method must be a CTS users-map-canister.")
+    }
+    
+    let cycles_transferrer_canister_id: Principal = match get_next_cycles_transferrer_canister_round_robin() { 
+        Some(cycles_transferrer_canister) => cycles_transferrer_canister,
+        None => return Err(UMCUserTransferCyclesError::NoCyclesTransferrerCanistersFound) 
+    }; 
+    
+    match call::<(CTSUserTransferCyclesQuest,), (Result<(), CTSUserTransferCyclesError>,)>(
+        cycles_transferrer_canister_id,
+        "cts_user_transfer_cycles",
+        (CTSUserTransferCyclesQuest{
+            users_map_canister_id: caller(),
+            umc_user_transfer_cycles_quest: umc_q
+        },)
+    ).await {
+        Ok((cts_user_transfer_cycles_sponse,)) => match cts_user_transfer_cycles_sponse {
+            Ok(()) => return Ok(()), 
+            Err(cts_user_transfer_cycles_error) => return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesError(cts_user_transfer_cycles_error))
+        },
+        Err(cts_user_transfer_cycles_call_error) => return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesCallError(format!("{:?}", cts_user_transfer_cycles_call_error)))
+    }
+    
 }
 
-#[post_upgrade]
-fn post_upgrade() {
-    USERS_DATA.with(|ud| {
-        *ud.borrow_mut() = read_users_data();
-    });
-    NEW_CANISTERS.with(|ncs| {
-        *ncs.borrow_mut() = read_new_canisters();
-    });
-
-    
-} 
-*/
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --------------------------------------------------------------------------
+// :CONTROLLER-METHODS.
 
 /*
 #[update]
@@ -989,7 +1075,6 @@ pub fn controller_see_new_canisters<'a>() -> () {
 }
 
 
-
 #[derive(CandidType, Deserialize)]
 pub enum ControllerSeeNewCanisterStatusError {
     CanisterStatusCallError(String)
@@ -1010,6 +1095,23 @@ pub async fn controller_see_new_canister_status(new_canister: Principal) -> Resu
     Ok(canister_status_record)
 
 }
+
+
+
+
+
+
+#[update]
+pub fn controller_put_cycles_transferrer_canisters(mut new_cycles_transferrer_canisters: Vec<Principal>) {
+    with_mut(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| {
+        ctcs.append(&mut new_cycles_transferrer_canisters);
+    });
+}
+
+
+
+
+
 
 
 #[update]

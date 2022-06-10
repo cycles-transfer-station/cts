@@ -29,8 +29,8 @@ pub type UsersMapCanisterId = Principal;
 
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
-    Text(String),
     Nat64(u64),
+    Text(String),
     Blob(Vec<u8>)
 }
 
@@ -171,6 +171,63 @@ pub mod management_canister {
 
 
 
+pub mod cts {
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct UMCUserTransferCyclesQuest {
+        user_canister_id: UserCanisterId,
+        uc_user_transfer_cycles_quest: users_map_canister::UCUserTransferCyclesQuest,
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum UMCUserTransferCyclesError {
+        NoCyclesTransferrerCanistersFound,
+        CTSUserTransferCyclesError(cycles_transferrer::CTSUserTransferCyclesError),
+        CTSUserTransferCyclesCallError(String)
+    }
+    
+}
+
+
+
+
+
+
+
+pub mod users_map_canister {
+    use super::*;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct UsersMapCanisterInit {
+        pub cts_id: Principal
+    }
+
+    #[derive(CandidType,Deserialize)]
+    pub enum PutNewUserError {
+        CanisterIsFull,
+        FoundUser(UserCanisterId)
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct UCUserTransferCyclesQuest {
+        pub user_id: UserId,
+        pub cycles_transfer_purchase_log_id: user_canister::CyclesTransferPurchaseLogId,
+        pub user_transfer_cycles_quest: user_canister::UserTransferCyclesQuest,
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum UCUserTransferCyclesError {
+        UMCUserTransferCyclesError(cts::UMCUserTransferCyclesError),
+        UMCUserTransferCyclesCallError(String),
+        
+    }
+
+
+}
+
+
+
+
 
 
 pub mod user_canister {
@@ -215,40 +272,27 @@ pub mod user_canister {
 
 
 
-
-
-
-pub mod users_map_canister {
+pub mod cycles_transferrer {
     use super::*;
-
+    
     #[derive(CandidType, Deserialize)]
-    pub struct UsersMapCanisterInit {
+    pub struct CyclesTransferrerInit {
         pub cts_id: Principal
-    }
-
-    #[derive(CandidType,Deserialize)]
-    pub enum PutNewUserError {
-        CanisterIsFull,
-        FoundUser(UserCanisterId)
-    }
-
-    #[derive(CandidType, Deserialize)]
-    pub struct UCUserTransferCyclesQuest {
-        pub user_transfer_cycles_quest: user_canister::UserTransferCyclesQuest,
-        pub cycles_transfer_purchase_log_id: user_canister::CyclesTransferPurchaseLogId
     }
     
     #[derive(CandidType, Deserialize)]
-    pub enum UCUserTransferCyclesError {}
-
-
+    pub struct CTSUserTransferCyclesQuest {
+        pub users_map_canister_id: UsersMapCanisterId,
+        pub umc_user_transfer_cycles_quest: cts::UMCUserTransferCyclesQuest
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum CTSUserTransferCyclesError {
+    
+    }
+    
+    
 }
-
-
-
-
-
-
 
 
 
