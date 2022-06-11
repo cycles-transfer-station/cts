@@ -186,6 +186,16 @@ pub mod cts {
         CTSUserTransferCyclesCallError(String)
     }
     
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransferrerUserTransferCyclesCallback {
+        cts_user_transfer_cycles_quest: CTSUserTransferCyclesQuest
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum CyclesTransferrerUserTransferCyclesCallbackError {
+        CTSUserTransferCyclesCallbackError(user_canister::CTSUserTransferCyclesCallbackError),
+        CTSUserTransferCyclesCallbackCallError(String),
+    }
 }
 
 
@@ -261,7 +271,7 @@ pub mod user_canister {
         pub user_id: UserId,
         pub cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
         pub cycles_refunded: Cycles,
-        pub call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+        pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
     }
     
     #[derive(CandidType, Deserialize)]
@@ -288,7 +298,9 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]
     pub enum CTSUserTransferCyclesError {
-    
+        MaxOngoingCyclesTransfers(usize),
+        CyclesTransferQuestCandidCodeError(String),
+        
     }
     
     

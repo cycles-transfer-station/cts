@@ -985,13 +985,14 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
         None => return Err(UMCUserTransferCyclesError::NoCyclesTransferrerCanistersFound) 
     }; 
     
-    match call::<(CTSUserTransferCyclesQuest,), (Result<(), CTSUserTransferCyclesError>,)>(
+    match call_with_payment128::<(CTSUserTransferCyclesQuest,), (Result<(), CTSUserTransferCyclesError>,)>(
         cycles_transferrer_canister_id,
         "cts_user_transfer_cycles",
         (CTSUserTransferCyclesQuest{
             users_map_canister_id: caller(),
             umc_user_transfer_cycles_quest: umc_q
-        },)
+        },),
+        umc_q.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles
     ).await {
         Ok((cts_user_transfer_cycles_sponse,)) => match cts_user_transfer_cycles_sponse {
             Ok(()) => return Ok(()), 
@@ -1004,6 +1005,30 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
 
 
 
+#[update]
+pub async fn cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_q: CyclesTransferrerUserTransferCyclesCallback) -> Result<(), CyclesTransferrerUserTransferCyclesCallbackError> {
+    
+    if with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| { !ctcs.contains(&caller()) }) {
+        trap("Caller must be a cts cycles_transferrer canister.")
+    }
+    
+    let cycles_transfer_refund: Cycles = msg_cycles_refunded128();
+    
+    match call::<(CTSUserTransferCyclesCallback,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
+        cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id,
+        "cts_user_transfer_cycles_callback",
+        (CTSUserTransferCyclesCallback{
+            user_id: UserId,
+            cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
+            cycles_refunded: Cycles,
+            cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+        },)
+    ).await {}
+    
+    
+    // on user_canister cts cts_user_transfer_cycles_callback call error, wrong user id, make a find user call and find the user's canister if they have one now and if is is different than the one in the quest, make a call on it's cycles_transferrer_user_transfer_cycles_callback-method
+ 
+}
 
 
 

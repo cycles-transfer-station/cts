@@ -281,7 +281,7 @@ pub fn cts_cycles_transfer_into_user() {
 pub struct CyclesTransferPurchaseLog {
     pub canister_id: Principal,
     pub cycles_sent: Cycles,
-    pub cycles_accepted: Option<Cycles>, // option cause this field is only filled in the callback and that might not come back because of the callee holding-back the callback cross-upgrades
+    pub cycles_accepted: Option<Cycles>, // option cause this field is only filled in the callback and that might not come back because of the callee holding-back the callback cross-upgrades. // if/when a user deletes some CyclesTransferPurchaseLogs, let the user set a special flag to delete the still-not-come-back-user_transfer_cycles by default unset.
     pub cycles_transfer_memo: CyclesTransferMemo,
     pub timestamp_nanos: u64, // time sent
     pub call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means the cycles_transfer-call replied.
@@ -306,14 +306,6 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
         trap("caller must be the user")
     }
     
-    match q.cycles_transfer_memo {
-        CyclesTransferMemo::Blob(b) => {
-            if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
-                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size:USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
-            }
-        },
-    }
-    
     if q.cycles < MINIMUM_USER_TRANSFER_CYCLES {
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
     }
@@ -324,6 +316,16 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     }
     std::mem::drop(user_cycles_balance);
     
+    // check memo size
+    match q.cycles_transfer_memo {
+        CyclesTransferMemo::Blob(b) => {
+            if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size:USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
+            }
+        },
+    }
+    
+
     // take the user-cycles before the transfer, and refund in the callback 
     let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
     with_mut(&USER_DATA, |user_data| {
