@@ -95,7 +95,7 @@ pub async fn cts_user_transfer_cycles() {
         },
     };
     
-    ONGOING_CYCLES_TRANSFERS.with(|octs| { octs.set(octs.get() + 1); });
+    ONGOING_CYCLES_TRANSFERS.with(|octs| { octs.set(octs.get() + 1); }); // checked add?
     
     reply::<(Result<(), CTSUserTransferCyclesError>,)>((Ok(),)); /// test that at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
     
@@ -113,8 +113,8 @@ pub async fn cts_user_transfer_cycles() {
     
     match cycles_transfer_call {
         Ok(_) => {},
-        Err(cycles_transfer_call_error) => {
-            cycles_transfer_call_error = Some(cycles_transfer_call_error);
+        Err(call_error) => {
+            cycles_transfer_call_error = Some(call_error);
         }
     }
     
@@ -128,7 +128,9 @@ pub async fn cts_user_transfer_cycles() {
         cycles_transfer_refund
     ).await {
         Ok((cycles_transferrer_user_transfer_cycles_callback_sponse,)) => match cycles_transferrer_user_transfer_cycles_callback_sponse {
-            Ok(()) => (),
+            Ok(()) => { 
+                ONGOING_CYCLES_TRANSFERS.with(|octs| { octs.set(octs.get() - 1); }); 
+            }, // checked sub?
             Err(cycles_transferrer_user_transfer_cycles_callback_error) => {
             
             }

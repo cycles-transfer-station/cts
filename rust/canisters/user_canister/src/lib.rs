@@ -344,7 +344,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
         );
     });
     
-    let q_cycles: Cycles = q.cycles;
+    let q_cycles: Cycles = q.cycles; // copy cause want the value to stay on the stack for the closure to run with it. after the q is move into the candid params
     
     let cancel_user_transfer_cycles = || {
         with_mut(&USER_DATA, |user_data| {
