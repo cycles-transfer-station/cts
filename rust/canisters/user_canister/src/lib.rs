@@ -89,7 +89,6 @@ use cts_lib::{
 struct UserData {
     
     cycles_balance: Cycles,
-    cts_take_icp: IcpTokens,
     cycles_transfer_purchases: HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>,
     cycles_transfers_into_user: Vec<CTSCyclesTransferIntoUser>,
     icp_transfers_out: Vec<IcpBlockHeight>,
@@ -101,8 +100,7 @@ struct UserData {
 impl UserData {
     fn new() -> Self {
         Self {
-            cycles_balance: 0u128,    
-            cts_take_icp: IcpTokens::ZERO,
+            cycles_balance: 0u128,
             cycles_transfer_purchases: HashMap::new(),
             cycles_transfers_into_user: Vec::new(),
             icp_transfers_out: Vec::new(),
