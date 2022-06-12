@@ -82,9 +82,7 @@ use cts_lib::{
 
 
 
-// when collecting the cts_take_icp, collect the user_data.cts_take_icp - LEDGER_TRANSFER_FEE
 // cycles transfer purchases that are complete dont need an id.
-
 
 struct UserData {
     
