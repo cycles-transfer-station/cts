@@ -223,8 +223,8 @@ name = "cts_lib"
 version = "0.1.0"
 dependencies = [
  "candid",
- "ic-cdk 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
- "ic-cdk-macros 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
+ "ic-cdk 0.5.1",
+ "ic-cdk-macros",
  "ic-certified-map",
  "ic-ledger-types",
  "serde",
@@ -235,16 +235,14 @@ dependencies = [
 name = "cycles_market"
 version = "0.1.0"
 dependencies = [
- "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "ic-cdk-macros 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cts_lib",
 ]
 
 [[package]]
 name = "cycles_transferrer"
 version = "0.1.0"
 dependencies = [
- "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "ic-cdk-macros 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cts_lib",
 ]
 
 [[package]]
@@ -450,6 +448,15 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "ic-cdk"
 version = "0.5.1"
+dependencies = [
+ "candid",
+ "cfg-if",
+ "serde",
+]
+
+[[package]]
+name = "ic-cdk"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953c6f940bbf1f79460849fa61cd3ac04768f8f0deb743d185860892f65cbff2"
 dependencies = [
@@ -466,21 +473,6 @@ dependencies = [
  "candid",
  "cfg-if",
  "serde",
-]
-
-[[package]]
-name = "ic-cdk-macros"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f50910f1df55124b5374847fd2b4e3515c426f6d1ce1a23503208e80832fbc2"
-dependencies = [
- "candid",
- "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream",
- "syn",
 ]
 
 [[package]]
@@ -1090,18 +1082,14 @@ checksum = "957e51f3646910546462e67d5f7599b9e4fb8acdd304b087a6494730f9eebf04"
 name = "user_canister"
 version = "0.1.0"
 dependencies = [
- "candid",
  "cts_lib",
- "serde",
 ]
 
 [[package]]
 name = "users_map_canister"
 version = "0.1.0"
 dependencies = [
- "candid",
  "cts_lib",
- "serde",
 ]
 
 [[package]]

@@ -9,11 +9,15 @@ use cts_lib::{
         api::{
             trap,
             id,
+            canister_balance128,
             call::{
                 call_with_payment128,
                 msg_cycles_accept128,
                 msg_cycles_available128,
                 reject,
+                CallFuture,
+                RejectionCode,
+                call_raw128
             }
             
         }
@@ -54,26 +58,36 @@ pub fn see_cycles_transfer_cycles() -> Cycles {
 
 
 #[update]
-pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Principal, cycles: Cycles) {
+pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Principal, cycles: Cycles) -> String {
     // send cycles to testcanister2
     
-    let cycles_transfer_call = call_with_payment128::<(Principal,), ()>(
+    let mut s: String = String::new();
+    
+    s.push_str(&format!("first_canister_balance: {:?}", canister_balance128()));
+    
+    let cycles_transfer_call_future: CallFuture<Vec<u8>> = call_raw128(
         test_canister_id,
         "test_cycles_transfer_pogation_two",
-        (id(),),
+        &candid::utils::encode_one(id()).unwrap(),
         cycles
-    ).await;
+    );
     
-    match cycles_transfer_call {
+    s.push_str(&format!("\nsecond_canister_balance: {:?}\ncall_perform_status_code: {:?}", canister_balance128(), cycles_transfer_call_future.call_perform_status_code));
+    
+    /*
+    match cycles_transfer_call_future.await {
         Ok(()) => return,
         Err(call_error) => {
             reject(&format!("two call error: {:?}", call_error));
             return;
         }
     }
+    */
+    
     
     // have testcanister2 pogate the cycles to a testcanister1 method and refund    
-
+    
+    s
 }
 
 

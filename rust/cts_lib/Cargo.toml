@@ -6,7 +6,7 @@ edition = "2021"
 
 
 [dependencies]
-ic-cdk = { git = "https://github.com/dfinity/cdk-rs", rev = "468cc63b89453ec9c334e49a81060c7c7aa4b742" } # "0.5.1"
+ic-cdk = { path = "../../../../DFINITY/cdk-rs/src/ic-cdk" } # "0.5.1"
 ic-cdk-macros = { git = "https://github.com/dfinity/cdk-rs", rev = "468cc63b89453ec9c334e49a81060c7c7aa4b742" } # "0.5.1"
 ic-certified-map = { git = "https://github.com/dfinity/cdk-rs", rev = "129d1a8c595525c6f4c54e73bafa779143e568ce" }
 ic-ledger-types = "0.1.2"

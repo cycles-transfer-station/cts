@@ -22,8 +22,6 @@ use cts_lib::{
                 CallResult,
                 arg_data,
                 call
-                
-                
             }
         },
         export::{
@@ -361,7 +359,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
             cycles_transfer_purchase_log_id: cycles_transfer_purchase_log_id 
             user_transfer_cycles_quest: q,            // move
         },)
-    ).await {
+    ).await { // it is possible that this callback will be called after the cts calls the cts_user_transfer_cycles_callback
         Ok((uc_user_transfer_cycles_sponse,)) => match uc_user_transfer_cycles_sponse {
             Ok(()) => return Ok(cycles_transfer_purchase_log_id),
             Err(uc_user_transfer_cycles_error) => {

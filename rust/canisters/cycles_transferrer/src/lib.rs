@@ -79,11 +79,6 @@ pub async fn cts_user_transfer_cycles() {
         return;
     }
     
-    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    if cycles != cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles {
-        trap("check the cts call of this cycles_transferrer.")
-    }
-    
     let cycles_transfer_candid: Vec<u8> = match candid::utils::encode_one(
         CyclesTransfer{ memo: cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles_transfer_memo }
     ) {
@@ -95,28 +90,46 @@ pub async fn cts_user_transfer_cycles() {
         },
     };
     
+    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128()); // make sure to cept the cts cycles for the call after any possibility of a reply() and return; also make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the cts gets the cycles back 
+    if cycles != cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles {
+        trap("check the cts call of this cycles_transferrer.")
+    }
+    
     ONGOING_CYCLES_TRANSFERS.with(|octs| { octs.set(octs.get() + 1); }); // checked add?
     
     reply::<(Result<(), CTSUserTransferCyclesError>,)>((Ok(),)); /// test that at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
     
     // call_raw because dont want to rely on the canister returning the correct candid 
-    let cycles_transfer_call: CallResult<Vec<u8>> = call_raw128::<(CyclesTransfer,), ()>(
+    let cycles_transfer_call_future: CallFuture<Vec<u8>> = call_raw128(
         cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.canister_id,
         "cycles_transfer",
         cycles_transfer_candid,
         cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles,
-    ).await;
+    );
     
-    let cycles_transfer_refund: Cycles = msg_cycles_refunded128();
+    if cycles_transfer_call_future.call_perform_status_code as u32 != 0 {
+        // test that a trap will refund the already accepted cycles(from the cts-main) and discard the reply(to the cts-main) 
+        trap(&format!("cycles_transfer call_perform error: {:?}", cycles_transfer_call_future.call_perform_status_code));
+        //cycles_transfer_refund = cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles;
+        //cycles_transfer_call_error = Some(cycles_transfer_call_future.call_perform_status_code, "call_perform error");
+    }
     
-    let mut cycles_transfer_call_error: Option<(u32, String)> = None;
+    let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;
     
-    match cycles_transfer_call {
-        Ok(_) => {},
+    let cycles_transfer_refund: Cycles = msg_cycles_refunded128(); // now that we are for sure in a callback
+
+    let mut cycles_transfer_call_error: Option<(u32, String)>;
+    
+    match cycles_transfer_call_result {
+        Ok(_) => {
+            cycles_transfer_call_error = None;
+        },
         Err(call_error) => {
             cycles_transfer_call_error = Some(call_error);
         }
     }
+   
+    
     
     // we make a new call here because we already replied to the cts before the cycles_transfer call.
     match call_with_payment128::<(CyclesTransferrerUserTransferCyclesCallback,), (Result<(), CyclesTransferrerUserTransferCyclesCallbackError>,)>(

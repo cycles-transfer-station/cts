@@ -172,6 +172,7 @@ pub mod management_canister {
 
 
 pub mod cts {
+    use super::*;
     
     #[derive(CandidType, Deserialize)]
     pub struct UMCUserTransferCyclesQuest {
@@ -188,7 +189,7 @@ pub mod cts {
     
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerUserTransferCyclesCallback {
-        cts_user_transfer_cycles_quest: CTSUserTransferCyclesQuest
+        cts_user_transfer_cycles_quest: cycles_transferrer::CTSUserTransferCyclesQuest
     }
     
     #[derive(CandidType, Deserialize)]
