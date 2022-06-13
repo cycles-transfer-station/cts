@@ -170,14 +170,40 @@ pub mod management_canister {
 
 
 
+pub mod cycles_transferrer {
+    use super::*;
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransferrerInit {
+        pub cts_id: Principal
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CTSUserTransferCyclesQuest {
+        pub users_map_canister_id: UsersMapCanisterId,
+        pub umc_user_transfer_cycles_quest: cts::UMCUserTransferCyclesQuest
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum CTSUserTransferCyclesError {
+        MaxOngoingCyclesTransfers(usize),
+        CyclesTransferQuestCandidCodeError(String),
+        
+    }
+    
+    
+}
+
+
+
 
 pub mod cts {
     use super::*;
     
     #[derive(CandidType, Deserialize)]
     pub struct UMCUserTransferCyclesQuest {
-        user_canister_id: UserCanisterId,
-        uc_user_transfer_cycles_quest: users_map_canister::UCUserTransferCyclesQuest,
+        pub user_canister_id: UserCanisterId,
+        pub uc_user_transfer_cycles_quest: users_map_canister::UCUserTransferCyclesQuest,
     }
     
     #[derive(CandidType, Deserialize)]
@@ -189,14 +215,10 @@ pub mod cts {
     
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerUserTransferCyclesCallback {
-        cts_user_transfer_cycles_quest: cycles_transferrer::CTSUserTransferCyclesQuest
+        pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means callstatus == 'replied'
+        pub cts_user_transfer_cycles_quest: cycles_transferrer::CTSUserTransferCyclesQuest
     }
     
-    #[derive(CandidType, Deserialize)]
-    pub enum CyclesTransferrerUserTransferCyclesCallbackError {
-        CTSUserTransferCyclesCallbackError(user_canister::CTSUserTransferCyclesCallbackError),
-        CTSUserTransferCyclesCallbackCallError(String),
-    }
 }
 
 
@@ -281,31 +303,6 @@ pub mod user_canister {
     }
 }
 
-
-
-pub mod cycles_transferrer {
-    use super::*;
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransferrerInit {
-        pub cts_id: Principal
-    }
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct CTSUserTransferCyclesQuest {
-        pub users_map_canister_id: UsersMapCanisterId,
-        pub umc_user_transfer_cycles_quest: cts::UMCUserTransferCyclesQuest
-    }
-    
-    #[derive(CandidType, Deserialize)]
-    pub enum CTSUserTransferCyclesError {
-        MaxOngoingCyclesTransfers(usize),
-        CyclesTransferQuestCandidCodeError(String),
-        
-    }
-    
-    
-}
 
 
 

@@ -1005,28 +1005,63 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
 
 
 
-#[update]
-pub async fn cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_q: CyclesTransferrerUserTransferCyclesCallback) -> Result<(), CyclesTransferrerUserTransferCyclesCallbackError> {
+// return () or trap back to the cycles_transferrer before the first await in the same message execution as the msg_cycles_accept of the cycles_transfer_re_fund 
+#[export_name = "canister_update cycles_transferrer_user_transfer_cycles_callback"]
+pub async fn cycles_transferrer_user_transfer_cycles_callback() {
     
     if with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| { !ctcs.contains(&caller()) }) {
         trap("Caller must be a cts cycles_transferrer canister.")
     }
     
-    let cycles_transfer_refund: Cycles = msg_cycles_refunded128();
+    let (cycles_transferrer_q,): (CyclesTransferrerUserTransferCyclesCallback,) = arg_data::<(CyclesTransferrerUserTransferCyclesCallback,)>();
+    
+    let user_transfer_cycles_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    
+    reply::<()>(()); // within this first (exe)cution
     
     match call::<(CTSUserTransferCyclesCallback,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
         cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id,
         "cts_user_transfer_cycles_callback",
         (CTSUserTransferCyclesCallback{
-            user_id: UserId,
-            cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
-            cycles_refunded: Cycles,
-            cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+            user_id: cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_id,
+            cycles_transfer_purchase_log_id: cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.cycles_transfer_purchase_log_id,
+            cycles_refunded: user_transfer_cycles_refund,
+            cycles_transfer_call_error: cycles_transferrer_q.cycles_transfer_call_error
         },)
-    ).await {}
-    
-    
-    // on user_canister cts cts_user_transfer_cycles_callback call error, wrong user id, make a find user call and find the user's canister if they have one now and if is is different than the one in the quest, make a call on it's cycles_transferrer_user_transfer_cycles_callback-method
+    ).await {
+        Ok((cts_user_transfer_cycles_callback_sponse,)) => match cts_user_transfer_cycles_callback_sponse {
+            Ok(()) => (),
+            Err(cts_user_transfer_cycles_callback_error) => match cts_user_transfer_cycles_callback_error {
+                CTSUserTransferCyclesCallbackError::WrongUserId => {
+                    match find_user_in_the_users_map_canisters(cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_id).await {
+                        Ok((user_canister_id, users_map_canister_id)) => {
+                            if user_canister_id == cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id {
+                                // :log and re-try in this cts-canister
+                                //return;
+                            } else {
+                                // call the new-found user_canister_id
+                            }
+                        },
+                        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
+                            FindUserInTheUsersMapCanistersError::UserNotFound => {
+                                // check the save users-cycles-balance for the (time/)space if a user-canister runs out of time. if not there either:
+                                // do nothing let it drop
+                            },
+                            FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
+                                // :log and re-try in this cts-canister
+                            }
+                        } 
+                    }
+                },
+                _ => {
+                    // :log and re-try in this cts-canister
+                }
+            }
+        },
+        Err(cts_user_transfer_cycles_callback_call_error) => {
+            // :log and re-try in this cts-canister
+        }
+    }
  
 }
 
