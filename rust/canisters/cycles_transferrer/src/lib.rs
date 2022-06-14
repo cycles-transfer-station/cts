@@ -134,9 +134,9 @@ pub async fn cts_user_transfer_cycles() {
         cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles,
     );
     
-    if cycles_transfer_call_future.call_perform_status_code as u32 != 0 {
+    if cycles_transfer_call_future.call_perform_status_code != 0 {
         // test that a trap will refund the already accepted cycles(from the cts-main) and discard the reply(to the cts-main) 
-        trap(&format!("cycles_transfer call_perform error: {:?}", cycles_transfer_call_future.call_perform_status_code));
+        trap(&format!("cycles_transfer call_perform error: {:?}", RejectionCode::from(cycles_transfer_call_future.call_perform_status_code)));
         //cycles_transfer_refund = cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles;
         //cycles_transfer_call_error = Some(cycles_transfer_call_future.call_perform_status_code, "call_perform error");
     }
@@ -179,11 +179,11 @@ async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_
         cycles_transfer_refund
     );
     
-    if cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code as u32 != 0 {
+    if cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code != 0 {
         // log and re-try in a heartbeat or similar
         // in the re-try, make sure to give the cts back the user_transfer_cycles-refund 
         with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-            rcs.push(((cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code as u32, "call_perform error".to_string()), cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund));
+            rcs.push(((cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code, "call_perform error".to_string()), cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund));
         });
         return;
     }

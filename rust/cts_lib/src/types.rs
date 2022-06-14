@@ -213,6 +213,7 @@ pub mod cts {
     
     #[derive(CandidType, Deserialize)]
     pub enum UMCUserTransferCyclesError {
+        MaxReTryCtsUserTransferCyclesCallbacks(usize),
         NoCyclesTransferrerCanistersFound,
         CTSUserTransferCyclesError(cycles_transferrer::CTSUserTransferCyclesError),
         CTSUserTransferCyclesCallError(String)

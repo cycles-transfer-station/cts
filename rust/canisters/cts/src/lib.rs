@@ -256,7 +256,7 @@ thread_local! {
     
     static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
-    static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>> = RefCell::new(Vec::new());
+    static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS/*_LOGS*/: RefCell<Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>> = RefCell::new(Vec::new());
 }
 
 
@@ -987,6 +987,11 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
         trap("Caller of this method must be a CTS users-map-canister.")
     }
     
+    if with(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) >= MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS {
+        //trap("The CTS MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS limit is hit") // 
+        return Err(UMCUserTransferCyclesError::MaxReTryCtsUserTransferCyclesCallbacks(MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS));
+    }
+    
     let cycles_transferrer_canister_id: Principal = match get_next_cycles_transferrer_canister_round_robin() { 
         Some(cycles_transferrer_canister) => cycles_transferrer_canister,
         None => return Err(UMCUserTransferCyclesError::NoCyclesTransferrerCanistersFound) 
@@ -1005,7 +1010,20 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
     ).await {
         Ok((cts_user_transfer_cycles_sponse,)) => match cts_user_transfer_cycles_sponse {
             Ok(()) => return Ok(()), 
-            Err(cts_user_transfer_cycles_error) => return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesError(cts_user_transfer_cycles_error))
+            Err(cts_user_transfer_cycles_error) => match cts_user_transfer_cycles_error {
+                CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(max_ongoing_cycles_transfers) => {
+                    let a_different_possible_cycles_transferrer_canister_id: Principal = match get_next_cycles_transferrer_canister_round_robin(){
+                        Some(c_id) => {
+                            if c_id != cycles_transferrer_canister_id {
+                                // try this different cycles_transferrer_canister
+                            }
+                        },
+                        None => {}
+                    };
+                    return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesError(cts_user_transfer_cycles_error)) // take this out when finish the try this different cycles_transferrer_canister 
+                },
+                _ => return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesError(cts_user_transfer_cycles_error))
+            }
         },
         Err(cts_user_transfer_cycles_call_error) => return Err(UMCUserTransferCyclesError::CTSUserTransferCyclesCallError(format!("{:?}", cts_user_transfer_cycles_call_error)))
     }
@@ -1025,7 +1043,8 @@ pub async fn cycles_transferrer_user_transfer_cycles_callback() {
         trap("Caller must be a cts cycles_transferrer canister.")
     }
     
-    // check the MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS in a case that this cts_user_transfer_cycles_callback fails and needs to be log 
+    // check the MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS in a case that this cts_user_transfer_cycles_callback fails and is put into a log
+    // check this value before cepting a user_transfer_cycles
     if with(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) >= MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS {
         trap("The CTS MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS limit is hit")
     }
