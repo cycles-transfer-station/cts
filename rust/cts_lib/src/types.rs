@@ -1,5 +1,10 @@
 use crate::ic_cdk::{
-    api::time,
+    api::{
+        time,
+        call::{
+            RejectionCode
+        },
+    },
     export::{
         Principal,
         candid::{
@@ -214,7 +219,7 @@ pub mod cts {
     }
     
     #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransferrerUserTransferCyclesCallback {
+    pub struct CyclesTransferrerUserTransferCyclesCallbackQuest {
         pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means callstatus == 'replied'
         pub cts_user_transfer_cycles_quest: cycles_transferrer::CTSUserTransferCyclesQuest
     }
@@ -290,10 +295,10 @@ pub mod user_canister {
     pub type CyclesTransferPurchaseLogId = u64;
     
     #[derive(CandidType, Deserialize)]
-    pub struct CTSUserTransferCyclesCallback {
+    pub struct CTSUserTransferCyclesCallbackQuest {
         pub user_id: UserId,
         pub cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
-        pub cycles_refunded: Cycles,
+        pub cycles_transfer_refund: Cycles,
         pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
     }
     

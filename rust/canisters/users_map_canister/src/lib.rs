@@ -11,6 +11,7 @@ use cts_lib::{
             call::{
                 reply,
                 arg_data,
+                call,
             }
         },
         export::{
@@ -34,9 +35,6 @@ use cts_lib::{
             UsersMapCanisterInit,
             UCUserTransferCyclesQuest,
             UCUserTransferCyclesError,
-        },
-        user_canister::{
-            CyclesTransferPurchaseLogId
         }
     },
     global_allocator_counter::get_allocated_bytes_count

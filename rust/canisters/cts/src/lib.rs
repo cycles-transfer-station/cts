@@ -45,7 +45,12 @@
 //#![allow(unused)] 
 #![allow(non_camel_case_types)]
 
-use std::{cell::{Cell, RefCell, RefMut}, collections::HashMap};
+use std::{
+    cell::{Cell, RefCell, RefMut}, 
+    collections::HashMap,
+    future::Future,
+    
+};
 
 use cts_lib::{
     types::{
@@ -68,12 +73,13 @@ use cts_lib::{
         },
         cts::{
             UMCUserTransferCyclesQuest,
-            UMCUserTransferCyclesError
+            UMCUserTransferCyclesError,
+            CyclesTransferrerUserTransferCyclesCallbackQuest
         },
         user_canister::{
             UserCanisterInit,
             CTSCyclesTransferIntoUser,
-            CTSUserTransferCyclesCallback,
+            CTSUserTransferCyclesCallbackQuest,
             CTSUserTransferCyclesCallbackError
         },
         cycles_transferrer::{
@@ -129,6 +135,7 @@ use cts_lib::{
         export::{
             Principal,
             candid::{
+                self,
                 CandidType,
                 Deserialize,
                 utils::{
@@ -163,7 +170,7 @@ use cts_lib::{
         icp_account_balance,
         IcpAccountBalanceArgs
     },
-    global_allocator_counter::get_allocated_bytes_count,
+    global_allocator_counter::get_allocated_bytes_count
 };
 
 
@@ -230,7 +237,7 @@ pub const CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE: Cycles = 3_000
 
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
-
+pub const MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: usize = 100;
 
 
 
@@ -249,6 +256,7 @@ thread_local! {
     
     static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
+    static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>> = RefCell::new(Vec::new());
 }
 
 
@@ -953,19 +961,18 @@ fn get_next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
             0 => None,
             1 => Some(ctcs[0]),
             l => {
-                CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|ctcs_rrc| { 
-                    match ctcs_rrc.get() {
-                        c @ 0..=(l-1) => {
-                            match c {
-                                l-1       => { ctcs_rrc.set(0);   },
-                                0..=(l-2) => { ctcs_rrc.set(c+1); },
-                            }
-                            Some(ctcs[c])
-                        }, 
-                        _ => {
-                            ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match 
-                            Some(ctcs[0])
+                CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|ctcs_rrc| {
+                    let c_i: usize = ctcs_rrc.get();                    
+                    if c_i <= l-1 {
+                        if c_i == l-1 {
+                            ctcs_rrc.set(0);
+                        } else {
+                            ctcs_rrc.set(c_i+1);
                         }
+                        Some(ctcs[c_i])
+                    } else {
+                        ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match                         
+                        Some(ctcs[0])
                     } 
                 })
             }
@@ -985,6 +992,8 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
         None => return Err(UMCUserTransferCyclesError::NoCyclesTransferrerCanistersFound) 
     }; 
     
+    let user_transfer_cycles_quest_cycles: Cycles = umc_q.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles; // copy here before the umc_q move for the CTSUserTransferCyclesQuest
+    
     match call_with_payment128::<(CTSUserTransferCyclesQuest,), (Result<(), CTSUserTransferCyclesError>,)>(
         cycles_transferrer_canister_id,
         "cts_user_transfer_cycles",
@@ -992,7 +1001,7 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
             users_map_canister_id: caller(),
             umc_user_transfer_cycles_quest: umc_q
         },),
-        umc_q.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles
+        user_transfer_cycles_quest_cycles
     ).await {
         Ok((cts_user_transfer_cycles_sponse,)) => match cts_user_transfer_cycles_sponse {
             Ok(()) => return Ok(()), 
@@ -1005,6 +1014,9 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
 
 
 
+
+
+
 // return () or trap back to the cycles_transferrer before the first await in the same message execution as the msg_cycles_accept of the cycles_transfer_re_fund 
 #[export_name = "canister_update cycles_transferrer_user_transfer_cycles_callback"]
 pub async fn cycles_transferrer_user_transfer_cycles_callback() {
@@ -1013,66 +1025,107 @@ pub async fn cycles_transferrer_user_transfer_cycles_callback() {
         trap("Caller must be a cts cycles_transferrer canister.")
     }
     
-    let (cycles_transferrer_q,): (CyclesTransferrerUserTransferCyclesCallback,) = arg_data::<(CyclesTransferrerUserTransferCyclesCallback,)>();
+    // check the MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS in a case that this cts_user_transfer_cycles_callback fails and needs to be log 
+    if with(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) >= MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS {
+        trap("The CTS MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS limit is hit")
+    }
+    
+    let (cycles_transferrer_q,): (CyclesTransferrerUserTransferCyclesCallbackQuest,) = arg_data::<(CyclesTransferrerUserTransferCyclesCallbackQuest,)>();
     
     let user_transfer_cycles_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
-    reply::<()>(()); // within this first (exe)cution
-    
-    match call::<(CTSUserTransferCyclesCallback,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
-        cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id,
-        "cts_user_transfer_cycles_callback",
-        (CTSUserTransferCyclesCallback{
+    // unwrap bc want to trap here if candid broken bc the cycles transferrer can handle a trap here
+    // make sure and test that a trap on the unwrap will give back the cycles for this user_transfer_cycles_refund to the cycles_transferrer 
+    let cts_user_transfer_cycles_callback_quest: CTSUserTransferCyclesCallbackQuest = 
+        CTSUserTransferCyclesCallbackQuest{
             user_id: cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_id,
             cycles_transfer_purchase_log_id: cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.cycles_transfer_purchase_log_id,
-            cycles_refunded: user_transfer_cycles_refund,
+            cycles_transfer_refund: user_transfer_cycles_refund,
             cycles_transfer_call_error: cycles_transferrer_q.cycles_transfer_call_error
-        },)
+        }
+    ;
+    
+    reply::<()>(()); // within this first (exe)cution
+    
+    do_cts_user_transfer_cycles_callback(
+        cts_user_transfer_cycles_callback_quest,
+        cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id
+    ).await;
+    
+}
+
+
+
+
+async fn do_cts_user_transfer_cycles_callback(cts_user_transfer_cycles_callback_quest: CTSUserTransferCyclesCallbackQuest, user_canister_id: UserCanisterId) {
+    
+    match call::<(&CTSUserTransferCyclesCallbackQuest,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
+        user_canister_id,
+        "cts_user_transfer_cycles_callback",
+        (&cts_user_transfer_cycles_callback_quest,)
     ).await {
         Ok((cts_user_transfer_cycles_callback_sponse,)) => match cts_user_transfer_cycles_callback_sponse {
             Ok(()) => (),
             Err(cts_user_transfer_cycles_callback_error) => match cts_user_transfer_cycles_callback_error {
                 CTSUserTransferCyclesCallbackError::WrongUserId => {
-                    match find_user_in_the_users_map_canisters(cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_id).await {
-                        Ok((user_canister_id, users_map_canister_id)) => {
-                            if user_canister_id == cycles_transferrer_q.cts_user_transfer_cycles_quest.umc_user_transfer_cycles_quest.user_canister_id {
+                    match find_user_in_the_users_map_canisters(cts_user_transfer_cycles_callback_quest.user_id).await {
+                        Ok((found_user_canister_id, _users_map_canister_id)) => {
+                            if found_user_canister_id == user_canister_id {
                                 // :log and re-try in this cts-canister
-                                //return;
+                                with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                return;
                             } else {
-                                // call the new-found user_canister_id
+                                // call the new-found_user_canister_id
+                                match call::<(&CTSUserTransferCyclesCallbackQuest,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
+                                    found_user_canister_id,
+                                    "cts_user_transfer_cycles_callback",
+                                    (&cts_user_transfer_cycles_callback_quest,)
+                                ).await {
+                                    Ok((cts_user_transfer_cycles_callback_sponse,)) => match cts_user_transfer_cycles_callback_sponse {
+                                        Ok(()) => (),
+                                        Err(cts_user_transfer_cycles_callback_error) => {
+                                            // :log and re-try in this cts-canister
+                                            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                            return;
+                                        }
+                                    },
+                                    Err(cts_user_transfer_cycles_callback_call_error) => {
+                                        // :log and re-try in this cts-canister
+                                        with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                        return;
+                                    }
+                                }
                             }
                         },
                         Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
                             FindUserInTheUsersMapCanistersError::UserNotFound => {
                                 // check the save users-cycles-balance for the (time/)space if a user-canister runs out of time. if not there either:
                                 // do nothing let it drop
+                                return;
                             },
                             FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
                                 // :log and re-try in this cts-canister
+                                with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                return;
                             }
-                        } 
+                        }
                     }
                 },
                 _ => {
                     // :log and re-try in this cts-canister
+                    with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                    return;
                 }
             }
         },
         Err(cts_user_transfer_cycles_callback_call_error) => {
             // :log and re-try in this cts-canister
+            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+            return;
         }
     }
- 
+
 }
-
-
-
-
-
-
-
-
-
 
 
 
