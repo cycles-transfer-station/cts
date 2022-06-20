@@ -203,13 +203,12 @@ use tools::{
     FindUserInTheUsersMapCanistersError,
     find_user_in_the_users_map_canisters
     
-
-
-
-
-    
-    
 };
+
+
+mod frontcode;
+use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_hash, make_file_certificate_header};
+
 
 /*
 mod stable;
@@ -257,6 +256,9 @@ thread_local! {
     static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
     static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS/*_LOGS*/: RefCell<Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>> = RefCell::new(Vec::new());
+
+    static FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
+    static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
 }
 
 
@@ -333,7 +335,7 @@ pub fn canister_inspect_message() {
 // if a user for the topup is not found, the cycles-transfer-station takes a fee for the user-lookup(:fee is with the base on how many users_map_canisters there are) and refunds the rest of the cycles. 
 // make sure the minimum-in-cycles-transfer is more than the find_and_plus_user_cycles_balance_user_not_found_fee
 
-#[export_name="canister_update cycles_transfer"]
+#[update(manual_reply = true)]
 pub async fn cycles_transfer() {
     
     let cycles_available: Cycles = msg_cycles_available128();
@@ -1012,7 +1014,7 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
             Ok(()) => return Ok(()), 
             Err(cts_user_transfer_cycles_error) => match cts_user_transfer_cycles_error {
                 CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(max_ongoing_cycles_transfers) => {
-                    let a_different_possible_cycles_transferrer_canister_id: Principal = match get_next_cycles_transferrer_canister_round_robin(){
+                    /*let a_different_possible_cycles_transferrer_canister_id: Principal = */match get_next_cycles_transferrer_canister_round_robin(){
                         Some(c_id) => {
                             if c_id != cycles_transferrer_canister_id {
                                 // try this different cycles_transferrer_canister
@@ -1036,7 +1038,7 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
 
 
 // return () or trap back to the cycles_transferrer before the first await in the same message execution as the msg_cycles_accept of the cycles_transfer_re_fund 
-#[export_name = "canister_update cycles_transferrer_user_transfer_cycles_callback"]
+#[update(manual_reply = true)]
 pub async fn cycles_transferrer_user_transfer_cycles_callback() {
     
     if with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| { !ctcs.contains(&caller()) }) {
@@ -1326,6 +1328,143 @@ pub fn controller_see_metrics() -> Metrics {
 
     }
 }
+
+
+
+
+
+
+#[update]
+pub async fn create_new_cycles_transferrer_canister() -> Principal {
+    trap("")
+} 
+
+
+
+
+
+
+#[query]
+pub fn see_caller() -> Principal {
+    caller()
+} 
+
+
+
+
+
+
+
+
+// ---------------------------- :FRONTCODE. -----------------------------------
+
+// front code can take less wasm-size. i think it is do to serde serialization, cbor?
+// CHECK THE CALLER == CONTROLLER
+
+
+
+
+#[update]
+pub fn upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+    // let mut file_hashes: FileHashes = get_file_hashes();
+    // file_hashes.insert(file_path.clone(), sha256(&file.content));
+    // put_file_hashes(&file_hashes);
+    
+    // set_root_hash(&file_hashes);
+    
+    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+        ffhs.insert(file_path.clone(), sha256(&file.content));
+        set_root_hash(ffhs);
+    });
+    
+    // let mut files: Files = get_files();
+    // files.insert(file_path, file);
+    // put_files(&files);
+    with_mut(&FRONTCODE_FILES, |ffs| {
+        ffs.insert(file_path, file); 
+    });
+}
+
+
+#[query]
+pub fn http_request(quest: HttpRequest) -> HttpResponse {
+    let file_name: String = quest.url;
+    // let files: Files = get_files();
+    
+    with(&FRONTCODE_FILES, |ffs| {
+        match ffs.get(&file_name) {
+            None => {
+                return HttpResponse {
+                    status_code: 404,
+                    headers: vec![],
+                    body: vec![],
+                    streaming_strategy: None
+                }
+            }, 
+            Some(file) => {                 
+                HttpResponse {
+                    status_code: 200,
+                    headers: vec![
+                        make_file_certificate_header(&file_name), 
+                        ("content-type".to_string(), file.content_type.clone()),
+                        ("content-encoding".to_string(), file.content_encoding.clone())
+                    ],
+                    body: file.content.to_vec(),
+                    streaming_strategy: None
+                }
+            }
+        }
+    })
+}
+
+
+#[query]
+pub fn public_get_file_hashes() -> Vec<(String, [u8; 32])> {
+    with(&FRONTCODE_FILES_HASHES, |file_hashes| { 
+        let mut vec = Vec::<(String, [u8; 32])>::new();
+        file_hashes.for_each(|k,v| {
+            vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
+        });
+        vec
+    })
+}
+
+
+#[update]
+pub fn public_clear_file_hashes() {
+    // put_file_hashes(&FileHashes::default());
+    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+        *ffhs = FilesHashes::default();
+        set_root_hash(ffhs);
+    });
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -90,7 +90,7 @@ fn cts_id() -> Principal {
 
 
 // (cts_q: CTSUserTransferCyclesQuest) -> Result<(), CTSUserTransferCyclesError>
-#[export_name = "canister_update cts_user_transfer_cycles"]
+#[update(manual_reply = true)]
 pub async fn cts_user_transfer_cycles() {
     
     if caller() != cts_id() {
@@ -135,10 +135,8 @@ pub async fn cts_user_transfer_cycles() {
     );
     
     if cycles_transfer_call_future.call_perform_status_code != 0 {
-        // test that a trap will refund the already accepted cycles(from the cts-main) and discard the reply(to the cts-main) 
+        // a trap will refund the already accepted cycles(from the cts-main) and discard the reply(to the cts-main) 
         trap(&format!("cycles_transfer call_perform error: {:?}", RejectionCode::from(cycles_transfer_call_future.call_perform_status_code)));
-        //cycles_transfer_refund = cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles;
-        //cycles_transfer_call_error = Some(cycles_transfer_call_future.call_perform_status_code, "call_perform error");
     }
     
     let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;

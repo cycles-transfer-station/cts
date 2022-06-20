@@ -14,6 +14,7 @@ use cts_lib::{
                 call_with_payment128,
                 msg_cycles_accept128,
                 msg_cycles_available128,
+                msg_cycles_refunded128,
                 reject,
                 CallFuture,
                 RejectionCode,
@@ -38,6 +39,7 @@ use cts_lib::{
 
 thread_local! {
     /*static CYCLES_TRANSFER_CYCLES: Cell<Cycles> = Cell::new(0);*/
+    
 
 }
 
@@ -48,8 +50,9 @@ pub async fn cycles_transfer(ct: CyclesTransfer) -> () {
     CYCLES_TRANSFER_CYCLES.with(|ctc| { ctc.set(ctc.get() + msg_cycles_accept128(msg_cycles_available128())); });
     
 }
+*/
 
-
+/*
 #[update]
 pub fn see_cycles_transfer_cycles() -> Cycles {
     CYCLES_TRANSFER_CYCLES.with(|ctc| { ctc.get() })
@@ -58,43 +61,21 @@ pub fn see_cycles_transfer_cycles() -> Cycles {
 
 
 #[update]
-pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Principal, cycles: Cycles) -> String {
+pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Principal, cycles: Cycles) -> (u32, String, Cycles) {
     // send cycles to testcanister2
     
-    let mut s: String = String::new();
-    
-    s.push_str(&format!("first_canister_balance: {:?}", canister_balance128()));
-    
-    let cycles_transfer_call_future: CallFuture<Vec<u8>> = call_raw128(
+    match call_raw128(
         test_canister_id,
         "test_cycles_transfer_pogation_two",
         &candid::utils::encode_one(id()).unwrap(),
         cycles
-    );
-    
-    s.push_str(&format!("\nsecond_canister_balance: {:?}\ncall_perform_status_code: {:?}", canister_balance128(), cycles_transfer_call_future.call_perform_status_code));
-    
-    /*
-    match cycles_transfer_call_future.await {
-        Ok(()) => return,
-        Err(call_error) => {
-            reject(&format!("two call error: {:?}", call_error));
-            return;
-        }
+    ).await {
+        Ok(_) => trap(""),
+        Err(call_error) => return (call_error.0 as u32, call_error.1, msg_cycles_refunded128())
     }
-    */
-    
-    
-    // have testcanister2 pogate the cycles to a testcanister1 method and refund    
-    
-    s
+
 }
 
 
-
-#[update]
-pub async fn test_cycles_transfer_pogation_three() -> u64 {
-    5u64
-}
 
 
