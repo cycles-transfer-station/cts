@@ -99,7 +99,7 @@ fn cts_id() -> Principal {
 
 
 fn is_full() -> bool {
-    get_allocated_bytes_count() > MAX_CANISTER_SIZE || with(&USERS_MAP, |users_map| users_map.len()) >= MAX_USERS
+    get_allocated_bytes_count() >= MAX_CANISTER_SIZE || with(&USERS_MAP, |users_map| users_map.len()) >= MAX_USERS
 }
 
 

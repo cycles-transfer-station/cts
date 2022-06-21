@@ -243,7 +243,7 @@ pub const MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: usize = 100;
 thread_local! {
 
     static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
-    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(vec![ic_cdk::api::id()]);
+    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     
@@ -257,8 +257,8 @@ thread_local! {
     static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
     static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS/*_LOGS*/: RefCell<Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>> = RefCell::new(Vec::new());
 
-    static FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
-    static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
+    static     FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
+    static     FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
 }
 
 
@@ -419,6 +419,7 @@ pub struct Fees {
     convert_icp_for_the_cycles_with_the_cmc_rate_cost_cycles: Cycles,
     minimum_cycles_transfer_into_user: Cycles,
     cycles_transfer_into_user_user_not_found_fee_cycles: Cycles,
+    CYCLES_PER_USER_PER_103_MiB_PER_YEAR: cycles,
     
     
 }
@@ -432,7 +433,7 @@ pub fn see_fees() -> Fees {
         convert_icp_for_the_cycles_with_the_cmc_rate_cost_cycles: CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE,
         minimum_cycles_transfer_into_user: MINIMUM_CYCLES_TRANSFER_INTO_USER,
         cycles_transfer_into_user_user_not_found_fee_cycles: CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE,
-        
+        CYCLES_PER_USER_PER_103_MiB_PER_YEAR
     }
 }
 
@@ -1149,6 +1150,7 @@ async fn do_cts_user_transfer_cycles_callback(cts_user_transfer_cycles_callback_
 }
 
 
+// make controller method to loop through the RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS and .pop() and call do_cts_user_transfer_cycles_callback
 
 
 
