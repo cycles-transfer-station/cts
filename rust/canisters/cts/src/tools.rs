@@ -153,8 +153,11 @@ pub fn main_cts_icp_id() -> IcpId {  // do once
 
 
 pub mod canister_code {
-
+    use super::{CandidType, Deserialize};
+    
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct CanisterCode {
+        #[serde(with = "serde_bytes")]
         module: Vec<u8>,
         module_hash: [u8; 32] 
     }

@@ -12,6 +12,13 @@ use cts_lib::{
                 reply,
                 arg_data,
                 call,
+            },
+            stable::{
+                stable64_grow,
+                stable64_read,
+                stable64_size,
+                stable64_write,
+                stable_bytes
             }
         },
         export::{
@@ -19,6 +26,10 @@ use cts_lib::{
             candid::{
                 CandidType,
                 Deserialize,
+                utils::{
+                    encode_one,
+                    decode_one
+                }
             },
         }
     },
@@ -37,6 +48,9 @@ use cts_lib::{
             UCUserTransferCyclesError,
         }
     },
+    consts::{
+        WASM_PAGE_SIZE_BYTES
+    },
     global_allocator_counter::get_allocated_bytes_count
 };
 
@@ -52,6 +66,8 @@ const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024 / 11;// bytes // 1 GiB // e
 const MAX_USERS: usize = 2_000_000;
 
 
+
+const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 
@@ -70,14 +86,58 @@ fn init(users_map_canister_init: UsersMapCanisterInit) {
     CTS_ID.with(|cts_id| { cts_id.set(users_map_canister_init.cts_id); });
 }
 
+
+#[derive(CandidType, Deserialize)]
+struct UsersMapCanisterData {
+    cts_id: Principal,
+    users_map: Vec<(UserId, UserCanisterId)>
+}
+
+
+fn create_users_map_canister_data_candid_bytes() -> Vec<u8> {
+    encode_one(
+        &UsersMapCanisterData {
+            cts_id: cts_id(),
+            users_map: with(&USERS_MAP, |users_map| { (*users_map).clone().into_iter().collect::<Vec<(UserId, UserCanisterId)>>() })
+        }
+    ).unwrap()
+}
+
+fn re_store_users_map_canister_data_candid_bytes(users_map_canister_data_candid_bytes: Vec<u8>) {
+    let users_map_canister_data: UsersMapCanisterData = decode_one::<UsersMapCanisterData>(&users_map_canister_data_candid_bytes).unwrap();
+    // std::mem::drop(users_map_canister_data_candid_bytes);
+    CTS_ID.with(|cts_id| { cts_id.set(users_map_canister_data.cts_id); });
+    with_mut(&USERS_MAP, |users_map| { *users_map = users_map_canister_data.users_map.into_iter().collect::<HashMap<UserId, UserCanisterId>>(); });
+}
+
+
 #[pre_upgrade]
 fn pre_upgrade() {
+    let users_map_canister_data_candid_bytes: Vec<u8> = create_users_map_canister_data_candid_bytes();
+    
+    let current_stable_size_wasm_pages: u64 = stable64_size();
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    
+    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the users_map_canister_data_candid_bytes*/ + users_map_canister_data_candid_bytes.len() as u64; 
+    if current_stable_size_bytes < want_stable_memory_size_bytes {
+        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+    }
+    
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((users_map_canister_data_candid_bytes.len() as u64).to_be_bytes()));
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &users_map_canister_data_candid_bytes);
 
 }
 
 #[post_upgrade]
 fn post_upgrade() {
+    let mut users_map_canister_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut users_map_canister_data_candid_bytes_len_u64_be_bytes);
+    let users_map_canister_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(users_map_canister_data_candid_bytes_len_u64_be_bytes); 
     
+    let mut users_map_canister_data_candid_bytes: Vec<u8> = vec![0; users_map_canister_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut users_map_canister_data_candid_bytes);
+    
+    re_store_users_map_canister_data_candid_bytes(users_map_canister_data_candid_bytes);
 }
 
 #[no_mangle]

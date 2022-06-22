@@ -11,4 +11,4 @@ crate-type = ["cdylib"]
 [dependencies]
 cts_lib = { path = "../../cts_lib" }
 serde = "1.0.137"
-candid = "0.7.14"
+candid = "0.7.11"

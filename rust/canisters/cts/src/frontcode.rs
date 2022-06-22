@@ -21,10 +21,11 @@ use crate::{FRONTCODE_FILES_HASHES, FRONTCODE_FILES};
 
 const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct File {
     pub content_type: String,
     pub content_encoding: String,
+    #[serde(with = "serde_bytes")]
     pub content: Box<[u8]>
 }
 pub type Files = HashMap<String, File>;

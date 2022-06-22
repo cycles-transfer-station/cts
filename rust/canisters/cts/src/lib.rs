@@ -89,6 +89,7 @@ use cts_lib::{
     },
     consts::{
         MANAGEMENT_CANISTER_ID,
+        WASM_PAGE_SIZE_BYTES
     },
     fees::{
         CYCLES_BANK_COST,
@@ -116,6 +117,7 @@ use cts_lib::{
             caller, 
             time,
             id,
+            canister_balance128,
             call::{
                 arg_data,
                 arg_data_raw,
@@ -131,6 +133,13 @@ use cts_lib::{
                 reject,
                 reply,
             },
+            stable::{
+                stable64_grow,
+                stable64_read,
+                stable64_size,
+                stable64_write,
+                stable_bytes
+            }
         },
         export::{
             Principal,
@@ -140,7 +149,7 @@ use cts_lib::{
                 Deserialize,
                 utils::{
                     encode_one, 
-                    // decode_one
+                    decode_one
                 },
             },
         },
@@ -210,18 +219,6 @@ mod frontcode;
 use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_hash, make_file_certificate_header};
 
 
-/*
-mod stable;
-use stable::{
-    save_users_data,
-    read_users_data,
-    save_new_canisters,
-    read_new_canisters
-
-};
-*/
-
-
 
 
 
@@ -233,11 +230,12 @@ pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = 5_000_000_000_000;
 pub const CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE: Cycles = 3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
 
 
-
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 pub const MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: usize = 100;
 
+
+const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 thread_local! {
@@ -259,6 +257,14 @@ thread_local! {
 
     static     FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
     static     FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
+
+    static     CONTROLLERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    
+    
+    
+    // not save in a CTSData
+    static     STOP_CALLS: Cell<bool> = Cell::new(false);
+    static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 }
 
 
@@ -266,36 +272,115 @@ thread_local! {
 
 
 
-
-
-/*
-#[init]
-fn init() {
-
+#[derive(CandidType, Deserialize)]
+struct CTSInit {
+    controllers: Vec<Principal>
 } 
+
+#[init]
+fn init(cts_init: CTSInit) {
+    with_mut(&CONTROLLERS, |controllers| { *controllers = cts_init.controllers; });
+} 
+
+#[derive(CandidType, Deserialize)]
+struct CTSData {
+    new_users: Vec<(Principal, NewUserData)>,
+    users_map_canisters: Vec<Principal>,
+    create_new_users_map_canister_lock: bool,
+    latest_known_cmc_rate: IcpXdrConversionRate,
+    cycles_bank_canister_code: Option<CanisterCode>,
+    user_canister_code: Option<CanisterCode>,
+    users_map_canister_code: Option<CanisterCode>,
+    new_canisters: Vec<Principal>,
+    cycles_transferrer_canisters: Vec<Principal>,
+    cycles_transferrer_canisters_round_robin_counter: usize,
+    re_try_cts_user_transfer_cycles_callbacks: Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>,
+    frontcode_files: Vec<(String, File)>,
+    frontcode_files_hashes: Vec<(String, [u8; 32])>,
+    controllers: Vec<Principal>
+}
+
+
+
+fn create_cts_data_candid_bytes() -> Vec<u8> {
+    encode_one(
+        &CTSData {
+            new_users: with(&NEW_USERS, |new_users| { (*new_users).clone().into_iter().collect::<Vec<(Principal, NewUserData)>>() }),  //Vec<(Principal, NewUserData)>,
+            users_map_canisters: with(&USERS_MAP_CANISTERS, |users_map_canisters| { (*users_map_canisters).clone() }), // Vec<Principal>,
+            create_new_users_map_canister_lock: CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|create_new_users_map_canister_lock| { create_new_users_map_canister_lock.get() }), //bool, // the cts main canister can stop safe before upgrading. this value should always be false when upgrading for now becouse the canister stops and finishes ongoing callbacks before upgrading. leaving this here for when there is name-callbacks.
+            latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|latest_known_cmc_rate| { latest_known_cmc_rate.get() }),    // IcpXdrConversionRate,
+            cycles_bank_canister_code: with(&CYCLES_BANK_CANISTER_CODE, |cycles_bank_canister_code| { (*cycles_bank_canister_code).clone() }), //Option<CanisterCode>,
+            user_canister_code: with(&USER_CANISTER_CODE, |user_canister_code| { (*user_canister_code).clone() }), //Option<CanisterCode>,
+            users_map_canister_code: with(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { (*users_map_canister_code).clone() }), // Option<CanisterCode>,
+            new_canisters: with(&NEW_CANISTERS, |new_canisters| { (*new_canisters).clone() }), // Vec<Principal>,
+            cycles_transferrer_canisters: with(&CYCLES_TRANSFERRER_CANISTERS, |cycles_transferrer_canisters| { (*cycles_transferrer_canisters).clone() }), // Vec<Principal>,
+            cycles_transferrer_canisters_round_robin_counter: CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|cycles_transferrer_canisters_round_robin_counter| { cycles_transferrer_canisters_round_robin_counter.get() }), // usize,
+            re_try_cts_user_transfer_cycles_callbacks: with(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cts_user_transfer_cycles_callbacks| { (*re_try_cts_user_transfer_cycles_callbacks).clone() }), // Vec<(CTSUserTransferCyclesCallbackQuest, UserCanisterId)>,
+            frontcode_files: with(&FRONTCODE_FILES, |frontcode_files| { (*frontcode_files).clone().into_iter().collect::<Vec<(String, File)>>() }), //Vec<(String, File)>,
+            frontcode_files_hashes: with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { frontcode_files_hashes.iter().map(|(k, v): (&String, &[u8; 32])| { (k.clone(), *v/*copy*/) }).collect::<Vec<(String, [u8; 32])>>() }), //Vec<(String, [u8; 32])>, 
+            controllers: with(&CONTROLLERS, |controllers| { (*controllers).clone() }), // Vec<Principal>      
+        }
+    ).unwrap()   
+}
+
+fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
+    let cts_upgrade_data: CTSData = decode_one::<CTSData>(&cts_data_candid_bytes).unwrap();
+    // std::mem::drop(cts_data_candid_bytes);
+    with_mut(&NEW_USERS, |new_users| { *new_users = cts_upgrade_data.new_users.into_iter().collect::<HashMap<Principal, NewUserData>>(); });
+    with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { *users_map_canisters = cts_upgrade_data.users_map_canisters; });
+    CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|create_new_users_map_canister_lock| { create_new_users_map_canister_lock.set(cts_upgrade_data.create_new_users_map_canister_lock); });
+    LATEST_KNOWN_CMC_RATE.with(|latest_known_cmc_rate| { latest_known_cmc_rate.set(cts_upgrade_data.latest_known_cmc_rate); });
+    with_mut(&CYCLES_BANK_CANISTER_CODE, |cycles_bank_canister_code| { *cycles_bank_canister_code = cts_upgrade_data.cycles_bank_canister_code; });
+    with_mut(&USER_CANISTER_CODE, |user_canister_code| { *user_canister_code = cts_upgrade_data.user_canister_code; });
+    with_mut(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { *users_map_canister_code = cts_upgrade_data.users_map_canister_code; });
+    with_mut(&NEW_CANISTERS, |new_canisters| { *new_canisters = cts_upgrade_data.new_canisters; });
+    with_mut(&CYCLES_TRANSFERRER_CANISTERS, |cycles_transferrer_canisters| { *cycles_transferrer_canisters = cts_upgrade_data.cycles_transferrer_canisters; });
+    CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|cycles_transferrer_canisters_round_robin_counter| { cycles_transferrer_canisters_round_robin_counter.set(cts_upgrade_data.cycles_transferrer_canisters_round_robin_counter); });
+    with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cts_user_transfer_cycles_callbacks| { *re_try_cts_user_transfer_cycles_callbacks = cts_upgrade_data.re_try_cts_user_transfer_cycles_callbacks; });
+    with_mut(&FRONTCODE_FILES, |frontcode_files| { *frontcode_files = cts_upgrade_data.frontcode_files.into_iter().collect::<HashMap<String, File>>(); });
+    with_mut(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| {
+        cts_upgrade_data.frontcode_files_hashes.into_iter().for_each(|file_hash_pair| {
+            frontcode_files_hashes.insert(file_hash_pair.0, file_hash_pair.1);    
+        });
+        set_root_hash(frontcode_files_hashes);
+    });
+    with_mut(&CONTROLLERS, |controllers| { *controllers = cts_upgrade_data.controllers; });
+    
+    
+}
+
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    USERS_DATA.with(|ud| {
-        save_users_data(&*ud.borrow());
-    });
-    NEW_CANISTERS.with(|ncs| {
-        save_new_canisters(&*ncs.borrow());
-    });
+    
+    let cts_upgrade_data_candid_bytes: Vec<u8> = create_cts_data_candid_bytes();
+    
+    let current_stable_size_wasm_pages: u64 = stable64_size();
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    
+    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the cts_upgrade_data_candid_bytes*/ + cts_upgrade_data_candid_bytes.len() as u64; 
+    if current_stable_size_bytes < want_stable_memory_size_bytes {
+        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+    }
+    
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((cts_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &cts_upgrade_data_candid_bytes);
+    
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    USERS_DATA.with(|ud| {
-        *ud.borrow_mut() = read_users_data();
-    });
-    NEW_CANISTERS.with(|ncs| {
-        *ncs.borrow_mut() = read_new_canisters();
-    });
-
+    let mut cts_upgrade_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut cts_upgrade_data_candid_bytes_len_u64_be_bytes);
+    let cts_upgrade_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(cts_upgrade_data_candid_bytes_len_u64_be_bytes); 
+    
+    let mut cts_upgrade_data_candid_bytes: Vec<u8> = vec![0; cts_upgrade_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut cts_upgrade_data_candid_bytes);
+    
+    re_store_cts_data_candid_bytes(cts_upgrade_data_candid_bytes);
     
 } 
-*/
+
 
 // test this!
 #[no_mangle]
@@ -313,6 +398,12 @@ pub fn canister_inspect_message() {
 
     if &method_name()[..] == "cycles_transfer" {
         trap("caller must be a canister for this method.")
+    }
+    
+    if method_name()[..].starts_with("controller") {
+        if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+            trap("Caller must be a controller for this method.")
+        }
     }
 
     accept_message();
@@ -337,6 +428,7 @@ pub fn canister_inspect_message() {
 
 #[update(manual_reply = true)]
 pub async fn cycles_transfer() {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     
     let cycles_available: Cycles = msg_cycles_available128();
     
@@ -419,7 +511,7 @@ pub struct Fees {
     convert_icp_for_the_cycles_with_the_cmc_rate_cost_cycles: Cycles,
     minimum_cycles_transfer_into_user: Cycles,
     cycles_transfer_into_user_user_not_found_fee_cycles: Cycles,
-    CYCLES_PER_USER_PER_103_MiB_PER_YEAR: cycles,
+    CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles,
     
     
 }
@@ -481,16 +573,16 @@ pub fn topup_balance() -> TopUpBalanceData {
 
 
 
+// save the fees in the new_user_data so the fees cant change while creating a new user
 
-
-#[derive(Clone, Default)]
+#[derive(Clone, Default, CandidType, Deserialize)]
 struct NewUserData {
     lock_start_time_nanos: u64,
     lock: bool,
     
-    // the options are for the memberance of the steps
-    user_icp_ledger_balance: Option<IcpTokens>,
-    current_xdr_icp_rate: Option<u64>,
+    current_xdr_icp_rate: u64,
+    
+    // the options and bools are for the memberance of the steps
     look_if_user_is_in_the_users_map_canisters: bool,
     create_user_canister_block_height: Option<IcpBlockHeight>,
     user_canister: Option<UserId>,
@@ -546,20 +638,16 @@ pub enum NewUserError{
         user_icp_ledger_balance: IcpTokens,
         icp_ledger_transfer_fee: IcpTokens
     },
+    NewUserIsInTheMiddleOfAnotherCall,
+    MaxNewUsers,
     FoundUserCanister(Principal),
-    UserIcpBalanceTooLow{
-        membership_cost_icp: IcpTokens,
-        user_icp_balance: IcpTokens,
-        icp_ledger_transfer_fee: IcpTokens
-    },
     CreateUserCanisterCmcNotifyError(CmcNotifyError),
     MidCallError(NewUserMidCallError),    // re-try the call on this sponse
 }
 
 #[derive(CandidType, Deserialize)]
 pub struct NewUserSuccessData {
-    users_map_canister: Principal,
-    user_canister: Principal,
+    user_canister: UserCanisterId,
 }
 
 
@@ -576,10 +664,12 @@ fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
 // for the now a user must sign-up/register with the icp.
 #[update]
 pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
 
     let user_id: Principal = caller();
     
-    let mut new_user_data: NewUserData = with_mut(&NEW_USERS, |new_users| {
+    
+    let optional_new_user_data: Option<NewUserData> = with_mut(&NEW_USERS, |new_users| {
         match new_users.get_mut(&user_id) {
             Some(nud) => {
                 if nud.lock == true {
@@ -587,68 +677,92 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 }
                 nud.lock = true;
                 // update nud.lock_time_start_nanos?
-                nud.clone()
+                Some(nud.clone())
             },
-            None => {
-                if new_users.len() >= MAX_NEW_USERS {
-                    trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
-                }
-                let nud: NewUserData = NewUserData::new();
-                new_users.insert(user_id, nud.clone());
-                nud
-            }
+            None => None
         }
     });
+    
+    let mut new_user_data: NewUserData = match optional_new_user_data {
+        None => {
+            // if icp balance good, create nud in nuds and set new_user_data else return err balance too low
 
-
-    if new_user_data.user_icp_ledger_balance.is_none() || new_user_data.current_xdr_icp_rate.is_none() {
-
-        let (
-            check_user_icp_ledger_balance_sponse,
-            check_current_xdr_permyriad_per_icp_cmc_rate_sponse,
-        ): (
-            CallResult<IcpTokens>,
-            CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
-        ) = futures::future::join(
-            check_user_icp_ledger_balance(&user_id), 
-            check_current_xdr_permyriad_per_icp_cmc_rate()
-        ).await; 
-        
-        let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
-            Ok(tokens) => tokens,
-            Err(check_balance_call_error) => {
+            let (
+                check_user_icp_ledger_balance_sponse,
+                check_current_xdr_permyriad_per_icp_cmc_rate_sponse,
+            ): (
+                CallResult<IcpTokens>,
+                CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
+            ) = futures::future::join(
+                check_user_icp_ledger_balance(&user_id), 
+                check_current_xdr_permyriad_per_icp_cmc_rate()
+            ).await; 
+            
+            let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
+                Ok(tokens) => tokens,
+                Err(check_balance_call_error) => {
+                    with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+                    return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
+                }
+            };
+                    
+            let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
+                Ok(rate) => rate,
+                Err(check_xdr_icp_rate_error) => {
+                    with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+                    return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
+                }
+            };
+            
+            let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
+            
+            if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
                 with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
-                return Err(NewUserError::CheckIcpBalanceCallError(format!("{:?}", check_balance_call_error)));
+                return Err(NewUserError::UserIcpLedgerBalanceTooLow{
+                    membership_cost_icp: current_membership_cost_icp,
+                    user_icp_ledger_balance,
+                    icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+                });
             }
-        };
-                
-        let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
-            Ok(rate) => rate,
-            Err(check_xdr_icp_rate_error) => {
-                with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
-                return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
-            }
-        };
-        
-        let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR, current_xdr_icp_rate); 
-        
-        if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-            with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
-            return Err(NewUserError::UserIcpLedgerBalanceTooLow{
-                membership_cost_icp: current_membership_cost_icp,
-                user_icp_ledger_balance,
-                icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
+
+            let r: Result<NewUserData, NewUserError> = with_mut(&NEW_USERS, |new_users| {
+                match new_users.get_mut(&user_id) {
+                    Some(nud) => { // checking again here if Some bc this is within a different [exe]cution
+                        if nud.lock == true {
+                            //trap("new user is in the middle of another call")
+                            return Err(NewUserError::NewUserIsInTheMiddleOfAnotherCall);
+                        }
+                        nud.lock = true;
+                        // update nud.lock_time_start_nanos?
+                        Ok(nud.clone())
+                    },
+                    None => {
+                        if new_users.len() >= MAX_NEW_USERS {
+                            //trap("max limit of creating new users at the same-time. try your call in a couple of seconds.")
+                            return Err(NewUserError::MaxNewUsers);
+                        }
+                        let mut nud: NewUserData = NewUserData::new();
+                        nud.current_xdr_icp_rate = current_xdr_icp_rate;
+                        new_users.insert(user_id, nud.clone());
+                        Ok(nud)
+                    }
+                }
             });
-        }
+            
+            match r {
+                Ok(nud) => nud,
+                Err(new_user_error) => return Err(new_user_error)
+            }
+            
+        },
+        
+        Some(nud) => nud//.clone()        
+        
+    };
 
-        new_user_data.user_icp_ledger_balance = Some(user_icp_ledger_balance);
-        new_user_data.current_xdr_icp_rate = Some(current_xdr_icp_rate); 
-        // after this, use new_user_data.field to use the data
-    }
-
-
+    
     if new_user_data.look_if_user_is_in_the_users_map_canisters == false {
-        // check in the list of the users-whos cycles-balance is save but without a user-canister   
+        // check in the list of the users-whos cycles-balance is save but without a user-canister 
         
         match find_user_in_the_users_map_canisters(user_id).await {
             Ok((user_canister_id, users_map_canister_id)) => {
@@ -676,7 +790,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             MAINNET_LEDGER_CANISTER_ID,
             IcpTransferArgs {
                 memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
-                amount: cycles_to_icptokens(CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate.unwrap()),
+                amount: cycles_to_icptokens(CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate),
                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                 from_subaccount: Some(principal_icp_subaccount(&user_id)),
                 to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
@@ -800,7 +914,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                     cts_id: id(), 
                     user_id: user_id,
                     users_map_canister_id: new_user_data.users_map_canister.unwrap()
-
                 }).unwrap() 
             },),
         ).await {
@@ -877,11 +990,11 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     
     // take the money
     
-    // give them back the users-map-canister-id and the user-canister-id
+    // give them back the user-canister-id
     
     
     if new_user_data.collect_icp == false {
-        match take_user_icp_ledger(&user_id, cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR - CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate.unwrap())).await {
+        match take_user_icp_ledger(&user_id, cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR - CYCLES_FOR_A_USER_CANISTER_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate)).await {
             Ok(icp_transfer_result) => match icp_transfer_result {
                 Ok(_block_height) => {
                     new_user_data.collect_icp = true;
@@ -908,7 +1021,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
     
     Ok(NewUserSuccessData {
-        users_map_canister: new_user_data.users_map_canister.unwrap(),
         user_canister: new_user_data.user_canister.unwrap()
     })
 }
@@ -922,24 +1034,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
 
 
-// certification? or replication-calls?
-#[export_name = "canister_query see_users_map_canisters"]
-pub fn see_users_map_canisters() {
-    with(&USERS_MAP_CANISTERS, |umcs| {
-        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((umcs,));
-    });
-}
-
-
-
-
-
-
-
-
 
 #[update]
 pub async fn find_user_canister() -> Result<UserCanisterId, FindUserInTheUsersMapCanistersError> {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     let user_id: UserId = caller();
     match find_user_in_the_users_map_canisters(user_id).await {
         Ok((user_canister_id, _users_map_canister_id)) => Ok(user_canister_id),
@@ -985,6 +1083,7 @@ fn get_next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
 
 #[update]
 pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Result<(), UMCUserTransferCyclesError> {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     // caller-check
     if with(&USERS_MAP_CANISTERS, |umcs| { !umcs.contains(&caller()) }) {
         trap("Caller of this method must be a CTS users-map-canister.")
@@ -1041,6 +1140,7 @@ pub async fn umc_user_transfer_cycles(umc_q: UMCUserTransferCyclesQuest) -> Resu
 // return () or trap back to the cycles_transferrer before the first await in the same message execution as the msg_cycles_accept of the cycles_transfer_re_fund 
 #[update(manual_reply = true)]
 pub async fn cycles_transferrer_user_transfer_cycles_callback() {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     
     if with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| { !ctcs.contains(&caller()) }) {
         trap("Caller must be a cts cycles_transferrer canister.")
@@ -1193,15 +1293,51 @@ pub async fn controller_see_balance() -> SeeBalanceSponse {
 }
 */
 
+
+
+
+
+// certification? or replication-calls?
+#[export_name = "canister_query controller_see_users_map_canisters"]
+pub fn controller_see_users_map_canisters() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with(&USERS_MAP_CANISTERS, |umcs| {
+        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((umcs,));
+    });
+}
+
+
+
+#[export_name = "canister_query controller_see_cycles_transferrer_canisters"]
+pub fn controller_see_cycles_transferrer_canisters() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| {
+        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((ctcs,));
+    });
+}
+
+
+
+
 #[update]
 pub fn controller_put_new_canisters(mut new_canisters: Vec<Principal>) {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
     NEW_CANISTERS.with(|ncs| {
         ncs.borrow_mut().append(&mut new_canisters); // .extend_from_slice(&new_canisters) also works but it clones each item. .append moves each item
     });
 }
 
-#[export_name = "canister_update controller_see_new_canisters"]
+#[export_name = "canister_query controller_see_new_canisters"]
 pub fn controller_see_new_canisters<'a>() -> () {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
     let ncs_pointer = NEW_CANISTERS.with(|ncs| {
         (&(*ncs.borrow())) as *const Vec<Principal> 
     });
@@ -1212,20 +1348,24 @@ pub fn controller_see_new_canisters<'a>() -> () {
 
 
 #[derive(CandidType, Deserialize)]
-pub enum ControllerSeeNewCanisterStatusError {
+pub enum ControllerSeeCTSCanisterStatusError {
     CanisterStatusCallError(String)
 }
 
 #[update]
-pub async fn controller_see_new_canister_status(new_canister: Principal) -> Result<ManagementCanisterCanisterStatusRecord, ControllerSeeNewCanisterStatusError> {
+pub async fn controller_see_cts_canister_status(cts_canister: Principal) -> Result<ManagementCanisterCanisterStatusRecord, ControllerSeeCTSCanisterStatusError> {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+        
     let canister_status_call: CallResult<(ManagementCanisterCanisterStatusRecord,)> = call(
         MANAGEMENT_CANISTER_ID,
         "canister_status",
-        (CanisterIdRecord { canister_id: new_canister },),
+        (CanisterIdRecord { canister_id: cts_canister },),
     ).await;
     let canister_status_record: ManagementCanisterCanisterStatusRecord = match canister_status_call {
         Ok((canister_status_record,)) => canister_status_record,
-        Err(canister_status_call_error) => return Err(ControllerSeeNewCanisterStatusError::CanisterStatusCallError(format!("{:?}", canister_status_call_error)))
+        Err(canister_status_call_error) => return Err(ControllerSeeCTSCanisterStatusError::CanisterStatusCallError(format!("{:?}", canister_status_call_error)))
     };
 
     Ok(canister_status_record)
@@ -1239,6 +1379,11 @@ pub async fn controller_see_new_canister_status(new_canister: Principal) -> Resu
 
 #[update]
 pub fn controller_put_cycles_transferrer_canisters(mut new_cycles_transferrer_canisters: Vec<Principal>) {
+    
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     with_mut(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| {
         ctcs.append(&mut new_cycles_transferrer_canisters);
     });
@@ -1252,18 +1397,30 @@ pub fn controller_put_cycles_transferrer_canisters(mut new_cycles_transferrer_ca
 
 #[update]
 pub fn controller_put_cbcc(module: Vec<u8>) -> () {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+
     with_mut(&CYCLES_BANK_CANISTER_CODE, |cbcc| {
         *cbcc = Some(CanisterCode::new(module));
     });
 }
 #[update]
 pub fn controller_put_ucc(module: Vec<u8>) -> () {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     with_mut(&USER_CANISTER_CODE, |ucc| {
         *ucc = Some(CanisterCode::new(module));
     });
 }
 #[update]
 pub fn controller_put_umcc(module: Vec<u8>) -> () {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     with_mut(&USERS_MAP_CANISTER_CODE, |umcc| {
         *umcc = Some(CanisterCode::new(module));
     });
@@ -1278,6 +1435,10 @@ pub enum ControllerDepositCyclesError {
 
 #[update]
 pub async fn controller_deposit_cycles(cycles: Cycles, topup_canister: Principal) -> Result<(), ControllerDepositCyclesError> {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     let put_cycles_call: CallResult<()> = call_with_payment128(
         MANAGEMENT_CANISTER_ID,
         "deposit_cycles",
@@ -1312,6 +1473,10 @@ pub struct Metrics {
 
 #[query]
 pub fn controller_see_metrics() -> Metrics {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     Metrics {
         global_allocator_counter: get_allocated_bytes_count(),
         stable_size: ic_cdk::api::stable::stable64_size(),
@@ -1337,7 +1502,11 @@ pub fn controller_see_metrics() -> Metrics {
 
 
 #[update]
-pub async fn create_new_cycles_transferrer_canister() -> Principal {
+pub async fn controller_create_new_cycles_transferrer_canister() -> Principal {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     trap("")
 } 
 
@@ -1354,44 +1523,186 @@ pub fn see_caller() -> Principal {
 
 
 
+#[update]
+pub fn controller_set_stop_calls(stop_calls_flag: bool) {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    STOP_CALLS.with(|stop_calls| { stop_calls.set(stop_calls_flag); });
+}
+
+#[update]
+pub fn controller_see_stop_calls_flag() -> bool {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    STOP_CALLS.with(|stop_calls| { stop_calls.get() })
+}
+
+
+
+
+
+#[update]
+pub fn controller_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
+        *state_snapshot_cts_data_candid_bytes = create_cts_data_candid_bytes();
+        state_snapshot_cts_data_candid_bytes.len()
+    })
+}
+
+
+
+// chunk_size = 1mib
+
+#[query]
+pub fn controller_download_state_snapshot(chunk_i: usize) -> Option<Vec<u8>> {          // starts at 0
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    let chunk_size: usize = 1024*1024;
+    with(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
+        if state_snapshot_cts_data_candid_bytes.len() <= chunk_size {
+            Some(state_snapshot_cts_data_candid_bytes.clone())
+        } else {
+            match state_snapshot_cts_data_candid_bytes.chunks(chunk_size).nth(chunk_i) {
+                Some(chunk) => Some(chunk.to_vec()),
+                None => None
+            }
+        }
+    })
+
+}
+
+
+#[update]
+pub fn controller_clear_state_snapshot() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
+        *state_snapshot_cts_data_candid_bytes = Vec::new();
+    });    
+}
+
+#[update]
+pub fn controller_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
+        state_snapshot_cts_data_candid_bytes.append(&mut append_bytes);
+    });
+}
+
+#[update]
+pub fn controller_re_store_cts_data_out_of_the_state_snapshot() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    re_store_cts_data_candid_bytes(
+        with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
+            let mut v: Vec<u8> = Vec::new();
+            v.append(state_snapshot_cts_data_candid_bytes);
+            v
+        })
+    );
+
+}
+
+
+#[query]
+pub fn controller_see_controllers() -> Vec<Principal> {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with(&CONTROLLERS, |controllers| { controllers.clone() })
+}
+
+
+#[update]
+pub fn controller_set_controllers(set_controllers: Vec<Principal>) {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    with_mut(&CONTROLLERS, |controllers| { *controllers = set_controllers; });
+}
 
 
 
 
 // ---------------------------- :FRONTCODE. -----------------------------------
 
-// front code can take less wasm-size. i think it is do to serde serialization, cbor?
-// CHECK THE CALLER == CONTROLLER
-
-
-
 
 #[update]
-pub fn upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+pub fn controller_upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
     // let mut file_hashes: FileHashes = get_file_hashes();
     // file_hashes.insert(file_path.clone(), sha256(&file.content));
     // put_file_hashes(&file_hashes);
-    
     // set_root_hash(&file_hashes);
+
+    // let mut files: Files = get_files();
+    // files.insert(file_path, file);
+    // put_files(&files);
     
     with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
         ffhs.insert(file_path.clone(), sha256(&file.content));
         set_root_hash(ffhs);
     });
     
-    // let mut files: Files = get_files();
-    // files.insert(file_path, file);
-    // put_files(&files);
     with_mut(&FRONTCODE_FILES, |ffs| {
         ffs.insert(file_path, file); 
     });
 }
 
 
+#[update]
+pub fn controller_clear_frontcode_files() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    
+    with_mut(&FRONTCODE_FILES, |ffs| {
+        *ffs = Files::new();
+    });
+
+    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+        *ffhs = FilesHashes::default();
+        set_root_hash(ffhs);
+    });
+}
+
+
+#[query]
+pub fn controller_get_file_hashes() -> Vec<(String, [u8; 32])> {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with(&FRONTCODE_FILES_HASHES, |file_hashes| { 
+        let mut vec = Vec::<(String, [u8; 32])>::new();
+        file_hashes.for_each(|k,v| {
+            vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
+        });
+        vec
+    })
+}
+
+
+
 #[query]
 pub fn http_request(quest: HttpRequest) -> HttpResponse {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
+    
     let file_name: String = quest.url;
-    // let files: Files = get_files();
     
     with(&FRONTCODE_FILES, |ffs| {
         match ffs.get(&file_name) {
@@ -1418,31 +1729,6 @@ pub fn http_request(quest: HttpRequest) -> HttpResponse {
         }
     })
 }
-
-
-#[query]
-pub fn public_get_file_hashes() -> Vec<(String, [u8; 32])> {
-    with(&FRONTCODE_FILES_HASHES, |file_hashes| { 
-        let mut vec = Vec::<(String, [u8; 32])>::new();
-        file_hashes.for_each(|k,v| {
-            vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
-        });
-        vec
-    })
-}
-
-
-#[update]
-pub fn public_clear_file_hashes() {
-    // put_file_hashes(&FileHashes::default());
-    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-        *ffhs = FilesHashes::default();
-        set_root_hash(ffhs);
-    });
-}
-
-
-
 
 
 

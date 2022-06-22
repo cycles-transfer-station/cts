@@ -127,8 +127,9 @@ thread_local! {
     static USER_ID:               Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USER_ICP_ID: Cell<Option<IcpId>>       = Cell::new(None); // option cause no way to const an IcpId while checking the crc32 checksum
     static USER_DATA: RefCell<UserData>           = RefCell::new(UserData::new());    
-    static USER_CANISTER_MAX_SIZE: Cell<usize>    = Cell::new(0);
+    static USER_CANISTER_MAX_SIZE: Cell<usize>    = Cell::new(1024*1024*100); // starting at a 100mb-limit 
     static CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER: Cell<u64> = Cell::new(0);
+    static USER_CANISTER_CREATION_TIMESTAMP_NANOS: Cell<u64> = Cell::new(0); // is with the set in the canister_init
 
 }
 
@@ -140,7 +141,7 @@ fn init(user_canister_init: UserCanisterInit) {
     USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.set(user_canister_init.users_map_canister_id); });
     USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
     USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::tools::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
-     
+    USER_CANISTER_CREATION_TIMESTAMP_NANOS.with(|user_canister_creation_timestamp_nanos| { user_canister_creation_timestamp_nanos.set(time()); });
 }
 
 #[pre_upgrade]
@@ -177,7 +178,8 @@ fn user_icp_id() -> IcpId {
 
 fn is_canister_full() -> bool {
     // FOR THE DO!
-    false
+    //false
+    get_allocated_bytes_count() >= USER_CANISTER_MAX_SIZE.with(|user_canister_max_size| { user_canister_max_size.get() }) /*for hashmap and vector [al]locations*/+ 1024*1024*10
 }
 
 fn get_new_cycles_transfer_purchase_log_id() -> u64 {

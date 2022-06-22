@@ -214,6 +214,7 @@ dependencies = [
  "cts_lib",
  "futures",
  "serde",
+ "serde_bytes",
  "serde_cbor",
 ]
 

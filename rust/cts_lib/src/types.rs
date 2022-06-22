@@ -295,7 +295,7 @@ pub mod user_canister {
     
     pub type CyclesTransferPurchaseLogId = u64;
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct CTSUserTransferCyclesCallbackQuest {
         pub user_id: UserId,
         pub cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
