@@ -18,7 +18,6 @@ use cts_lib::{
                 stable64_read,
                 stable64_size,
                 stable64_write,
-                stable_bytes
             }
         },
         export::{
@@ -33,8 +32,20 @@ use cts_lib::{
             },
         }
     },
-    ic_cdk_macros::{update, init, pre_upgrade, post_upgrade},
-    tools::localkey_refcell::{with, with_mut},
+    ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade},
+    tools::{
+        localkey::{
+            self,
+            refcell::{
+                with, 
+                with_mut,
+            },
+            cell::{
+                get,
+                set
+            }
+        }
+    },
     types::{
         UserId,
         UserCanisterId,
@@ -62,9 +73,8 @@ type UsersMap = HashMap<UserId, UserCanisterId>;
 
 
 
-const MAX_CANISTER_SIZE: usize =  1 * 1024*1024*1024 / 11;// bytes // 1 GiB // each user-map-canister can hold round 10_000_000 users. test
-const MAX_USERS: usize = 2_000_000;
-
+const MAX_CANISTER_SIZE: usize =  1024*1024*100;
+const MAX_USERS: usize = 30_000; 
 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
@@ -74,6 +84,10 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 thread_local! {
     static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USERS_MAP: RefCell<UsersMap> = RefCell::new(UsersMap::new());
+
+    // not save in a UsersMapCanisterData
+    static     STOP_CALLS: Cell<bool> = Cell::new(false);
+    static     STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 }
 
 
@@ -88,56 +102,58 @@ fn init(users_map_canister_init: UsersMapCanisterInit) {
 
 
 #[derive(CandidType, Deserialize)]
-struct UsersMapCanisterData {
+struct UMCData {
     cts_id: Principal,
     users_map: Vec<(UserId, UserCanisterId)>
 }
 
 
-fn create_users_map_canister_data_candid_bytes() -> Vec<u8> {
-    encode_one(
-        &UsersMapCanisterData {
+fn create_umc_data_candid_bytes() -> Vec<u8> {
+    let mut umc_data_candid_bytes: Vec<u8> = encode_one(
+        &UMCData {
             cts_id: cts_id(),
             users_map: with(&USERS_MAP, |users_map| { (*users_map).clone().into_iter().collect::<Vec<(UserId, UserCanisterId)>>() })
         }
-    ).unwrap()
+    ).unwrap();
+    umc_data_candid_bytes.shrink_to_fit();
+    umc_data_candid_bytes
 }
 
-fn re_store_users_map_canister_data_candid_bytes(users_map_canister_data_candid_bytes: Vec<u8>) {
-    let users_map_canister_data: UsersMapCanisterData = decode_one::<UsersMapCanisterData>(&users_map_canister_data_candid_bytes).unwrap();
-    // std::mem::drop(users_map_canister_data_candid_bytes);
-    CTS_ID.with(|cts_id| { cts_id.set(users_map_canister_data.cts_id); });
-    with_mut(&USERS_MAP, |users_map| { *users_map = users_map_canister_data.users_map.into_iter().collect::<HashMap<UserId, UserCanisterId>>(); });
+fn re_store_umc_data_candid_bytes(umc_data_candid_bytes: Vec<u8>) {
+    let umc_data: UMCData = decode_one::<UMCData>(&umc_data_candid_bytes).unwrap();
+    // std::mem::drop(umc_data_candid_bytes);
+    CTS_ID.with(|cts_id| { cts_id.set(umc_data.cts_id); });
+    with_mut(&USERS_MAP, |users_map| { *users_map = umc_data.users_map.into_iter().collect::<HashMap<UserId, UserCanisterId>>(); });
 }
 
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    let users_map_canister_data_candid_bytes: Vec<u8> = create_users_map_canister_data_candid_bytes();
+    let umc_data_candid_bytes: Vec<u8> = create_umc_data_candid_bytes();
     
     let current_stable_size_wasm_pages: u64 = stable64_size();
     let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
     
-    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the users_map_canister_data_candid_bytes*/ + users_map_canister_data_candid_bytes.len() as u64; 
+    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the umc_data_candid_bytes*/ + umc_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
         stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
     }
     
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((users_map_canister_data_candid_bytes.len() as u64).to_be_bytes()));
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &users_map_canister_data_candid_bytes);
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((umc_data_candid_bytes.len() as u64).to_be_bytes()));
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &umc_data_candid_bytes);
 
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    let mut users_map_canister_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut users_map_canister_data_candid_bytes_len_u64_be_bytes);
-    let users_map_canister_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(users_map_canister_data_candid_bytes_len_u64_be_bytes); 
+    let mut umc_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut umc_data_candid_bytes_len_u64_be_bytes);
+    let umc_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(umc_data_candid_bytes_len_u64_be_bytes); 
     
-    let mut users_map_canister_data_candid_bytes: Vec<u8> = vec![0; users_map_canister_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut users_map_canister_data_candid_bytes);
+    let mut umc_data_candid_bytes: Vec<u8> = vec![0; umc_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut umc_data_candid_bytes);
     
-    re_store_users_map_canister_data_candid_bytes(users_map_canister_data_candid_bytes);
+    re_store_umc_data_candid_bytes(umc_data_candid_bytes);
 }
 
 #[no_mangle]
@@ -234,6 +250,7 @@ pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
 
 #[update]
 pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<(), UCUserTransferCyclesError> {
+    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     // caller-check
     with(&USERS_MAP, |users_map| { 
         match users_map.get(&uc_q.user_id) { 
@@ -264,9 +281,107 @@ pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<
 
 
 
+ // ------------------------------------------------------------------------------
+ 
+ 
+ 
+ 
+
+#[update]
+pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    STOP_CALLS.with(|stop_calls| { stop_calls.set(stop_calls_flag); });
+}
+
+#[query]
+pub fn cts_see_stop_calls_flag() -> bool {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    STOP_CALLS.with(|stop_calls| { stop_calls.get() })
+}
 
 
 
+
+
+#[update]
+pub fn cts_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    with_mut(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
+        *state_snapshot_umc_data_candid_bytes = create_umc_data_candid_bytes();
+        state_snapshot_umc_data_candid_bytes.len()
+    })
+}
+
+
+
+// chunk_size = 1mib
+
+#[export_name = "canister_query cts_download_state_snapshot"]
+pub fn cts_download_state_snapshot() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    let chunk_size: usize = 1024*1024;
+    with(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
+        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
+        reply::<(Option<&[u8]>,)>((state_snapshot_umc_data_candid_bytes.chunks(chunk_size).nth(chunk_i),));
+    });
+}
+
+
+#[update]
+pub fn cts_clear_state_snapshot() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    with_mut(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
+        *state_snapshot_umc_data_candid_bytes = Vec::new();
+    });    
+}
+
+#[update]
+pub fn cts_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    with_mut(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
+        state_snapshot_umc_data_candid_bytes.append(&mut append_bytes);
+    });
+}
+
+#[update]
+pub fn cts_re_store_cts_data_out_of_the_state_snapshot() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    re_store_umc_data_candid_bytes(
+        with_mut(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
+            let mut v: Vec<u8> = Vec::new();
+            v.append(state_snapshot_umc_data_candid_bytes);
+            v
+        })
+    );
+
+}
+
+
+
+
+// ---------------------------------------------------------------
+
+
+/*
+#[update]
+pub fn cts_upgrade_users_canisters(cts_q: CTSUpgradeUsersCanistersQuest) -> Vec<Principal> {
+
+}
+*/
 
 
 

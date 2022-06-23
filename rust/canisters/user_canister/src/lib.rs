@@ -22,6 +22,12 @@ use cts_lib::{
                 CallResult,
                 arg_data,
                 call
+            },
+            stable::{
+                stable64_grow,
+                stable64_read,
+                stable64_size,
+                stable64_write,
             }
         },
         export::{
@@ -30,7 +36,10 @@ use cts_lib::{
                 self,
                 CandidType,
                 Deserialize,
-                utils::encode_one,
+                utils::{
+                    encode_one,
+                    decode_one
+                }
             },
         }
     },
@@ -54,6 +63,9 @@ use cts_lib::{
         Cycles,
         CyclesTransfer,
         CyclesTransferMemo,
+        UserId,
+        UserCanisterId,
+        UsersMapCanisterId,
         user_canister::{
             UserCanisterInit,
             CTSCyclesTransferIntoUser,
@@ -70,8 +82,21 @@ use cts_lib::{
             
         }
     },
+    consts::{
+        WASM_PAGE_SIZE_BYTES
+    },
     tools::{
-        localkey_refcell::{with, with_mut},
+        localkey::{
+            self,
+            refcell::{
+                with, 
+                with_mut,
+            },
+            cell::{
+                get,
+                set
+            }
+        }
     },
     fees::{
         CYCLES_TRANSFER_FEE,
@@ -85,14 +110,14 @@ use cts_lib::{
 
 // cycles transfer purchases that are complete dont need an id.
 
+#[derive(CandidType, Deserialize, Clone)]
 struct UserData {
-    
+
     cycles_balance: Cycles,
-    cycles_transfer_purchases: HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>,
-    cycles_transfers_into_user: Vec<CTSCyclesTransferIntoUser>,
-    icp_transfers_out: Vec<IcpBlockHeight>,
+    cycles_transfers_in: Vec<CTSCyclesTransferIntoUser>,
+    cycles_transfers_out: Vec<CyclesTransferPurchaseLog>,
     icp_transfers_in: Vec<IcpBlockHeight>,
-    //cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
+    icp_transfers_out: Vec<IcpBlockHeight>,
     
 }
 
@@ -100,12 +125,11 @@ impl UserData {
     fn new() -> Self {
         Self {
             cycles_balance: 0u128,
-            cycles_transfer_purchases: HashMap::new(),
-            cycles_transfers_into_user: Vec::new(),
-            icp_transfers_out: Vec::new(),
+            cycles_transfers_in: Vec::new(),
+            cycles_transfers_out: Vec::new(),
             icp_transfers_in: Vec::new(),
-            //cycles_bank_purchases: Vec<CyclesBankPurchaseLog>,
-            
+            icp_transfers_out: Vec::new(),
+
         }
     }
 }
@@ -117,19 +141,25 @@ const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
 
 
-
+const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 
 thread_local! {
-    static CTS_ID:                Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static USERS_MAP_CANISTER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static USER_ID:               Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static USER_ICP_ID: Cell<Option<IcpId>>       = Cell::new(None); // option cause no way to const an IcpId while checking the crc32 checksum
-    static USER_DATA: RefCell<UserData>           = RefCell::new(UserData::new());    
-    static USER_CANISTER_MAX_SIZE: Cell<usize>    = Cell::new(1024*1024*100); // starting at a 100mb-limit 
-    static CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER: Cell<u64> = Cell::new(0);
-    static USER_CANISTER_CREATION_TIMESTAMP_NANOS: Cell<u64> = Cell::new(0); // is with the set in the canister_init
+    static CTS_ID:      Cell<Principal> = Cell::new(Principal::from_slice(&[]));
+    static UMC_ID:      Cell<Principal> = Cell::new(Principal::from_slice(&[]));
+    static USER_ID:     Cell<Principal> = Cell::new(Principal::from_slice(&[]));
+    static USER_ICP_ID: Cell<Option<IcpId>>                     = Cell::new(None); // option cause no way to const an IcpId while checking the crc32 checksum
+    static USER_CANISTER_MAX_MEMORY_SIZE: Cell<usize>           = Cell::new(1024*1024*100); // starting at a 100mb-limit 
+    static USER_CANISTER_CREATION_TIMESTAMP_NANOS: Cell<u64>    = Cell::new(0); // is with the set in the canister_init
+    
+    static USER_DATA: RefCell<UserData>                         = RefCell::new(UserData::new());    
+    static CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER: Cell<u64>   = Cell::new(0);
+    static ONGOING_USER_TRANSFER_CYCLES: RefCell<HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>> = RefCell::new(HashMap::new());
+
+    // not save in a UCData
+    static     STOP_CALLS: Cell<bool> = Cell::new(false);
+    static     STATE_SNAPSHOT_UC_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 
 }
 
@@ -138,20 +168,89 @@ thread_local! {
 #[init]
 fn init(user_canister_init: UserCanisterInit) {
     CTS_ID.with(|cts_id| { cts_id.set(user_canister_init.cts_id); });
-    USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.set(user_canister_init.users_map_canister_id); });
+    UMC_ID.with(|umc_id| { umc_id.set(user_canister_init.umc_id); });
     USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
     USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::tools::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
     USER_CANISTER_CREATION_TIMESTAMP_NANOS.with(|user_canister_creation_timestamp_nanos| { user_canister_creation_timestamp_nanos.set(time()); });
 }
 
+
+#[derive(CandidType, Deserialize)]
+struct UCData {
+    cts_id: Principal,
+    umc_id: UsersMapCanisterId,
+    user_id: UserId,
+    user_icp_id: Option<IcpId>,
+    user_canister_max_memory_size: usize,
+    user_canister_creation_timestamp_nanos: u64,
+    user_data: UserData,
+    cycles_transfer_purchase_log_id_counter: u64,
+    ongoing_user_transfer_cycles: Vec<(CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog)>
+}
+
+
+fn create_uc_data_candid_bytes() -> Vec<u8> {
+    let mut uc_data_candid_bytes: Vec<u8> = encode_one(
+        &UCData {
+            cts_id:                 get(&CTS_ID),
+            umc_id:  get(&UMC_ID),
+            user_id:                get(&USER_ID),
+            user_icp_id:            get(&USER_ICP_ID),
+            user_canister_max_memory_size:              get(&USER_CANISTER_MAX_MEMORY_SIZE),
+            user_canister_creation_timestamp_nanos:     get(&USER_CANISTER_CREATION_TIMESTAMP_NANOS),
+            user_data: with(&USER_DATA, |user_data| { (*user_data).clone() }),
+            cycles_transfer_purchase_log_id_counter:    get(&CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER),
+            ongoing_user_transfer_cycles: with(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { (*ongoing_user_transfer_cycles).clone().into_iter().collect::<Vec<(CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog)>>() }),
+        }
+    ).unwrap();
+    uc_data_candid_bytes.shrink_to_fit();
+    uc_data_candid_bytes
+}
+
+fn re_store_uc_data_candid_bytes(uc_data_candid_bytes: Vec<u8>) {
+    let uc_data: UCData = decode_one::<UCData>(&uc_data_candid_bytes).unwrap();
+    // std::mem::drop(uc_data_candid_bytes);
+    set(&CTS_ID, uc_data.cts_id);
+    set(&UMC_ID, uc_data.umc_id);
+    set(&USER_ID, uc_data.user_id);
+    set(&USER_ICP_ID, uc_data.user_icp_id);
+    set(&USER_CANISTER_MAX_MEMORY_SIZE, uc_data.user_canister_max_memory_size);
+    set(&USER_CANISTER_CREATION_TIMESTAMP_NANOS, uc_data.user_canister_creation_timestamp_nanos);
+    with_mut(&USER_DATA, |user_data| { *user_data = uc_data.user_data; });
+    set(&CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER, uc_data.cycles_transfer_purchase_log_id_counter);
+    with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { 
+        *ongoing_user_transfer_cycles = uc_data.ongoing_user_transfer_cycles.into_iter().collect::<HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>>(); 
+    });
+}
+
+
 #[pre_upgrade]
 fn pre_upgrade() {
-
+    let uc_upgrade_data_candid_bytes: Vec<u8> = create_uc_data_candid_bytes();
+    
+    let current_stable_size_wasm_pages: u64 = stable64_size();
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    
+    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the uc_upgrade_data_candid_bytes*/ + uc_upgrade_data_candid_bytes.len() as u64; 
+    if current_stable_size_bytes < want_stable_memory_size_bytes {
+        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+    }
+    
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((uc_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &uc_upgrade_data_candid_bytes);
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-
+    let mut uc_upgrade_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut uc_upgrade_data_candid_bytes_len_u64_be_bytes);
+    let uc_upgrade_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(uc_upgrade_data_candid_bytes_len_u64_be_bytes); 
+    
+    let mut uc_upgrade_data_candid_bytes: Vec<u8> = vec![0; uc_upgrade_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
+    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut uc_upgrade_data_candid_bytes);
+    
+    re_store_uc_data_candid_bytes(uc_upgrade_data_candid_bytes);
+    
 }
 
 
@@ -163,11 +262,11 @@ fn post_upgrade() {
 fn cts_id() -> Principal {
     CTS_ID.with(|cts_id| { cts_id.get() })
 }
+fn umc_id() -> Principal {
+    UMC_ID.with(|umc_id| { umc_id.get() })
+}
 fn user_id() -> Principal {
     USER_ID.with(|user_id| { user_id.get() })
-}
-fn umc_id() -> Principal {
-    USERS_MAP_CANISTER_ID.with(|umc_id| { umc_id.get() })
 }
 fn user_icp_id() -> IcpId {
     USER_ICP_ID.with(|user_icp_id| { user_icp_id.get().unwrap() }) // unwrap because we put the Some(icp_id) in the canister_init
@@ -179,7 +278,7 @@ fn user_icp_id() -> IcpId {
 fn is_canister_full() -> bool {
     // FOR THE DO!
     //false
-    get_allocated_bytes_count() >= USER_CANISTER_MAX_SIZE.with(|user_canister_max_size| { user_canister_max_size.get() }) /*for hashmap and vector [al]locations*/+ 1024*1024*10
+    get_allocated_bytes_count() >= get(&USER_CANISTER_MAX_MEMORY_SIZE) /*for hashmap and vector [al]locations*/+ 1024*1024*10
 }
 
 fn get_new_cycles_transfer_purchase_log_id() -> u64 {
@@ -203,6 +302,12 @@ pub enum UserCyclesBalanceError {
 
 #[query]
 pub fn user_cycles_balance() -> Result<Cycles, UserCyclesBalanceError> {
+    if caller() != user_id() {
+        trap("caller must be the user")
+    }
+    
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
     Ok(with(&USER_DATA, |user_data| user_data.cycles_balance))
 }
 
@@ -221,6 +326,12 @@ pub enum UserIcpBalanceError {
 
 #[update]
 pub async fn user_icp_balance() -> Result<IcpTokens, UserIcpBalanceError> {
+    if caller() != user_id() {
+        trap("caller must be the user")
+    }
+
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
     let user_icp_ledger_balance: IcpTokens = match icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
         IcpAccountBalanceArgs{
@@ -250,6 +361,8 @@ pub fn cts_cycles_transfer_into_user() {
         trap("this is a CTS-method.")
     }
     
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
     if is_canister_full() {
         reject("user is full");
         return;
@@ -259,7 +372,7 @@ pub fn cts_cycles_transfer_into_user() {
     
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance += cycles_transfer_into_user.cycles;
-        user_data.cycles_transfers_into_user.push(cycles_transfer_into_user);
+        user_data.cycles_transfers_in.push(cycles_transfer_into_user);
     });
     
     reply::<()>(());
@@ -267,6 +380,26 @@ pub fn cts_cycles_transfer_into_user() {
     
     
 } 
+
+
+
+// chunk_size = 1024*1024 / 74 = 14169.945945945947
+#[export_name = "canister_query user_download_cycles_transfers_in"]
+pub fn user_download_cycles_transfers_in() {
+    if caller() != get(&USER_ID) {
+        trap("Caller must be the user for this method.")
+    }
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
+    let chunk_size: usize = 1000;
+    with(&USER_DATA, |user_data| {
+        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
+        reply::<(Option<&[CTSCyclesTransferIntoUser]>,)>((user_data.cycles_transfers_in.chunks(chunk_size).nth(chunk_i),));
+    });
+}
+
+
+
 
 
 
@@ -300,10 +433,12 @@ pub enum UserTransferCyclesError {
 
 #[update]
 pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTransferPurchaseLogId, UserTransferCyclesError> {
-    
+
     if caller() != user_id() {
         trap("caller must be the user")
     }
+    
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
     
     if q.cycles < MINIMUM_USER_TRANSFER_CYCLES {
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
@@ -322,15 +457,22 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
                 return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes:USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
             }
         },
-        _ => () // DO!!
+        CyclesTransferMemo::Text(ref b) => {
+            if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes:USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
+            }
+        }
+        _ => () 
     }
     
 
     // take the user-cycles before the transfer, and refund in the callback 
-    let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance -= q.cycles + CYCLES_TRANSFER_FEE;
-        user_data.cycles_transfer_purchases.insert(
+    });
+    let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
+    with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| {
+        ongoing_user_transfer_cycles.insert(
             cycles_transfer_purchase_log_id,
             CyclesTransferPurchaseLog{
                 canister_id: q.canister_id,
@@ -349,8 +491,10 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     let cancel_user_transfer_cycles = || {
         with_mut(&USER_DATA, |user_data| {
             user_data.cycles_balance += q_cycles + CYCLES_TRANSFER_FEE;
-            user_data.cycles_transfer_purchases.remove(&cycles_transfer_purchase_log_id);
         });
+        with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| {
+            ongoing_user_transfer_cycles.remove(&cycles_transfer_purchase_log_id);
+        })
     };
         
     match call::<(UCUserTransferCyclesQuest,), (Result<(), UCUserTransferCyclesError>,)>(
@@ -398,34 +542,36 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
         trap("caller must be the cts for this method.")
     }
     
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
     if cts_q.user_id != user_id() {
         return Err(CTSUserTransferCyclesCallbackError::WrongUserId)
     }
 
-    with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance += cts_q.cycles_transfer_refund + match cts_q.cycles_transfer_call_error {
-            Some(ref call_error) => match (*call_error).0 {
-                0 | 1 | 2 => match user_data.cycles_transfer_purchases.get_mut(&cts_q.cycles_transfer_purchase_log_id) {
-                    // change the fee-paid field in the log
-                    Some(cycles_transfer_purchase_log) => {
-                        let give_back_the_fee: u64 = cycles_transfer_purchase_log.fee_paid;
-                        cycles_transfer_purchase_log.fee_paid = 0u64;
-                        give_back_the_fee as Cycles
-                    },
-                    None => 0 
-                },
-                _ => 0
-            },
-            None => 0    
-        };
-        match user_data.cycles_transfer_purchases.get_mut(&cts_q.cycles_transfer_purchase_log_id) {
-            Some(cycles_transfer_purchase_log) => {
-                cycles_transfer_purchase_log.cycles_accepted = Some(cycles_transfer_purchase_log.cycles_sent - cts_q.cycles_transfer_refund);
-                cycles_transfer_purchase_log.call_error = cts_q.cycles_transfer_call_error;
-            },
-            None => {}
-        }
+    let opt_cycles_transfer_purchase_log: Option<CyclesTransferPurchaseLog> = with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { 
+        ongoing_user_transfer_cycles.remove(&cts_q.cycles_transfer_purchase_log_id)
     });
+    
+    let mut give_back_the_fee: u64 = 0;
+    
+    if let Some(mut cycles_transfer_purchase_log) = opt_cycles_transfer_purchase_log {
+        if let Some(ref call_error) = cts_q.cycles_transfer_call_error {
+            if let  0 | 1 | 2 = (*call_error).0 {        
+                give_back_the_fee = cycles_transfer_purchase_log.fee_paid;
+                cycles_transfer_purchase_log.fee_paid = 0u64;
+            }
+        }
+        cycles_transfer_purchase_log.call_error = cts_q.cycles_transfer_call_error;
+        cycles_transfer_purchase_log.cycles_accepted = Some(cycles_transfer_purchase_log.cycles_sent - cts_q.cycles_transfer_refund);
+        
+        with_mut(&USER_DATA, |user_data| {
+            user_data.cycles_transfers_out.push(cycles_transfer_purchase_log); 
+        });
+    }
+
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance += cts_q.cycles_transfer_refund + (give_back_the_fee as Cycles); 
+    });        
     
     Ok(())
 }
@@ -433,6 +579,132 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
 
 
 
+
+
+
+#[export_name = "canister_query user_download_cycles_transfers_out"]
+pub fn user_download_cycles_transfers_out() {
+    if caller() != get(&USER_ID) {
+        trap("Caller must be the user for this method.")
+    }
+    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    
+    let chunk_size: usize = 500;
+    with(&USER_DATA, |user_data| {
+        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
+        reply::<(Option<&[CyclesTransferPurchaseLog]>,)>((user_data.cycles_transfers_out.chunks(chunk_size).nth(chunk_i),));
+    });
+}
+
+
+
+
+
+
+
+
+
+
+
+// -----------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+#[update]
+pub fn umc_set_stop_calls_flag(stop_calls_flag: bool) {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    set(&STOP_CALLS, stop_calls_flag);
+}
+
+#[query]
+pub fn umc_see_stop_calls_flag() -> bool {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    get(&STOP_CALLS)
+}
+
+
+
+
+
+#[update]
+pub fn umc_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
+        *state_snapshot_uc_data_candid_bytes = create_uc_data_candid_bytes();
+        state_snapshot_uc_data_candid_bytes.len()
+    })
+}
+
+
+
+// chunk_size = 1mib
+
+
+#[export_name = "canister_query umc_download_state_snapshot"]
+pub fn umc_download_state_snapshot() {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    let chunk_size: usize = 1024*1024;
+    with(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
+        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
+        reply::<(Option<&[u8]>,)>((state_snapshot_uc_data_candid_bytes.chunks(chunk_size).nth(chunk_i),));
+    })
+
+}
+
+
+
+#[update]
+pub fn umc_clear_state_snapshot() {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
+        *state_snapshot_uc_data_candid_bytes = Vec::new();
+    });    
+}
+
+#[update]
+pub fn umc_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
+        state_snapshot_uc_data_candid_bytes.append(&mut append_bytes);
+    });
+}
+
+#[update]
+pub fn umc_re_store_umc_data_out_of_the_state_snapshot() {
+    if caller() != get(&UMC_ID) {
+        trap("Caller must be the umc for this method.")
+    }
+    re_store_uc_data_candid_bytes(
+        with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
+            let mut v: Vec<u8> = Vec::new();
+            v.append(state_snapshot_uc_data_candid_bytes);  // moves the bytes out of the state_snapshot vec
+            v
+        })
+    );
+
+}
+
+
+
+
+// -------------------------------------------------------------------------
 
 
 

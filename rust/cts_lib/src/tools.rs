@@ -18,40 +18,55 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
 
 
 
-pub mod localkey_refcell {
-    use std::{
-        cell::RefCell,
-        thread::LocalKey,
-    };
+pub mod localkey {
+    pub mod refcell {
+        use std::{
+            cell::RefCell,
+            thread::LocalKey,
+        };
 
-    pub fn with<T: 'static, R, F>(s: &'static LocalKey<RefCell<T>>, f: F) -> R
-    where 
-        F: FnOnce(&T) -> R 
-    {
-        s.with(|b| {
-            f(&*b.borrow())
-        })
+        pub fn with<T: 'static, R, F>(s: &'static LocalKey<RefCell<T>>, f: F) -> R
+        where 
+            F: FnOnce(&T) -> R 
+        {
+            s.with(|b| {
+                f(&*b.borrow())
+            })
+        }
+        
+        pub fn with_mut<T: 'static, R, F>(s: &'static LocalKey<RefCell<T>>, f: F) -> R
+        where 
+            F: FnOnce(&mut T) -> R 
+        {
+            s.with(|b| {
+                f(&mut *b.borrow_mut())
+            })
+        }
+        
+        pub unsafe fn get<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &T {
+            let pointer: *const T = with(s, |i| { i as *const T });
+            &*pointer
+        }
+        /*
+        pub unsafe fn get_mut<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &mut T {
+            let pointer: *mut T = with_mut(s, |i| { i as *mut T });
+            &mut *pointer
+        }
+        */
     }
-    
-    pub fn with_mut<T: 'static, R, F>(s: &'static LocalKey<RefCell<T>>, f: F) -> R
-    where 
-        F: FnOnce(&mut T) -> R 
-    {
-        s.with(|b| {
-            f(&mut *b.borrow_mut())
-        })
+    pub mod cell {
+        use std::{
+            cell::Cell,
+            thread::LocalKey
+        };
+        pub fn get<T: 'static + Copy>(s: &'static LocalKey<Cell<T>>) -> T {
+            s.with(|c| { c.get() })
+        }
+        pub fn set<T: 'static + Copy>(s: &'static LocalKey<Cell<T>>, v: T) {
+            s.with(|c| { c.set(v); });
+        }
+        
     }
-    
-    pub unsafe fn get<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &T {
-        let pointer: *const T = with(s, |i| { i as *const T });
-        &*pointer
-    }
-    
-    pub unsafe fn get_mut<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &mut T {
-        let pointer: *mut T = with_mut(s, |i| { i as *mut T });
-        &mut *pointer
-    }
-    
 }
 
 

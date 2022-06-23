@@ -6,7 +6,7 @@
 // always check user lock before any awaits (or maybe after the first await if not fective?). 
 // in the cycles-market, let a seller set a minimum-purchase-quantity. which can be the full-mount that is up for the sale or less 
 // always unlock the user af-ter the last await-call()
-// does dereferencing a borrow give the ownership? try on a non-copy type. yes it does a move
+// does dereferencing a borrow give the ownership? try on a non-copy type. error[E0507]: cannot move out of `*cycles_transfer_purchase_log` which is behind a mutable reference
 // sending cycles to a canister is the same risk as sending icp to a canister. 
 // put a max_fee on a cycles-transfer-purchase & on a cycles-bank-purchase?
 // 5xdr first-time-user-fee, valid for one year. with 100mbs of storage for the year and standard-call-rate-limits. after the year, if the user doesn't pay for more space, the user-storage gets deleted and the user cycles balance and icp balance stays for another 3 years.
@@ -102,10 +102,16 @@ use cts_lib::{
     },
     tools::{
         sha256,
-        localkey_refcell::{
+        localkey::{
             self,
-            with, 
-            with_mut,
+            refcell::{
+                with, 
+                with_mut,
+            },
+            cell::{
+                get,
+                set
+            }
         },
         thirty_bytes_as_principal,
         principal_icp_subaccount,
@@ -303,7 +309,7 @@ struct CTSData {
 
 
 fn create_cts_data_candid_bytes() -> Vec<u8> {
-    encode_one(
+    let mut cts_data_candid_bytes: Vec<u8> = encode_one(
         &CTSData {
             new_users: with(&NEW_USERS, |new_users| { (*new_users).clone().into_iter().collect::<Vec<(Principal, NewUserData)>>() }),  //Vec<(Principal, NewUserData)>,
             users_map_canisters: with(&USERS_MAP_CANISTERS, |users_map_canisters| { (*users_map_canisters).clone() }), // Vec<Principal>,
@@ -320,7 +326,9 @@ fn create_cts_data_candid_bytes() -> Vec<u8> {
             frontcode_files_hashes: with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { frontcode_files_hashes.iter().map(|(k, v): (&String, &[u8; 32])| { (k.clone(), *v/*copy*/) }).collect::<Vec<(String, [u8; 32])>>() }), //Vec<(String, [u8; 32])>, 
             controllers: with(&CONTROLLERS, |controllers| { (*controllers).clone() }), // Vec<Principal>      
         }
-    ).unwrap()   
+    ).unwrap();
+    cts_data_candid_bytes.shrink_to_fit();
+    cts_data_candid_bytes
 }
 
 fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
@@ -664,10 +672,8 @@ fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
 // for the now a user must sign-up/register with the icp.
 #[update]
 pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
-    if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
 
     let user_id: Principal = caller();
-    
     
     let optional_new_user_data: Option<NewUserData> = with_mut(&NEW_USERS, |new_users| {
         match new_users.get_mut(&user_id) {
@@ -679,7 +685,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 // update nud.lock_time_start_nanos?
                 Some(nud.clone())
             },
-            None => None
+            None => {
+                if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
+                None
+            }
         }
     });
     
@@ -913,7 +922,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
                 arg : &encode_one(&UserCanisterInit{ 
                     cts_id: id(), 
                     user_id: user_id,
-                    users_map_canister_id: new_user_data.users_map_canister.unwrap()
+                    umc_id: new_user_data.users_map_canister.unwrap()
                 }).unwrap() 
             },),
         ).await {
@@ -1524,14 +1533,14 @@ pub fn see_caller() -> Principal {
 
 
 #[update]
-pub fn controller_set_stop_calls(stop_calls_flag: bool) {
+pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
     STOP_CALLS.with(|stop_calls| { stop_calls.set(stop_calls_flag); });
 }
 
-#[update]
+#[query]
 pub fn controller_see_stop_calls_flag() -> bool {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
@@ -1558,24 +1567,19 @@ pub fn controller_create_state_snapshot() -> usize/*len of the state_snapshot_ca
 
 // chunk_size = 1mib
 
-#[query]
-pub fn controller_download_state_snapshot(chunk_i: usize) -> Option<Vec<u8>> {          // starts at 0
+
+#[export_name = "canister_query controller_download_state_snapshot"]
+pub fn controller_download_state_snapshot() {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        if state_snapshot_cts_data_candid_bytes.len() <= chunk_size {
-            Some(state_snapshot_cts_data_candid_bytes.clone())
-        } else {
-            match state_snapshot_cts_data_candid_bytes.chunks(chunk_size).nth(chunk_i) {
-                Some(chunk) => Some(chunk.to_vec()),
-                None => None
-            }
-        }
-    })
-
+        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
+        reply::<(Option<&[u8]>,)>((state_snapshot_cts_data_candid_bytes.chunks(chunk_size).nth(chunk_i),));
+    });
 }
+
 
 
 #[update]
@@ -1606,7 +1610,7 @@ pub fn controller_re_store_cts_data_out_of_the_state_snapshot() {
     re_store_cts_data_candid_bytes(
         with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
             let mut v: Vec<u8> = Vec::new();
-            v.append(state_snapshot_cts_data_candid_bytes);
+            v.append(state_snapshot_cts_data_candid_bytes);  // moves the bytes out of the state_snapshot vec
             v
         })
     );
@@ -1630,6 +1634,43 @@ pub fn controller_set_controllers(set_controllers: Vec<Principal>) {
     }
     with_mut(&CONTROLLERS, |controllers| { *controllers = set_controllers; });
 }
+
+
+
+
+
+
+#[update]
+pub async fn controller_upgrade_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>, post_upgrade_arg: Vec<u8>) -> Vec<Principal>/*umcs that upgrade call-fail*/ {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    if with(&USERS_MAP_CANISTER_CODE, |umc_code| umc_code.is_none() ) {
+        trap("USERS_MAP_CANISTER_CODE is None.")
+    }
+    trap("DO");
+    futures::future::join_all(
+        with(&USERS_MAP_CANISTERS, |umcs| {
+            with(&USERS_MAP_CANISTER_CODE, |umc_code| {
+                umcs.iter().map(|umc_id| { 
+                    call::<(ManagementCanisterInstallCodeQuest,), ()>(
+                        MANAGEMENT_CANISTER_ID,
+                        "install_code",
+                        (ManagementCanisterInstallCodeQuest{
+                            mode : ManagementCanisterInstallCodeMode::upgrade,
+                            canister_id : *umc_id/*copy*/,
+                            wasm_module : umc_code.as_ref().unwrap().module(),
+                            arg : &post_upgrade_arg,
+                        },)
+                    ) 
+                }).collect::<Vec<_>>() 
+            })
+        })
+    ).await;
+    
+
+}
+
 
 
 

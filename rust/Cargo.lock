@@ -228,6 +228,7 @@ dependencies = [
  "ic-certified-map",
  "ic-ledger-types",
  "serde",
+ "serde_bytes",
  "sha2",
 ]
 

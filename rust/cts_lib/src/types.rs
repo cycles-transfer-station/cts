@@ -108,7 +108,9 @@ pub mod management_canister {
     pub struct ManagementCanisterInstallCodeQuest<'a> {
         pub mode : ManagementCanisterInstallCodeMode,
         pub canister_id : Principal,
+        #[serde(with = "serde_bytes")]
         pub wasm_module : &'a [u8],
+        #[serde(with = "serde_bytes")]
         pub arg : &'a [u8],
     }
 
@@ -260,7 +262,13 @@ pub mod users_map_canister {
         UMCUserTransferCyclesCallError(String),
         
     }
-
+    /*
+    #[derive(CandidType, Deserialize)]
+    pub struct CTSUpgradeUsersCanistersQuest {
+        new_user_canister_wasm_module: Vec<u8>,
+        users_
+    }
+    */
 
 }
 
@@ -275,11 +283,11 @@ pub mod user_canister {
     #[derive(CandidType, Deserialize)]
     pub struct UserCanisterInit {
         pub user_id: UserId,
-        pub users_map_canister_id: UsersMapCanisterId,
+        pub umc_id: UsersMapCanisterId,
         pub cts_id: Principal,
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone, Copy)]
     pub struct CTSCyclesTransferIntoUser {
         pub canister: Principal,
         pub cycles: Cycles,

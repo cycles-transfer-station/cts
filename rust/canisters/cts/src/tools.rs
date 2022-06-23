@@ -40,7 +40,11 @@ use cts_lib::{
     },
     tools::{
         sha256,
-        localkey_refcell::{self, with, with_mut},
+        localkey::{
+            self,
+            refcell::{with, with_mut},
+            cell::{},
+        },
         user_icp_id,
         principal_icp_subaccount,
         principal_as_thirty_bytes,
@@ -558,7 +562,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe { localkey_refcell::get(&USERS_MAP_CANISTER_CODE).as_ref().unwrap().module() },   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe { localkey::refcell::get(&USERS_MAP_CANISTER_CODE).as_ref().unwrap().module() },   // .unwrap bc we checked if .is_none() before
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 

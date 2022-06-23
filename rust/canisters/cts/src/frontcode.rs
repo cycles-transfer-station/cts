@@ -10,7 +10,7 @@ use cts_lib::{
     ic_certified_map::{self, RbTree, HashTree, AsHashTree},
     tools::{
         sha256,
-        localkey_refcell::{with, with_mut},
+        localkey::refcell::{with, with_mut},
     },
 };
 
