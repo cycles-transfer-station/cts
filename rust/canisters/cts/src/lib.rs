@@ -138,6 +138,7 @@ use cts_lib::{
                 msg_cycles_accept128,
                 reject,
                 reply,
+                reply_raw
             },
             stable::{
                 stable64_grow,
@@ -1638,8 +1639,7 @@ pub fn controller_set_controllers(set_controllers: Vec<Principal>) {
 
 
 
-
-
+/*
 #[update]
 pub async fn controller_upgrade_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>, post_upgrade_arg: Vec<u8>) -> Vec<Principal>/*umcs that upgrade call-fail*/ {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
@@ -1648,7 +1648,15 @@ pub async fn controller_upgrade_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>, 
     if with(&USERS_MAP_CANISTER_CODE, |umc_code| umc_code.is_none() ) {
         trap("USERS_MAP_CANISTER_CODE is None.")
     }
-    trap("DO");
+    if let Some(upgrade_umcs) = opt_umcs {
+        upgrade_umcs.for_each(|upgrade_umc| {
+            if with(&USERS_MAP_CANISTERS, |umcs| { !umcs.contains(&upgrade_umc) }) {
+                trap(&format!("cts users_map_canisters does not contain: {:?}", upgrade_umc));
+            }
+        });    
+    }
+    
+
     futures::future::join_all(
         with(&USERS_MAP_CANISTERS, |umcs| {
             with(&USERS_MAP_CANISTER_CODE, |umc_code| {
@@ -1670,8 +1678,48 @@ pub async fn controller_upgrade_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>, 
     
 
 }
+*/
 
 
+
+#[derive(CandidType, Deserialize)]
+pub struct ControllerCtsCallCanisterQuest {
+    callee: Principal,
+    method_name: String,
+    arg_raw: Vec<u8>,
+    cycles: Cycles
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum ControllerCtsCallCanisterError {
+    CallError((u32, String)) 
+}
+
+#[update]
+pub async fn controller_cts_call_canister() {
+    if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    let (q,): (ControllerCtsCallCanisterQuest,) = arg_data::<(ControllerCtsCallCanisterQuest,)>(); 
+    
+    match call_raw128(
+        q.callee,
+        &q.method_name,
+        &q.arg_raw,
+        q.cycles   
+    ).await {
+        Ok(raw_sponse) => {
+            reply::<(Result<Vec<u8>, ControllerCtsCallCanisterError>,)>((Ok(raw_sponse),));
+        }, 
+        Err(call_error) => {
+            reply::<(Result<Vec<u8>, ControllerCtsCallCanisterError>,)>((Err(ControllerCtsCallCanisterError::CallError((call_error.0 as u32, call_error.1))),));
+            //trap(&format!("call_error: {:?}", call_error));
+        }
+    }
+    
+
+}
 
 
 
