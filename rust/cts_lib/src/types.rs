@@ -185,7 +185,7 @@ pub mod cycles_transferrer {
         pub cts_id: Principal
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct CTSUserTransferCyclesQuest {
         pub users_map_canister_id: UsersMapCanisterId,
         pub umc_user_transfer_cycles_quest: cts::UMCUserTransferCyclesQuest
@@ -207,7 +207,7 @@ pub mod cycles_transferrer {
 pub mod cts {
     use super::*;
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct UMCUserTransferCyclesQuest {
         pub user_canister_id: UserCanisterId,
         pub uc_user_transfer_cycles_quest: users_map_canister::UCUserTransferCyclesQuest,
@@ -221,7 +221,7 @@ pub mod cts {
         CTSUserTransferCyclesCallError(String)
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct CyclesTransferrerUserTransferCyclesCallbackQuest {
         pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means callstatus == 'replied'
         pub cts_user_transfer_cycles_quest: cycles_transferrer::CTSUserTransferCyclesQuest
@@ -249,7 +249,7 @@ pub mod users_map_canister {
         FoundUser(UserCanisterId)
     }
 
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct UCUserTransferCyclesQuest {
         pub user_id: UserId,
         pub cycles_transfer_purchase_log_id: user_canister::CyclesTransferPurchaseLogId,
@@ -294,7 +294,7 @@ pub mod user_canister {
         pub timestamp_nanos: u64
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct UserTransferCyclesQuest {
         pub cycles: Cycles,
         pub canister_id: Principal,

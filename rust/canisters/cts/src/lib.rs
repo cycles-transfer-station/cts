@@ -129,6 +129,7 @@ use cts_lib::{
                 arg_data_raw,
                 arg_data_raw_size,
                 call_raw128,
+                CallRawFuture,
                 call,
                 call_with_payment128,
                 CallResult,
@@ -369,7 +370,7 @@ fn pre_upgrade() {
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the cts_upgrade_data_candid_bytes*/ + cts_upgrade_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((cts_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
@@ -409,7 +410,7 @@ pub fn canister_inspect_message() {
         trap("caller must be a canister for this method.")
     }
     
-    if method_name()[..].starts_with("controller") {
+    if method_name()[..].starts_with("controller_") {
         if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
             trap("Caller must be a controller for this method.")
         }
@@ -1639,46 +1640,58 @@ pub fn controller_set_controllers(set_controllers: Vec<Principal>) {
 
 
 
-/*
+
 #[update]
-pub async fn controller_upgrade_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>, post_upgrade_arg: Vec<u8>) -> Vec<Principal>/*umcs that upgrade call-fail*/ {
+pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanisterId>>, post_upgrade_arg: Vec<u8>) -> Vec<(Principal, (u32, String))>/*umcs that upgrade call-fail*/ {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
     if with(&USERS_MAP_CANISTER_CODE, |umc_code| umc_code.is_none() ) {
         trap("USERS_MAP_CANISTER_CODE is None.")
     }
-    if let Some(upgrade_umcs) = opt_umcs {
-        upgrade_umcs.for_each(|upgrade_umc| {
-            if with(&USERS_MAP_CANISTERS, |umcs| { !umcs.contains(&upgrade_umc) }) {
-                trap(&format!("cts users_map_canisters does not contain: {:?}", upgrade_umc));
-            }
-        });    
-    }
     
-
-    futures::future::join_all(
-        with(&USERS_MAP_CANISTERS, |umcs| {
-            with(&USERS_MAP_CANISTER_CODE, |umc_code| {
-                umcs.iter().map(|umc_id| { 
-                    call::<(ManagementCanisterInstallCodeQuest,), ()>(
-                        MANAGEMENT_CANISTER_ID,
-                        "install_code",
-                        (ManagementCanisterInstallCodeQuest{
-                            mode : ManagementCanisterInstallCodeMode::upgrade,
-                            canister_id : *umc_id/*copy*/,
-                            wasm_module : umc_code.as_ref().unwrap().module(),
-                            arg : &post_upgrade_arg,
-                        },)
-                    ) 
-                }).collect::<Vec<_>>() 
-            })
+    let upgrade_umcs: Vec<Principal> = {
+        if let Some(upgrade_umcs) = opt_upgrade_umcs {
+            with(&USERS_MAP_CANISTERS, |umcs| { 
+                upgrade_umcs.iter().for_each(|upgrade_umc| {
+                    if !umcs.contains(&upgrade_umc) {
+                        trap(&format!("cts users_map_canisters does not contain: {:?}", upgrade_umc));
+                    }
+                });
+            });    
+            upgrade_umcs
+        } else {
+            with(&USERS_MAP_CANISTERS, |umcs| { umcs.clone() })
+        }
+    };    
+    
+    let sponses: Vec<Result<Vec<u8>/*candidzeroargs*/, (RejectionCode, String)>> = futures::future::join_all(
+        with(&USERS_MAP_CANISTER_CODE, |umc_code| {
+            upgrade_umcs.iter().map(|umc_id| {
+                call_raw128(                        //::<(ManagementCanisterInstallCodeQuest,), ()>
+                    MANAGEMENT_CANISTER_ID,
+                    "install_code",
+                    &encode_one(&ManagementCanisterInstallCodeQuest{
+                        mode : ManagementCanisterInstallCodeMode::upgrade,
+                        canister_id : *umc_id/*copy*/,
+                        wasm_module : umc_code.as_ref().unwrap().module(),
+                        arg : &post_upgrade_arg,
+                    }).unwrap(),
+                    0
+                )
+            }).collect::<Vec<CallRawFuture>>()
         })
     ).await;
     
+    upgrade_umcs.into_iter().zip(sponses.into_iter()).filter_map(|(umc_id, call_sponse): (UsersMapCanisterId, Result<Vec<u8>, (RejectionCode, String)>)| {
+        match call_sponse {
+            Ok(_) => None,
+            Err(call_error) => Some((umc_id, (call_error.0 as u32, call_error.1)))
+        }
+    }).collect::<Vec<(UsersMapCanisterId, (u32, String))>>()
 
 }
-*/
+
 
 
 

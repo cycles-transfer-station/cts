@@ -233,7 +233,7 @@ fn pre_upgrade() {
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the uc_upgrade_data_candid_bytes*/ + uc_upgrade_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((uc_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
@@ -687,7 +687,7 @@ pub fn umc_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
 }
 
 #[update]
-pub fn umc_re_store_umc_data_out_of_the_state_snapshot() {
+pub fn umc_re_store_uc_data_out_of_the_state_snapshot() {
     if caller() != get(&UMC_ID) {
         trap("Caller must be the umc for this method.")
     }

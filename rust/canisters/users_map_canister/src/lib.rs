@@ -136,7 +136,7 @@ fn pre_upgrade() {
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the umc_data_candid_bytes*/ + umc_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow((want_stable_memory_size_bytes / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((umc_data_candid_bytes.len() as u64).to_be_bytes()));
