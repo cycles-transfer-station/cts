@@ -552,9 +552,8 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
         ongoing_user_transfer_cycles.remove(&cts_q.cycles_transfer_purchase_log_id)
     });
     
-    let mut give_back_the_fee: u64 = 0;
-    
     if let Some(mut cycles_transfer_purchase_log) = opt_cycles_transfer_purchase_log {
+        let mut give_back_the_fee: u64 = 0;
         if let Some(ref call_error) = cts_q.cycles_transfer_call_error {
             if let  0 | 1 | 2 = (*call_error).0 {        
                 give_back_the_fee = cycles_transfer_purchase_log.fee_paid;
@@ -566,12 +565,9 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
         
         with_mut(&USER_DATA, |user_data| {
             user_data.cycles_transfers_out.push(cycles_transfer_purchase_log); 
-        });
-    }
-
-    with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance += cts_q.cycles_transfer_refund + (give_back_the_fee as Cycles); 
-    });        
+            user_data.cycles_balance += cts_q.cycles_transfer_refund + (give_back_the_fee as Cycles);     
+       });
+    }       
     
     Ok(())
 }
@@ -658,8 +654,8 @@ pub fn umc_download_state_snapshot() {
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
-        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
-        reply::<(Option<&[u8]>,)>((state_snapshot_uc_data_candid_bytes.chunks(chunk_size).nth(chunk_i),));
+        let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
+        reply::<(Option<&[u8]>,)>((state_snapshot_uc_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
     })
 
 }

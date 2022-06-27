@@ -51,9 +51,11 @@ use cts_lib::{
             CyclesTransferPurchaseLogId
         },
         cycles_transferrer::{
+            CyclesTransferRefund,
+            ReTryCyclesTransferrerUserTransferCyclesCallback,
             CyclesTransferrerInit,
             CTSUserTransferCyclesQuest,
-            CTSUserTransferCyclesError
+            CTSUserTransferCyclesError,
         }
     },
     tools::{
@@ -76,8 +78,6 @@ use cts_lib::{
 use std::cell::{Cell, RefCell};
 
 
-pub type CyclesTransferRefund = Cycles;
-
 
 
 
@@ -87,7 +87,6 @@ pub type CyclesTransferRefund = Cycles;
 
 pub const MAX_ONGOING_CYCLES_TRANSFERS: usize = 1000;
 
-
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
@@ -95,7 +94,7 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 thread_local! {
     static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static ONGOING_CYCLES_TRANSFERS_COUNT: Cell<usize> = Cell::new(0);
-    static RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<((u32, String), CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)>> = RefCell::new(Vec::new()); // (cycles_transferrer_user_transfer_cycles_call_error, CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)
+    static RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>> = RefCell::new(Vec::new()); // (cycles_transferrer_user_transfer_cycles_call_error, CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)
 
     // not save in a CTCData
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
@@ -191,6 +190,10 @@ pub async fn cts_user_transfer_cycles() {
         trap("Caller must be the CTS.")
     }
     
+    if get(&STOP_CALLS) == true {
+        trap("get(&STOP_CALLS) == true")
+    }
+    
     if ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| octs.get()) >= MAX_ONGOING_CYCLES_TRANSFERS {
         reply::<(Result<(), CTSUserTransferCyclesError>,)>((Err(CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(MAX_ONGOING_CYCLES_TRANSFERS)),));
         return;
@@ -262,7 +265,7 @@ pub async fn cts_user_transfer_cycles() {
 }
 
 
-async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_user_transfer_cycles_callback_quest: CyclesTransferrerUserTransferCyclesCallbackQuest, cycles_transfer_refund: Cycles) {
+async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_user_transfer_cycles_callback_quest: CyclesTransferrerUserTransferCyclesCallbackQuest, cycles_transfer_refund: CyclesTransferRefund) {
 
     let cycles_transferrer_user_transfer_cycles_callback_call_future: CallRawFuture = call_raw128(
         cts_id(),
@@ -299,22 +302,40 @@ async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_
 }
 
 
-#[update]
-pub async fn re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
+#[update(manual_reply = true)]
+pub async fn cts_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
     
     if caller() != cts_id() {
         trap("Caller must be the CTS.")
     }
    
-    for i in 0..with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) {
+    futures::future::join_all(
+        with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, 
+            |rcs| {
+                rcs.drain(..).map(
+                    |(_cycles_transferrer_user_transfer_cycles_callback_call_error, cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund): ReTryCyclesTransferrerUserTransferCyclesCallback| {
+                        do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund)
+                    }
+                ).collect::<Vec<_/*anonymous-future*/>>()
+            }
+        )
+    ).await;
+   
+    /*   
+    for i in 0..with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) { // futures::future::join?
         
-        let possible_re_try_callback: Option<((u32, String), CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)> = with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.pop() });
+        let possible_re_try_callback: Option<ReTryCyclesTransferrerUserTransferCyclesCallback> = with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.pop() });
         
         if let Some(re_try_callback) = possible_re_try_callback {
             do_cycles_transferrer_user_transfer_cycles_callback(re_try_callback.1, re_try_callback.2).await;
         }
         
     }
+    */
+    
+    with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
+        reply::<(&Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs,));
+    });
     
 }
 
@@ -327,12 +348,20 @@ pub fn cts_see_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
     }
     
     with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-        reply::<(&Vec<((u32, String), CyclesTransferrerUserTransferCyclesCallbackQuest, Cycles)>,)>((rcs,));
-    })
+        reply::<(&Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs,));
+    });
 }
 
 
-
+#[export_name = "canister_update cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks"]
+pub fn cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
+    if caller() != cts_id() {
+        trap("Caller must be the CTS.")
+    }
+    with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
+        reply::<(Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs.drain(..).collect::<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>>(),));
+    });    
+}
 
 
 
@@ -396,8 +425,8 @@ pub fn cts_download_state_snapshot() {
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
-        let (chunk_i,): (usize,) = arg_data::<(usize,)>(); // starts at 0
-        reply::<(Option<&[u8]>,)>((state_snapshot_ctc_data_candid_bytes.chunks(chunk_size).nth(chunk_i),));
+        let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
+        reply::<(Option<&[u8]>,)>((state_snapshot_ctc_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
     })
 
 }

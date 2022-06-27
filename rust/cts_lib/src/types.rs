@@ -1,15 +1,17 @@
-use crate::ic_cdk::{
-    api::{
-        time,
-        call::{
-            RejectionCode
+use crate::{
+    ic_cdk::{
+        api::{
+            time,
+            call::{
+                RejectionCode
+            },
         },
-    },
-    export::{
-        Principal,
-        candid::{
-            CandidType,
-            Deserialize,   
+        export::{
+            Principal,
+            candid::{
+                CandidType,
+                Deserialize,   
+            }
         }
     }
 };
@@ -101,6 +103,42 @@ impl UserLock {
 
 
 
+
+pub mod canister_code {
+    use super::{CandidType, Deserialize};
+    
+    #[derive(CandidType, Deserialize, Clone)]
+    pub struct CanisterCode {
+        #[serde(with = "serde_bytes")]
+        module: Vec<u8>,
+        module_hash: [u8; 32]
+    }
+
+    impl CanisterCode {
+        pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
+            module.shrink_to_fit();
+            Self {
+                module_hash: crate::tools::sha256(&module), // put this on the top if move error
+                module: module,
+            }
+        }
+        pub fn module(&self) -> &Vec<u8> {
+            &self.module
+        }
+        pub fn module_hash(&self) -> &[u8; 32] {
+            &self.module_hash
+        }
+        pub fn change_module(&mut self, module: Vec<u8>) {
+            *self = Self::new(module);
+        }
+    }
+}
+
+
+
+
+
+
 pub mod management_canister {
     use super::*;
     
@@ -180,6 +218,8 @@ pub mod management_canister {
 pub mod cycles_transferrer {
     use super::*;
     
+    pub type CyclesTransferRefund = Cycles;
+    
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerInit {
         pub cts_id: Principal
@@ -194,10 +234,10 @@ pub mod cycles_transferrer {
     #[derive(CandidType, Deserialize)]
     pub enum CTSUserTransferCyclesError {
         MaxOngoingCyclesTransfers(usize),
-        CyclesTransferQuestCandidCodeError(String),
-        
+        CyclesTransferQuestCandidCodeError(String)
     }
     
+    pub type ReTryCyclesTransferrerUserTransferCyclesCallback = ((u32, String)/*the call-error of the last try*/, cts::CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund);
     
 }
 
@@ -269,6 +309,17 @@ pub mod users_map_canister {
         users_
     }
     */
+    
+    pub type UMCUpgradeUCError = (UserCanisterId, UMCUpgradeUCCallErrorType, (u32, String));
+
+    #[derive(CandidType, Deserialize, Clone)]
+    pub enum UMCUpgradeUCCallErrorType {
+        StopCanisterCallError,
+        UpgradeCodeCallError,
+        StartCanisterCallError
+    }
+
+
 
 }
 
@@ -311,7 +362,7 @@ pub mod user_canister {
         pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub enum CTSUserTransferCyclesCallbackError {
         WrongUserId,
     }

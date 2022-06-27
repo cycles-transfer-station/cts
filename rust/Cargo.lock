@@ -247,6 +247,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cts_lib",
+ "futures",
  "serde",
 ]
 
@@ -1098,6 +1099,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cts_lib",
+ "futures",
  "serde",
 ]
 

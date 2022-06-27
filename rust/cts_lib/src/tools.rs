@@ -42,12 +42,12 @@ pub mod localkey {
                 f(&mut *b.borrow_mut())
             })
         }
-        
+        /*
         pub unsafe fn get<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &T {
             let pointer: *const T = with(s, |i| { i as *const T });
             &*pointer
         }
-        /*
+        
         pub unsafe fn get_mut<T: 'static>(s: &'static LocalKey<RefCell<T>>) -> &mut T {
             let pointer: *mut T = with_mut(s, |i| { i as *mut T });
             &mut *pointer

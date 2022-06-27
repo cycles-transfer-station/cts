@@ -13,6 +13,7 @@ use crate::{
 use cts_lib::{
     types::{
         UserLock,
+        canister_code::CanisterCode,
         Cycles,
         users_map_canister::{
             UsersMapCanisterInit,
@@ -155,45 +156,6 @@ pub fn main_cts_icp_id() -> IcpId {  // do once
 
 
 
-
-pub mod canister_code {
-    use super::{CandidType, Deserialize};
-    
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct CanisterCode {
-        #[serde(with = "serde_bytes")]
-        module: Vec<u8>,
-        module_hash: [u8; 32] 
-    }
-
-    impl CanisterCode {
-        pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
-            module.shrink_to_fit();
-            Self {
-                module_hash: cts_lib::tools::sha256(&module), // put this on the top if move error
-                module: module,
-            }
-        }
-        pub fn module(&self) -> &Vec<u8> {
-            &self.module
-        }
-        pub fn module_hash(&self) -> &[u8; 32] {
-            &self.module_hash
-        }
-        pub fn change_module(&mut self, module: Vec<u8>) {
-            *self = Self::new(module);
-        }
-    }
-}
-
-
-
-
-
-
-
-
-
  
 
 #[derive(CandidType, Deserialize)]
@@ -281,6 +243,7 @@ pub enum GetNewCanisterError {
 
 pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
     
+    /*
     if let Some(principal) = with_mut(&NEW_CANISTERS, |new_canisters| new_canisters.pop()) {
         // get status
         
@@ -296,6 +259,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
     
         return Ok(principal);
     } 
+    */
 
     let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(&ManagementCanisterCreateCanisterQuest { settings: optional_canister_settings }) {
         Ok(candid_bytes) => candid_bytes,
@@ -551,7 +515,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     };    
     
     // install code
-    if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.is_none()) {
+    if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.module().len() == 0 ) {
         with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push(new_users_map_canister_id); });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
@@ -562,7 +526,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe { localkey::refcell::get(&USERS_MAP_CANISTER_CODE).as_ref().unwrap().module() },   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe { &*with(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { users_map_canister_code.module() as *const Vec<u8> }) },   // .unwrap bc we checked if .is_none() before
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
