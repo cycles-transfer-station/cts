@@ -331,13 +331,13 @@ pub fn cts_see_stop_calls_flag() -> bool {
 // ----- STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES-METHODS --------------------------
 
 #[update]
-pub fn cts_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
     with_mut(&STATE_SNAPSHOT_UMC_DATA_CANDID_BYTES, |state_snapshot_umc_data_candid_bytes| {
         *state_snapshot_umc_data_candid_bytes = create_umc_data_candid_bytes();
-        state_snapshot_umc_data_candid_bytes.len()
+        state_snapshot_umc_data_candid_bytes.len() as u64
     })
 }
 

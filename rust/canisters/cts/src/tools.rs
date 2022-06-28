@@ -611,18 +611,22 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         Some(ManagementCanisterOptionalCanisterSettings{
             controllers : None,
             compute_allocation : None,
-            memory_allocation : Some(1024*1024*100),
+            memory_allocation : /*TEST-VALUE*/None, // Some(1024*1024*100),
             freezing_threshold : None,
         }),
-        7_000_000_000_000
+        /*TEST-VALUE*/3_000_000_000_000  //7_000_000_000_000
     ).await {
         Ok(canister_id) => canister_id,
-        Err(get_new_canister_error) => return Err(CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error))
+        Err(get_new_canister_error) => {
+            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+            return Err(CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error));
+        }
     };    
     
     // install code
     if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.module().len() == 0 ) {
         with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
+        CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
     
@@ -645,6 +649,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         },
         Err(install_code_call_error) => {
             with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
+            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
             return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }
     }

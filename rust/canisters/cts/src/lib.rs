@@ -252,8 +252,8 @@ pub enum ReTryCTSUserTransferCyclesCallbackErrorKind {
 
 pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
 pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000 + 1_000_000_000); // * with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u128); // :do: clude wasm-instructions-counts 1000000000 placeholder
-pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = 5_000_000_000_000;
-pub const CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE: Cycles = 3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
+pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = /*TEST-VALUE*/1_000_000_000_000; //5_000_000_000_000;
+pub const CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE: Cycles = /*TEST-VALUE*/1_000_000_000_000; //3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
 
 
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
@@ -1974,13 +1974,13 @@ pub fn controller_see_stop_calls_flag() -> bool {
 // ----- STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES-METHODS --------------------------
 
 #[update]
-pub fn controller_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+pub fn controller_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
     with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
         *state_snapshot_cts_data_candid_bytes = create_cts_data_candid_bytes();
-        state_snapshot_cts_data_candid_bytes.len()
+        state_snapshot_cts_data_candid_bytes.len() as u64
     })
 }
 
@@ -2110,16 +2110,17 @@ pub async fn controller_call_canister() {
 
 #[derive(CandidType, Deserialize)]
 pub struct Metrics {
-    global_allocator_counter: usize,
+    global_allocator_counter: u64,
     stable_size: u64,
     cycles_balance: u128,
-    new_canisters_count: usize,
+    new_canisters_count: u64,
     users_map_canister_code_hash: Option<[u8; 32]>,
     user_canister_code_hash: Option<[u8; 32]>,
     cycles_transferrer_canister_code_hash: Option<[u8; 32]>,
-    users_map_canisters_count: usize,
-    cycles_transferrer_canisters_count: usize,
+    users_map_canisters_count: u64,
+    cycles_transferrer_canisters_count: u64,
     latest_known_cmc_rate: IcpXdrConversionRate,
+    new_users_count: u64
 
 }
 
@@ -2131,16 +2132,17 @@ pub fn controller_see_metrics() -> Metrics {
     }
     
     Metrics {
-        global_allocator_counter: get_allocated_bytes_count(),
+        global_allocator_counter: get_allocated_bytes_count() as u64,
         stable_size: ic_cdk::api::stable::stable64_size(),
         cycles_balance: ic_cdk::api::canister_balance128(),
-        new_canisters_count: with(&NEW_CANISTERS, |nc| nc.len()),
-        users_map_canister_code_hash: with(&USERS_MAP_CANISTER_CODE, |umcc| { if umcc.module().len() == 0 { Some(*umcc.module_hash()) } else { None } }),
-        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| { if ucc.module().len() == 0 { Some(*ucc.module_hash()) } else { None } }),
-        cycles_transferrer_canister_code_hash: with(&CYCLES_TRANSFERRER_CANISTER_CODE, |ctcc| { if ctcc.module().len() == 0 { Some(*ctcc.module_hash()) } else { None } }),
-        users_map_canisters_count: with(&USERS_MAP_CANISTERS, |umcs| umcs.len()),
-        cycles_transferrer_canisters_count: with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| ctcs.len()),
+        new_canisters_count: with(&NEW_CANISTERS, |nc| nc.len() as u64),
+        users_map_canister_code_hash: with(&USERS_MAP_CANISTER_CODE, |umcc| { if umcc.module().len() != 0 { Some(*umcc.module_hash()) } else { None } }),
+        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| { if ucc.module().len() != 0 { Some(*ucc.module_hash()) } else { None } }),
+        cycles_transferrer_canister_code_hash: with(&CYCLES_TRANSFERRER_CANISTER_CODE, |ctcc| { if ctcc.module().len() != 0 { Some(*ctcc.module_hash()) } else { None } }),
+        users_map_canisters_count: with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u64),
+        cycles_transferrer_canisters_count: with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| ctcs.len() as u64),
         latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
+        new_users_count: with(&NEW_USERS, |new_users| { new_users.len() as u64 })
         
     }
 }

@@ -79,3 +79,15 @@ pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Princ
 
 
 
+
+
+#[update(manual_reply = true)]
+pub fn test_manual_reply() {
+    reject("reject-message-here");
+}
+
+
+
+
+
+

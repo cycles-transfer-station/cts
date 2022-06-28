@@ -632,13 +632,13 @@ pub fn umc_see_stop_calls_flag() -> bool {
 
 
 #[update]
-pub fn umc_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+pub fn umc_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
     if caller() != get(&UMC_ID) {
         trap("Caller must be the umc for this method.")
     }
     with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
         *state_snapshot_uc_data_candid_bytes = create_uc_data_candid_bytes();
-        state_snapshot_uc_data_candid_bytes.len()
+        state_snapshot_uc_data_candid_bytes.len() as u64
     })
 }
 

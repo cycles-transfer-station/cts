@@ -403,13 +403,13 @@ pub fn cts_see_stop_calls_flag() -> bool {
 
 
 #[update]
-pub fn cts_create_state_snapshot() -> usize/*len of the state_snapshot_candid_bytes*/ {
+pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
     if caller() != get(&CTS_ID) {
         trap("Caller must be the cts for this method.")
     }
     with_mut(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
         *state_snapshot_ctc_data_candid_bytes = create_ctc_data_candid_bytes();
-        state_snapshot_ctc_data_candid_bytes.len()
+        state_snapshot_ctc_data_candid_bytes.len() as u64
     })
 }
 
