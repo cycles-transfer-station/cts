@@ -165,7 +165,7 @@ pub mod management_canister {
         pub settings : Option<ManagementCanisterOptionalCanisterSettings>
     }
 
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct ManagementCanisterOptionalCanisterSettings {
         pub controllers : Option<Vec<Principal>>,
         pub compute_allocation : Option<u128>,

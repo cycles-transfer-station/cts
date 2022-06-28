@@ -59,6 +59,7 @@ use cts_lib::{
                 CallResult,
                 call_raw128,
                 call,
+                call_with_payment128,
                 RejectionCode,
             },
         },
@@ -232,6 +233,119 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 
 
 
+enum SetCanisterError {
+    CanisterStatusCallError((u32, String)),
+    StartCanisterCallError((u32, String)),
+    UpdateSettingsCallError((u32, String)),    
+    PositCyclesCallError((u32, String)),
+}
+
+async fn set_canister(canister_id: Principal, optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, SetCanisterError> {
+    // get status
+    let canister_status_record: ManagementCanisterCanisterStatusRecord = match call(
+        MANAGEMENT_CANISTER_ID,
+        "canister_status",
+        (CanisterIdRecord { canister_id: canister_id },),
+    ).await {
+        Ok((canister_status_record,)) => canister_status_record,
+        Err(canister_status_call_error) => return Err(SetCanisterError::CanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1)))
+    };
+    
+    // make sure is empty
+    if canister_status_record.module_hash.is_some() {
+        match call::<(CanisterIdRecord,), ()>(
+            MANAGEMENT_CANISTER_ID,
+            "uninstall_code",
+            (CanisterIdRecord{ canister_id: canister_id },)
+        ).await {
+            Ok(()) => {},
+            Err(canister_status_call_error) => return Err(SetCanisterError::CanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1)))
+        }
+    }
+    
+    // make sure is running 
+    if canister_status_record.status != ManagementCanisterCanisterStatusVariant::running {
+        match call::<(CanisterIdRecord,), ()>(
+            MANAGEMENT_CANISTER_ID,
+            "start_canister",
+            (CanisterIdRecord{ canister_id: canister_id },)
+        ).await {
+            Ok(()) => {},
+            Err(start_canister_call_error) => return Err(SetCanisterError::StartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1)))
+        }
+    
+    }
+    
+    // update settings if different
+    let mut settings: ManagementCanisterOptionalCanisterSettings = ManagementCanisterOptionalCanisterSettings{
+        controllers : Some(vec![id()]),
+        compute_allocation : Some(0),
+        memory_allocation : Some(0),
+        freezing_threshold : Some(2592000), //(30 days).
+    };
+    
+    if let Some(canister_settings) = optional_canister_settings {
+        if let Some(controllers) = canister_settings.controllers {
+            settings.controllers = Some(controllers);
+        }
+        if let Some(compute_allocation) = canister_settings.compute_allocation {
+            settings.compute_allocation = Some(compute_allocation);
+        }
+        if let Some(memory_allocation) = canister_settings.memory_allocation {
+            settings.memory_allocation = Some(memory_allocation);
+        }
+        if let Some(freezing_threshold) = canister_settings.freezing_threshold {
+            settings.freezing_threshold = Some(freezing_threshold);
+        }
+    }
+    
+    let mut update_settings_call_flag: bool = false;
+    
+    if settings.controllers.as_ref().unwrap() != &canister_status_record.settings.controllers {
+        update_settings_call_flag = true;
+    }
+    else if settings.compute_allocation.as_ref().unwrap() != &canister_status_record.settings.compute_allocation {
+        update_settings_call_flag = true;
+    }
+    else if settings.memory_allocation.as_ref().unwrap() != &canister_status_record.settings.memory_allocation {
+        update_settings_call_flag = true;
+    }
+    else if settings.freezing_threshold.as_ref().unwrap() != &canister_status_record.settings.freezing_threshold {
+        update_settings_call_flag = true;
+    }
+    
+    if update_settings_call_flag == true {
+        match call::<(ChangeCanisterSettingsRecord,), ()>(
+            MANAGEMENT_CANISTER_ID,
+            "update_settings",
+            (ChangeCanisterSettingsRecord{
+                canister_id: canister_id,
+                settings: settings
+            },)
+        ).await {
+            Ok(()) => {},
+            Err(update_settings_call_error) => return Err(SetCanisterError::UpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1)))
+        }
+    }
+    
+    // put cycles (or take cycles? later.) if not enough
+    if canister_status_record.cycles < with_cycles {
+        match call_with_payment128::<>(
+            MANAGEMENT_CANISTER_ID,
+            "deposit_cycles",
+            (CanisterIdRecord{ canister_id: canister_id },),
+            with_cycles - canister_status_record.cycles
+        ).await {
+            Ok(()) => {},
+            Err(posit_cycles_call_error) => return Err(SetCanisterError::PositCyclesCallError((posit_cycles_call_error.0 as u32, posit_cycles_call_error.1)))
+        }
+    }
+    
+    Ok(canister_id)
+}
+
+
+
 
 
 #[derive(CandidType, Deserialize)]
@@ -243,23 +357,15 @@ pub enum GetNewCanisterError {
 
 pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
     
-    /*
-    if let Some(principal) = with_mut(&NEW_CANISTERS, |new_canisters| new_canisters.pop()) {
-        // get status
-        
-        // make sure is empty
-
-        // make sure is running 
-        
-        // update settings if different
-        
-        // put cycles (or take cycles? later.) if not enough
-        
-        // if any of the above fail , create with the create_canister function and put the canister back into the new-canisters
-    
-        return Ok(principal);
-    } 
-    */
+    if let Some(new_canister) = with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.pop_front() }) {
+        match set_canister(new_canister, optional_canister_settings.clone(), with_cycles).await {
+            Ok(canister_id) => return Ok(canister_id),
+            Err(set_canister_error) => {
+                with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_canister); });
+                // continue
+            }
+        }
+    }
 
     let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(&ManagementCanisterCreateCanisterQuest { settings: optional_canister_settings }) {
         Ok(candid_bytes) => candid_bytes,
@@ -516,7 +622,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     
     // install code
     if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.module().len() == 0 ) {
-        with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push(new_users_map_canister_id); });
+        with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
     
@@ -538,7 +644,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
             Ok(new_users_map_canister_id)    
         },
         Err(install_code_call_error) => {
-            with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push(new_users_map_canister_id); });
+            with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
             return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }
     }

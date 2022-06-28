@@ -221,7 +221,7 @@ pub async fn cts_user_transfer_cycles() {
     
     ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| { octs.set(octs.get() + 1); }); // checked add?
     
-    reply::<(Result<(), CTSUserTransferCyclesError>,)>((Ok(()),)); /// test that at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
+    reply::<(Result<(), CTSUserTransferCyclesError>,)>((Ok(()),)); // test that at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
     
     // call_raw because dont want to rely on the canister returning the correct candid 
     let cycles_transfer_call_future: CallRawFuture = call_raw128(
