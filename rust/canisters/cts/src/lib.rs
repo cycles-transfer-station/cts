@@ -906,7 +906,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             user_id, 
             UMCUserData{
                 user_canister_id: *new_user_data.user_canister.as_ref().unwrap(),
-                user_canister_latest_known_module_hash: [0u8; 32] // 0s cause we are putting the user_canister_id onto the users_map_canister before install_code on the user_canister, cause we install_code with the umc_id in the user-canister-init-arg. we can update the umc_user_data on the umc after we install the code, but for now we will let it get upgraded
+                user_canister_latest_known_module_hash: [0u8; 32] // 0s cause we are putting the user_canister_id onto the users_map_canister before install_code on the user_canister, cause we install_code with the umc_id in the user-canister-init-arg. we can update the umc_user_data on the umc after we install the code, but for now we will let it get upgrade
             }
         ).await {
             Ok(umcid) => umcid,
@@ -1598,7 +1598,7 @@ pub enum ControllerUpgradeUCSOnAUMCError {
 
 
 #[update]
-pub async fn controller_upgrade_ucs_on_a_umc(umc: UsersMapCanisterId, opt_upgrade_ucs: Option<Vec<UserCanisterId>>, post_upgrade_arg: Vec<u8>) -> Result<Vec<UMCUpgradeUCError>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
+pub async fn controller_upgrade_ucs_on_a_umc(umc: UsersMapCanisterId, opt_upgrade_ucs: Option<Vec<UserCanisterId>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<UMCUpgradeUCError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
@@ -1607,12 +1607,12 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: UsersMapCanisterId, opt_upgrad
         trap(&format!("cts users_map_canisters does not contain: {:?}", umc));
     }
     
-    match call::<(Option<Vec<UserCanisterId>>, Vec<u8>/*post-upgrade-arg*/), (Vec<UMCUpgradeUCError>,)>(
+    match call::<(Option<Vec<UserCanisterId>>, Vec<u8>/*post-upgrade-arg*/), (Option<Vec<UMCUpgradeUCError>>,)>(
         umc,
         "cts_upgrade_ucs_chunk",
         (opt_upgrade_ucs, post_upgrade_arg)
     ).await {
-        Ok((uc_upgrade_fails,)) => Ok(uc_upgrade_fails),
+        Ok((opt_uc_upgrade_fails,)) => Ok(opt_uc_upgrade_fails),
         Err(call_error) => Err(ControllerUpgradeUCSOnAUMCError::CTSUpgradeUCSCallError((call_error.0 as u32, call_error.1)))
     }
 

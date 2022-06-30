@@ -545,6 +545,11 @@ pub async fn cts_upgrade_ucs_chunk() {
         }
     };    
     
+    if upgrade_ucs.len() == 0 {
+        reply::<(Option<&Vec<UMCUpgradeUCError>>,)>((None,));
+        return;
+    }
+    
     // PORTANT!! trying to do a loop here of any sort, for-loop or loop{}-block over chunks of the upgrade_ucs will cause memory corruption in a localkey.with closure within the async block  
     // Now one chunk per call.
    
@@ -619,7 +624,7 @@ pub async fn cts_upgrade_ucs_chunk() {
         }
     });
     
-    reply::<(&Vec<UMCUpgradeUCError>,)>((&current_upgrade_fails,));
+    reply::<(Option<&Vec<UMCUpgradeUCError>>,)>((Some(&current_upgrade_fails),));
     
     with_mut(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| {
         user_canister_upgrade_fails.append(&mut current_upgrade_fails);

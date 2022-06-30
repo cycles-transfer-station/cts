@@ -260,7 +260,8 @@ fn post_upgrade() {
 // inline always?
 
 fn cts_id() -> Principal {
-    CTS_ID.with(|cts_id| { cts_id.get() })
+    get(&CTS_ID)
+    //CTS_ID.with(|cts_id| { cts_id.get() })
 }
 fn umc_id() -> Principal {
     UMC_ID.with(|umc_id| { umc_id.get() })
