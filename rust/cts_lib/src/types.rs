@@ -36,7 +36,7 @@ pub type UsersMapCanisterId = Principal;
 
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
-    Nat64(u64),
+    Nat(u128),
     Text(String),
     Blob(Vec<u8>)
 }

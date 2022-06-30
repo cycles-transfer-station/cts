@@ -253,7 +253,7 @@ pub enum ReTryCTSUserTransferCyclesCallbackErrorKind {
 
 pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = 50_000_000_000; // enough to pay for a find_and_lock_user-call.
 pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = (100_000 + 260_000 + 590_000 + 1_000_000_000); // * with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u128); // :do: clude wasm-instructions-counts 1000000000 placeholder
-pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = /*TEST-VALUE*/1_000_000_000_000; //5_000_000_000_000;
+pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = /*TEST-VALUE*/2_000_000_000_000; //5_000_000_000_000;
 pub const CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE: Cycles = /*TEST-VALUE*/1_000_000_000_000; //3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
 
 
@@ -308,6 +308,14 @@ struct CTSInit {
 fn init(cts_init: CTSInit) {
     with_mut(&CONTROLLERS, |controllers| { *controllers = cts_init.controllers; });
 } 
+
+
+// --- OLD UPGRADE DATA -------
+
+
+
+
+
 
 #[derive(CandidType, Deserialize)]
 struct CTSData {
@@ -1081,6 +1089,9 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             }
         }
     }
+    
+    
+    // call the umc to tell it what the module hash is of the user_canister? upgrades can still happen between
     
 
 
