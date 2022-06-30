@@ -59,6 +59,8 @@ use cts_lib::{
         },
         users_map_canister::{
             UsersMapCanisterInit,
+            UMCUserData,
+            PutNewUserError,
             UCUserTransferCyclesQuest,
             UCUserTransferCyclesError,
             UMCUpgradeUCError,
@@ -79,15 +81,15 @@ use cts_lib::{
 };
 
 
-type UsersMap = HashMap<UserId, UserCanisterId>;
+type UsersMap = HashMap<UserId, UMCUserData>;
 
 
 
 
 
 
-const MAX_CANISTER_SIZE: usize =  1024*1024*100;
-const MAX_USERS: usize = 30_000; 
+const MAX_CANISTER_SIZE: usize = 1024*1024*100;
+const MAX_USERS: usize = 10_000; 
 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
@@ -116,20 +118,34 @@ fn init(users_map_canister_init: UsersMapCanisterInit) {
 }
 
 
+
+/*
 #[derive(CandidType, Deserialize)]
-struct UMCData {
+struct OldUMCData {
     cts_id: Principal,
     users_map: Vec<(UserId, UserCanisterId)>,
     user_canister_code: CanisterCode,
     user_canister_upgrade_fails: Vec<UMCUpgradeUCError>,
 }
+*/
+
+
+
+#[derive(CandidType, Deserialize)]
+struct UMCData {
+    cts_id: Principal,
+    users_map: Vec<(UserId, UMCUserData)>,
+    user_canister_code: CanisterCode,
+    user_canister_upgrade_fails: Vec<UMCUpgradeUCError>,
+}
+
 
 
 fn create_umc_data_candid_bytes() -> Vec<u8> {
     let mut umc_data_candid_bytes: Vec<u8> = encode_one(
         &UMCData {
             cts_id: cts_id(),
-            users_map: with(&USERS_MAP, |users_map| { (*users_map).clone().into_iter().collect::<Vec<(UserId, UserCanisterId)>>() }),
+            users_map: with(&USERS_MAP, |users_map| { (*users_map).clone().into_iter().collect::<Vec<(UserId, UMCUserData)>>() }),
             user_canister_code: with(&USER_CANISTER_CODE, |user_canister_code| { (*user_canister_code).clone() }),
             user_canister_upgrade_fails: with(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| { (*user_canister_upgrade_fails).clone() })
         }
@@ -139,10 +155,26 @@ fn create_umc_data_candid_bytes() -> Vec<u8> {
 }
 
 fn re_store_umc_data_candid_bytes(umc_data_candid_bytes: Vec<u8>) {
+    /*
+    let old_umc_data: OldUMCData = decode_one::<OldUMCData>(&umc_data_candid_bytes).unwrap();
+    std::mem::drop(umc_data_candid_bytes);    
+    let umc_data: UMCData = UMCData{
+        cts_id: old_umc_data.cts_id,
+        users_map: old_umc_data.users_map.into_iter().map(
+            |(user_id, user_canister_id): (UserId, UserCanisterId)| {
+                (user_id, UMCUserData{user_canister_id, user_canister_latest_known_module_hash: [0u8; 32]})    
+            }
+        ).collect::<Vec<(UserId, UMCUserData)>>(),
+        user_canister_code: old_umc_data.user_canister_code,
+        user_canister_upgrade_fails: old_umc_data.user_canister_upgrade_fails
+    };
+    */
+    
     let umc_data: UMCData = decode_one::<UMCData>(&umc_data_candid_bytes).unwrap();
-    // std::mem::drop(umc_data_candid_bytes);
+    std::mem::drop(umc_data_candid_bytes);
+    
     CTS_ID.with(|cts_id| { cts_id.set(umc_data.cts_id); });
-    with_mut(&USERS_MAP, |users_map| { *users_map = umc_data.users_map.into_iter().collect::<HashMap<UserId, UserCanisterId>>(); });
+    with_mut(&USERS_MAP, |users_map| { *users_map = umc_data.users_map.into_iter().collect::<HashMap<UserId, UMCUserData>>(); });
     with_mut(&USER_CANISTER_CODE, |user_canister_code| { *user_canister_code = umc_data.user_canister_code; });
     with_mut(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| { *user_canister_upgrade_fails = umc_data.user_canister_upgrade_fails; });
 }
@@ -196,7 +228,7 @@ fn cts_id() -> Principal {
 
 
 fn is_full() -> bool {
-    get_allocated_bytes_count() >= MAX_CANISTER_SIZE || with(&USERS_MAP, |users_map| users_map.len()) >= MAX_USERS
+    with(&USERS_MAP, |users_map| {users_map.len()}) >= MAX_USERS || get_allocated_bytes_count() >= MAX_CANISTER_SIZE+1024*1024*10/*for the hashmap and vec allocations*/
 }
 
 
@@ -206,29 +238,27 @@ fn is_full() -> bool {
 
 
 
-#[derive(CandidType,Deserialize)]
-pub enum PutNewUserError {
-    CanisterIsFull,
-    FoundUser(UserCanisterId)
-}
-
-#[update]
-pub fn put_new_user(user_id: UserId, user_canister_id: UserCanisterId) -> Result<(), PutNewUserError> {
+#[export_name = "canister_update put_new_user"]
+pub fn put_new_user() {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
     if is_full() {
-        return Err(PutNewUserError::CanisterIsFull);
+        reply::<(Result<(), PutNewUserError>,)>((Err(PutNewUserError::CanisterIsFull),));
+        return;
     }
+    let (user_id, umc_user_data): (UserId, UMCUserData) = arg_data::<(UserId, UMCUserData)>();
     with_mut(&USERS_MAP, |users_map| {
         match users_map.get(&user_id) {
-            Some(user_canister_id) => Err(PutNewUserError::FoundUser(*user_canister_id)),
+            Some(found_umc_user_data) => {
+                reply::<(Result<(), PutNewUserError>,)>((Err(PutNewUserError::FoundUser((*found_umc_user_data).clone())),));
+            },
             None => {
-                users_map.insert(user_id, user_canister_id);
-                Ok(())
+                users_map.insert(user_id, umc_user_data);
+                reply::<(Result<(), PutNewUserError>,)>((Ok(()),));
             }
         }
-    })
+    });
 }
 
 
@@ -241,20 +271,47 @@ pub fn find_user() {
     }
     let (user_id,): (UserId,) = arg_data::<(UserId,)>();
     with(&USERS_MAP, |users_map| {
-        reply::<(Option<&UserCanisterId>,)>((users_map.get(&user_id),));
+        reply::<(Option<&UMCUserData>,)>((users_map.get(&user_id),));
     });
 }
 
 
 
-#[update]
-pub fn void_user(user_id: UserId) -> Option<UserCanisterId> {
+#[export_name = "canister_update void_user"]
+pub fn void_user() {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
+    let (user_id,): (UserId,) = arg_data::<(UserId,)>();
     with_mut(&USERS_MAP, |users_map| {
-        users_map.remove(&user_id)
-    })
+        reply::<(Option<UMCUserData>,)>((users_map.remove(&user_id),));
+    });
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum UpdateUserError {
+    UserNotFound
+}
+
+
+#[export_name = "canister_update update_user"]
+pub fn update_user() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    let (user_id, umc_user_data): (UserId, UMCUserData) = arg_data::<(UserId, UMCUserData)>();
+    with_mut(&USERS_MAP, |users_map| {
+        match users_map.get(&user_id) {
+            Some(_found_umc_user_data) => {
+                users_map.insert(user_id, umc_user_data);
+                reply::<(Result<(), UpdateUserError>,)>((Ok(()),));  
+            },
+            None => {
+                reply::<(Result<(), UpdateUserError>,)>((Err(UpdateUserError::UserNotFound),));
+            }
+        }
+    });
 }
 
 
@@ -273,8 +330,8 @@ pub async fn uc_user_transfer_cycles(uc_q: UCUserTransferCyclesQuest) -> Result<
     // caller-check
     with(&USERS_MAP, |users_map| { 
         match users_map.get(&uc_q.user_id) { 
-            Some(user_canister_id) => { 
-                if *user_canister_id != caller() { 
+            Some(umc_user_data) => { 
+                if (*umc_user_data).user_canister_id != caller() { 
                     trap("caller of this method must be the user-canister") 
                 }
             }, 
@@ -434,113 +491,147 @@ pub fn cts_see_uc_code_module_hash() {
 
 
 
+const USER_CANISTER_UPGRADES_CHUNK_SIZE: usize = 500;
 const SEE_USER_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
 
 
-// do 30_000 user_canisters per call just in a case that the principals need to come back if the upgrade doesn't go through ? or do everything in one but save the UCs that upgrade fail in a global?
 #[update(manual_reply = true)]
-pub async fn cts_upgrade_ucs() {
+pub async fn cts_upgrade_ucs_chunk() {
     if caller() != cts_id() {
         trap("caller must be the CTS")
     }
     
     // make sure the user_canister_upgrade_fails vec is empty ?
     
+    if with(&USER_CANISTER_CODE, |ucc| { ucc.module().len() == 0 }) {
+        trap("No user-canister-code found on this umc");
+    }
+
     let (opt_upgrade_ucs, post_upgrade_arg): (Option<Vec<UserCanisterId>>, Vec<u8>) = arg_data::<(Option<Vec<UserCanisterId>>, Vec<u8>)>();
     
-    let upgrade_ucs: Vec<UserCanisterId> = {
+    let upgrade_ucs: Vec<(UserId, UserCanisterId)> = {
         if let Some(upgrade_ucs) = opt_upgrade_ucs {
-            let mut upgrade_ucs_good_check_map: HashMap<UserCanisterId, bool> = upgrade_ucs.into_iter().map(|upgrade_uc| { (upgrade_uc, false) }).collect::<HashMap<UserCanisterId, bool>>();
-            with(&USERS_MAP, |users_map| { 
-                for users_map_user_canister in users_map.values() {
-                    if upgrade_ucs_good_check_map.contains_key(users_map_user_canister) {
-                        upgrade_ucs_good_check_map.insert(*users_map_user_canister, true);
+            if upgrade_ucs.len() > USER_CANISTER_UPGRADES_CHUNK_SIZE {
+                trap(&format!("Max upgrade_ucs: {:?}", USER_CANISTER_UPGRADES_CHUNK_SIZE));
+            }
+            let mut upgrade_ucs_good_check_map: HashMap<UserCanisterId, Option<UserId>> = upgrade_ucs.into_iter().map(|upgrade_uc| { (upgrade_uc, None) }).collect::<HashMap<UserCanisterId, Option<UserId>>>();
+            with(&USERS_MAP, |users_map| {
+                for (user_id, umc_user_data) in users_map.iter() {
+                    if upgrade_ucs_good_check_map.contains_key(&(umc_user_data.user_canister_id)) {
+                        upgrade_ucs_good_check_map.insert(umc_user_data.user_canister_id, Some(/*copy*/*user_id));
                     }
-                } 
+                }
             });
-            for (upgrade_uc, is_in_the_users_map_values) in upgrade_ucs_good_check_map.iter() {
-                if *is_in_the_users_map_values == false {
+            for (upgrade_uc, is_with_a_user_id) in upgrade_ucs_good_check_map.iter() {
+                if is_with_a_user_id.is_none() {
                     trap(&format!("umc users_map does not contain the user_canister: {:?}", upgrade_uc));
                 }
             }
-            upgrade_ucs_good_check_map.into_iter().map(|(upgrade_uc, _is_in_the_users_map_values): (UserCanisterId, bool)| { upgrade_uc }).collect::<Vec<UserCanisterId>>()
+            upgrade_ucs_good_check_map.into_iter().map(|(upgrade_uc, with_a_user_id): (UserCanisterId, Option<UserId>)| { (with_a_user_id.unwrap(), upgrade_uc) }).collect::<Vec<(UserId, UserCanisterId)>>()
         } else {
-            with(&USERS_MAP, |users_map| { users_map.values().map(|user_canister| { *user_canister/*copy*/ }).collect::<Vec<UserCanisterId>>() })
+            let mut upgrade_ucs: Vec<(UserId, UserCanisterId)> = Vec::new();
+            let current_uc_code_module_hash: [u8; 32] = with(&USER_CANISTER_CODE, |uc_code| { /*copy*/*(uc_code.module_hash()) });
+            with(&USERS_MAP, |users_map| { 
+                for (user_id, umc_user_data) in users_map.iter() {
+                    if upgrade_ucs.len() >= USER_CANISTER_UPGRADES_CHUNK_SIZE {
+                        break;
+                    }
+                    if umc_user_data.user_canister_latest_known_module_hash != current_uc_code_module_hash {
+                        upgrade_ucs.push((/*copy*/*user_id, /*copy*/umc_user_data.user_canister_id));
+                    }
+                }
+            });
+            upgrade_ucs
         }
     };    
     
-    for upgrade_ucs_chunk in upgrade_ucs.chunks(500usize) {
-        let sponses: Vec<Result<(), UMCUpgradeUCError>> = futures::future::join_all(
-            upgrade_ucs_chunk.into_iter().map(|upgrade_uc| {
-                async {
+    // PORTANT!! trying to do a loop here of any sort, for-loop or loop{}-block over chunks of the upgrade_ucs will cause memory corruption in a localkey.with closure within the async block  
+    // Now one chunk per call.
+   
+    let sponses: Vec<Result<[u8; 32], UMCUpgradeUCError>> = futures::future::join_all(
+        upgrade_ucs.iter().map(|upgrade_uc| {
+            async {
+                let (_user_id,upgrade_uc): (UserId, UserCanisterId) = *upgrade_uc; // copy
                 
-                    match call::<(CanisterIdRecord,), ()>(
-                        MANAGEMENT_CANISTER_ID,
-                        "stop_canister",
-                        (CanisterIdRecord{ canister_id: *upgrade_uc },)
-                    ).await {
-                        Ok(_) => {},
-                        Err(stop_canister_call_error) => {
-                            return Err((*upgrade_uc, UMCUpgradeUCCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
-                        }
+                match call::<(CanisterIdRecord,), ()>(
+                    MANAGEMENT_CANISTER_ID,
+                    "stop_canister",
+                    (CanisterIdRecord{ canister_id: upgrade_uc },)
+                ).await {
+                    Ok(_) => {},
+                    Err(stop_canister_call_error) => {
+                        return Err((upgrade_uc, UMCUpgradeUCCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
                     }
-                
-                    match call_raw128(
-                        MANAGEMENT_CANISTER_ID,
-                        "install_code",
-                        &encode_one(&ManagementCanisterInstallCodeQuest{
-                            mode : ManagementCanisterInstallCodeMode::upgrade,
-                            canister_id : *upgrade_uc,
-                            wasm_module : unsafe { &*with(&USER_CANISTER_CODE, |uc_code| { uc_code.module() as *const Vec<u8> }) },
-                            arg : &post_upgrade_arg,
-                        }).unwrap(),
-                        0
-                    ).await {
-                        Ok(_) => {},
-                        Err(upgrade_code_call_error) => {
-                            return Err((*upgrade_uc, UMCUpgradeUCCallErrorType::UpgradeCodeCallError, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
-                        }
-                    }
-
-                    match call::<(CanisterIdRecord,), ()>(
-                        MANAGEMENT_CANISTER_ID,
-                        "start_canister",
-                        (CanisterIdRecord{ canister_id: *upgrade_uc },)
-                    ).await {
-                        Ok(_) => {},
-                        Err(start_canister_call_error) => {
-                            return Err((*upgrade_uc, UMCUpgradeUCCallErrorType::StartCanisterCallError, (start_canister_call_error.0 as u32, start_canister_call_error.1))); 
-                        }
-                    }
-                    
-                    Ok(())
                 }
-            }).collect::<Vec<_/*anonymous-future*/>>() 
-        ).await;
- 
-        let mut/*mut for the append*/ upgrade_fails: Vec<UMCUpgradeUCError> = sponses.into_iter().filter_map(
-            |sponse: Result<(), UMCUpgradeUCError>| {
-                match sponse {
-                    Ok(()) => None,
-                    Err(umc_upgrade_uc_error) => Some(umc_upgrade_uc_error)
+                
+                let user_canister_code_module_hash: [u8; 32] = with(&USER_CANISTER_CODE, |uc_code| { /*copy*/*uc_code.module_hash() });
+                match call_raw128(
+                    MANAGEMENT_CANISTER_ID,
+                    "install_code",
+                    &encode_one(&ManagementCanisterInstallCodeQuest{
+                        mode : ManagementCanisterInstallCodeMode::upgrade,
+                        canister_id : upgrade_uc,
+                        wasm_module : unsafe{&*with(&USER_CANISTER_CODE, |uc_code| { uc_code.module() as *const Vec<u8> })},
+                        arg : &post_upgrade_arg,
+                    }).unwrap(),
+                    0
+                ).await {
+                    Ok(_) => {},
+                    Err(upgrade_code_call_error) => {
+                        return Err((upgrade_uc, UMCUpgradeUCCallErrorType::UpgradeCodeCallError{wasm_module_hash: user_canister_code_module_hash}, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
+                    }
+                }
+                
+                match call::<(CanisterIdRecord,), ()>(
+                    MANAGEMENT_CANISTER_ID,
+                    "start_canister",
+                    (CanisterIdRecord{ canister_id: upgrade_uc },)
+                ).await {
+                    Ok(_) => {},
+                    Err(start_canister_call_error) => {
+                        return Err((upgrade_uc, UMCUpgradeUCCallErrorType::StartCanisterCallError, (start_canister_call_error.0 as u32, start_canister_call_error.1))); 
+                    }
+                }
+                
+                Ok(user_canister_code_module_hash)
+            }
+        }).collect::<Vec<_/*anonymous-future*/>>() 
+    ).await;
+        
+    let mut/*mut for the append*/ current_upgrade_fails: Vec<UMCUpgradeUCError> = Vec::new();
+    
+    // doing this outside of the async blocks. i seen memory corruption in a localkey refcell with(&) in the async blocks. i rather keep the with_mut(&) out of it
+    with_mut(&USERS_MAP, |users_map| {
+        for ((user_id, user_canister_id), sponse)/*: ((UserId,UserCanisterId),Result<[u8; 32], UMCUpgradeUCError>)*/ in upgrade_ucs.into_iter().zip(sponses.into_iter()) {    
+            match sponse {
+                Ok(user_canister_code_module_hash) => {
+                    match users_map.get_mut(&user_id) {
+                        Some(umc_user_data) => {
+                            (*umc_user_data).user_canister_latest_known_module_hash = user_canister_code_module_hash; 
+                        },
+                        None => {}
+                    }
+                },
+                Err(umc_upgrade_uc_error) => {
+                    current_upgrade_fails.push(umc_upgrade_uc_error);
                 }
             }
-        ).collect::<Vec<UMCUpgradeUCError>>();
-        
-        with_mut(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| {
-            user_canister_upgrade_fails.append(&mut upgrade_fails);
-            std::mem::drop(upgrade_fails); // cause its empty by the append
-        });
-    }
-    
-    with(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| {
-        if let Some(user_canister_upgrade_fails_chunk_0) = user_canister_upgrade_fails.chunks(SEE_USER_CANISTER_UPGRADE_FAILS_CHUNK_SIZE).nth(0) {
-            reply::<(&[UMCUpgradeUCError],)>((user_canister_upgrade_fails_chunk_0,));
-        } else {
-            reply::<(&[UMCUpgradeUCError],)>((&[],));
         }
     });
+    
+    reply::<(&Vec<UMCUpgradeUCError>,)>((&current_upgrade_fails,));
+    
+    with_mut(&USER_CANISTER_UPGRADE_FAILS, |user_canister_upgrade_fails| {
+        user_canister_upgrade_fails.append(&mut current_upgrade_fails);
+        std::mem::drop(current_upgrade_fails); // cause its empty by the append
+    });
+    
 }
+
+
+
+
+
 
 
 #[query(manual_reply = true)]
@@ -580,7 +671,7 @@ pub struct CTSCallCanisterQuest {
     cycles: Cycles
 }
 
-#[update]
+#[update(manual_reply = true)]
 pub async fn cts_call_canister() {
     if caller() != cts_id() {
         trap("caller must be the CTS")
@@ -609,13 +700,28 @@ pub async fn cts_call_canister() {
 
 #[derive(CandidType, Deserialize)]
 pub struct UMCMetrics {
-
+    global_allocator_counter: u64,
+    stable_size: u64,
+    cycles_balance: u128,
+    user_canister_code_hash: Option<[u8; 32]>,
+    users_map_len: u64,
+    user_canister_upgrade_fails_len: u64,
 }
 
 #[query]
-pub fn cts_metrics() -> UMCMetrics {
-    trap("")
-
+pub fn cts_see_metrics() -> UMCMetrics {
+    if caller() != cts_id() {
+        trap("caller must be the CTS")
+    }
+    
+    UMCMetrics {
+        global_allocator_counter: get_allocated_bytes_count() as u64,    
+        stable_size: ic_cdk::api::stable::stable64_size(),
+        cycles_balance: ic_cdk::api::canister_balance128(),
+        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| { if ucc.module().len() != 0 { Some(sha256(&ucc.module())) } else { None } }),
+        users_map_len: with(&USERS_MAP, |users_map| { users_map.len() as u64 }),
+        user_canister_upgrade_fails_len: with(&USER_CANISTER_UPGRADE_FAILS, |ucufs| { ucufs.len() as u64 }),
+    }
 }
 
 

@@ -308,7 +308,7 @@ pub fn user_cycles_balance() -> Result<Cycles, UserCyclesBalanceError> {
     
     if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
     
-    Ok(with(&USER_DATA, |user_data| user_data.cycles_balance))
+    Ok(with(&USER_DATA, |user_data| {user_data.cycles_balance}))
 }
 
 
@@ -612,17 +612,17 @@ pub fn user_download_cycles_transfers_out() {
 
 
 #[update]
-pub fn umc_set_stop_calls_flag(stop_calls_flag: bool) {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     set(&STOP_CALLS, stop_calls_flag);
 }
 
 #[query]
-pub fn umc_see_stop_calls_flag() -> bool {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_see_stop_calls_flag() -> bool {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     get(&STOP_CALLS)
 }
@@ -632,9 +632,9 @@ pub fn umc_see_stop_calls_flag() -> bool {
 
 
 #[update]
-pub fn umc_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
         *state_snapshot_uc_data_candid_bytes = create_uc_data_candid_bytes();
@@ -647,10 +647,10 @@ pub fn umc_create_state_snapshot() -> u64/*len of the state_snapshot_candid_byte
 // chunk_size = 1mib
 
 
-#[export_name = "canister_query umc_download_state_snapshot"]
-pub fn umc_download_state_snapshot() {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+#[export_name = "canister_query cts_download_state_snapshot"]
+pub fn cts_download_state_snapshot() {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
@@ -663,9 +663,9 @@ pub fn umc_download_state_snapshot() {
 
 
 #[update]
-pub fn umc_clear_state_snapshot() {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_clear_state_snapshot() {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
         *state_snapshot_uc_data_candid_bytes = Vec::new();
@@ -673,9 +673,9 @@ pub fn umc_clear_state_snapshot() {
 }
 
 #[update]
-pub fn umc_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
         state_snapshot_uc_data_candid_bytes.append(&mut append_bytes);
@@ -683,9 +683,9 @@ pub fn umc_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
 }
 
 #[update]
-pub fn umc_re_store_uc_data_out_of_the_state_snapshot() {
-    if caller() != get(&UMC_ID) {
-        trap("Caller must be the umc for this method.")
+pub fn cts_re_store_uc_data_out_of_the_state_snapshot() {
+    if caller() != get(&CTS_ID) {
+        trap("Caller must be the CTS for this method.")
     }
     re_store_uc_data_candid_bytes(
         with_mut(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {

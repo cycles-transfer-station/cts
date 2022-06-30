@@ -14,3 +14,5 @@ scripts_dart/pubspec.lock
 scripts_dart/pubspec.yaml
 scripts_dart/rust_bls12381/
 
+
+files.sh

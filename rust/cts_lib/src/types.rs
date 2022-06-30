@@ -283,10 +283,16 @@ pub mod users_map_canister {
         pub cts_id: Principal
     }
 
+    #[derive(CandidType, Deserialize, Clone)]    
+    pub struct UMCUserData {
+        pub user_canister_id: UserCanisterId,
+        pub user_canister_latest_known_module_hash: [u8; 32],
+    }
+
     #[derive(CandidType,Deserialize)]
     pub enum PutNewUserError {
         CanisterIsFull,
-        FoundUser(UserCanisterId)
+        FoundUser(UMCUserData)
     }
 
     #[derive(CandidType, Deserialize, Clone)]
@@ -312,12 +318,14 @@ pub mod users_map_canister {
     
     pub type UMCUpgradeUCError = (UserCanisterId, UMCUpgradeUCCallErrorType, (u32, String));
 
-    #[derive(CandidType, Deserialize, Clone)]
+    #[derive(CandidType, Deserialize, Clone, Debug)]
     pub enum UMCUpgradeUCCallErrorType {
         StopCanisterCallError,
-        UpgradeCodeCallError,
+        UpgradeCodeCallError{wasm_module_hash: [u8; 32]},
         StartCanisterCallError
     }
+    
+
 
 
 

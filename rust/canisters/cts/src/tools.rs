@@ -17,6 +17,7 @@ use cts_lib::{
         Cycles,
         users_map_canister::{
             UsersMapCanisterInit,
+            UMCUserData,
             PutNewUserError as UsersMapCanisterPutNewUserError
         },
         UserId,
@@ -544,21 +545,21 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
 }
 
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
-pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canister_id: UserCanisterId) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
+pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, umc_user_data: UMCUserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
     
     for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
         let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
-        match call::<(UserId, UserCanisterId), (Result<(), UsersMapCanisterPutNewUserError>,)>(
+        match call::<(UserId, UMCUserData), (Result<(), UsersMapCanisterPutNewUserError>,)>(
             umc_id,
             "put_new_user",
-            (user_id, user_canister_id),
+            (user_id, umc_user_data.clone()),
         ).await {
             Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
-                Ok(_) => return Ok(umc_id),
+                Ok(()) => return Ok(umc_id),
                 Err(users_map_canister_put_new_user_error) => match users_map_canister_put_new_user_error {
                     UsersMapCanisterPutNewUserError::CanisterIsFull => continue,
                     _ => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error)) /*error can be that the user is already in the canister. the new_user function should have locked the user and checked for the user first before calling this function.  */
-                } 
+                }
             },
             Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, format!("{:?}", users_map_canister_put_new_user_call_fail))),
         }
@@ -571,13 +572,13 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, user_canist
         Err(create_new_users_map_canister_error) => return Err(PutNewUserIntoAUsersMapCanisterError::CreateNewUsersMapCanisterError(create_new_users_map_canister_error))
     };
     
-    match call::<(UserId, UserCanisterId), (Result<(), UsersMapCanisterPutNewUserError>,)>(
+    match call::<(UserId, UMCUserData), (Result<(), UsersMapCanisterPutNewUserError>,)>(
         umc_id,
         "put_new_user",
-        (user_id, user_canister_id),
+        (user_id, umc_user_data),
     ).await {
         Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
-            Ok(_) => return Ok(umc_id),
+            Ok(()) => return Ok(umc_id),
             Err(users_map_canister_put_new_user_error) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error))
         },
         Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, format!("{:?}", users_map_canister_put_new_user_call_fail))),
@@ -636,7 +637,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe { &*with(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { users_map_canister_code.module() as *const Vec<u8> }) },   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe{&*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> })},   // .unwrap bc we checked if .is_none() before
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
@@ -664,25 +665,31 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
 #[derive(CandidType, Deserialize)]
 pub enum FindUserInTheUsersMapCanistersError {
     UserNotFound,
-    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, String)>)
+    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, (u32, String))>)
 }
 
-pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UserCanisterId, UsersMapCanisterId), FindUserInTheUsersMapCanistersError> {
+pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UMCUserData, UsersMapCanisterId), FindUserInTheUsersMapCanistersError> {
     
-    let call_results: Vec<CallResult<(Option<UserCanisterId>,)>> = with(&USERS_MAP_CANISTERS, |umcs| { 
-        futures::future::join_all(umcs.iter().map(|umc| { call::<(UserId,), (Option<UserCanisterId>,)>(*umc/*copy*/, "find_user", (user_id,)) }))
-    }).await;
+    let call_results: Vec<CallResult<(Option<UMCUserData>,)>> = with(&USERS_MAP_CANISTERS, |umcs| { futures::future::join_all(
+        umcs.iter().map(|umc| { 
+            call::<(UserId,), (Option<UMCUserData>,)>(
+                *umc/*copy*/, 
+                "find_user", 
+                (user_id,)
+            )
+        })
+    )}).await;
     
-    let mut call_fails: Vec<(UsersMapCanisterId, String)> = Vec::new();
+    let mut call_fails: Vec<(UsersMapCanisterId, (u32, String))> = Vec::new();
     
-    for i in 0..call_results.len() {
+    for (i,call_result) in call_results.into_iter().enumerate() {
         let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
-        match &call_results[i] {
-            Ok((optional_user_canister_id,)) => match optional_user_canister_id {
-                Some(user_canister_id) => return Ok((*user_canister_id/*copy*/, umc_id)),
+        match call_result {
+            Ok((optional_umc_user_data,)) => match optional_umc_user_data {
+                Some(umc_user_data) => return Ok((umc_user_data, umc_id)),
                 None => continue
             },
-            Err(find_user_call_error) => call_fails.push((umc_id, format!("{:?}", find_user_call_error)))
+            Err(find_user_call_error) => call_fails.push((umc_id, (find_user_call_error.0 as u32, find_user_call_error.1)))
         }
     }
     
@@ -690,26 +697,7 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(Us
         0 => Err(FindUserInTheUsersMapCanistersError::UserNotFound),
         _ => Err(FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(call_fails))
     }
-        
-    
-    /*
-    for i in 0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) {
-        let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
-        match call::<(UserId,), (Option<UserCanisterId>,)>(
-            umc_id,
-            "find_user",
-            (user_id,)
-        ).await {
-            Ok((optional_user_canister_id,)) => match optional_user_canister_id {
-                Some(user_canister_id) => return Ok((user_canister_id, umc_id)),
-                None => continue
-            },
-            Err(find_user_call_error) => return Err(FindUserInTheUsersMapCanistersError::UsersMapCanisterFindUserCallFail(umc_id, format!("{:?}", find_user_call_error))) 
-        }
-    }
-    
-    Err(FindUserInTheUsersMapCanistersError::UserNotFound)
-    */
+
 }
 
 

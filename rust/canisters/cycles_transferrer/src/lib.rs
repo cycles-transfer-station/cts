@@ -191,7 +191,7 @@ pub async fn cts_user_transfer_cycles() {
     }
     
     if get(&STOP_CALLS) == true {
-        trap("get(&STOP_CALLS) == true")
+        trap("Maintenance. try later.")
     }
     
     if ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| octs.get()) >= MAX_ONGOING_CYCLES_TRANSFERS {

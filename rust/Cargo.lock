@@ -1101,6 +1101,7 @@ dependencies = [
  "cts_lib",
  "futures",
  "serde",
+ "serde_bytes",
 ]
 
 [[package]]

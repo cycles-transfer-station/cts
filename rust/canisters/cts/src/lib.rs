@@ -78,6 +78,7 @@ use cts_lib::{
             CyclesTransferrerUserTransferCyclesCallbackQuest
         },
         users_map_canister::{
+            UMCUserData,
             UMCUpgradeUCError,
             UMCUpgradeUCCallErrorType
         },
@@ -484,11 +485,11 @@ pub async fn cycles_transfer() {
     let timestamp_nanos: u64 = time(); // before the first await
 
     let user_canister_id: UserCanisterId = match find_user_in_the_users_map_canisters(user_id).await {
-        Ok((user_canister_id, users_map_canister_id)) => user_canister_id,
+        Ok((umc_user_data, users_map_canister_id)) => umc_user_data.user_canister_id,
         Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
             FindUserInTheUsersMapCanistersError::UserNotFound => {
                 msg_cycles_accept128(CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE); // test that the cycles are taken on the reject.
-                reject(&format!("User for the top up not found. {} cycles taken for a nonexistentuserfee", CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE));
+                reject(&format!("User for the top up not found. {} cycles taken for a cycles_transfer-into-a-nonexistentuser-fee", CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE));
                 return;
             },
             FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
@@ -638,7 +639,7 @@ impl NewUserData {
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserMidCallError{
-    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, String)>),
+    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, (u32, String))>),
     PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
     CreateUserCanisterIcpTransferError(IcpTransferError),
     CreateUserCanisterIcpTransferCallError(String),
@@ -795,7 +796,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             
         },
         
-        Some(nud) => nud//.clone()        
+        Some(nud) => nud        
         
     };
 
@@ -804,10 +805,10 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         // check in the list of the users-whos cycles-balance is save but without a user-canister 
         
         match find_user_in_the_users_map_canisters(user_id).await {
-            Ok((user_canister_id, users_map_canister_id)) => {
+            Ok((umc_user_data, users_map_canister_id)) => {
                 // take a fee for this?
                 with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
-                return Err(NewUserError::FoundUserCanister(user_canister_id));
+                return Err(NewUserError::FoundUserCanister(umc_user_data.user_canister_id));
             },
             Err(find_user_error) => match find_user_error {
                 FindUserInTheUsersMapCanistersError::UserNotFound => {
@@ -897,10 +898,17 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         new_user_data.user_canister = Some(user_canister);
         new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
-
+        
+        
     if new_user_data.users_map_canister.is_none() {
         
-        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(user_id, *new_user_data.user_canister.as_ref().unwrap()).await {
+        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(
+            user_id, 
+            UMCUserData{
+                user_canister_id: *new_user_data.user_canister.as_ref().unwrap(),
+                user_canister_latest_known_module_hash: [0u8; 32] // 0s cause we are putting the user_canister_id onto the users_map_canister before install_code on the user_canister, cause we install_code with the umc_id in the user-canister-init-arg. we can update the umc_user_data on the umc after we install the code, but for now we will let it get upgraded
+            }
+        ).await {
             Ok(umcid) => umcid,
             Err(put_new_user_into_a_users_map_canister_error) => {
                 new_user_data.lock = false;
@@ -911,8 +919,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         
         new_user_data.users_map_canister = Some(users_map_canister_id);
     }
-
-
+    
     
     if new_user_data.collect_icp == false {
         match take_user_icp_ledger(&user_id, cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR - CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate)).await {
@@ -969,7 +976,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             (ManagementCanisterInstallCodeQuest {
                 mode : ManagementCanisterInstallCodeMode::install,
                 canister_id : new_user_data.user_canister.unwrap(),
-                wasm_module : unsafe { &*with(&USER_CANISTER_CODE, |ucc| { ucc.module() as *const Vec<u8> }) },
+                wasm_module : unsafe{&*with(&USER_CANISTER_CODE, |uc_code| { uc_code.module() as *const Vec<u8> })},
                 arg : &encode_one(&UserCanisterInit{ 
                     cts_id: id(), 
                     user_id: user_id,
@@ -1075,8 +1082,6 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
         }
     }
     
-    
-
 
 
     with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
@@ -1118,7 +1123,7 @@ pub async fn find_user_canister() -> Result<UserCanisterId, FindUserCanisterErro
     }
     
     match find_user_in_the_users_map_canisters(user_id).await {
-        Ok((user_canister_id, _users_map_canister_id)) => Ok(user_canister_id),
+        Ok((umc_user_data, _users_map_canister_id)) => Ok(umc_user_data.user_canister_id),
         Err(e) => Err(FindUserCanisterError::FindUserInTheUsersMapCanistersError(e))
     }
     
@@ -1268,15 +1273,15 @@ async fn do_cts_user_transfer_cycles_callback(cts_user_transfer_cycles_callback_
             Err(cts_user_transfer_cycles_callback_error) => match cts_user_transfer_cycles_callback_error {
                 CTSUserTransferCyclesCallbackError::WrongUserId => {
                     match find_user_in_the_users_map_canisters(cts_user_transfer_cycles_callback_quest.user_id).await {
-                        Ok((found_user_canister_id, _users_map_canister_id)) => {
-                            if found_user_canister_id == user_canister_id {
+                        Ok((found_umc_user_data, _users_map_canister_id)) => {
+                            if found_umc_user_data.user_canister_id == user_canister_id {
                                 // :log and re-try in this cts-canister
                                 with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
                                 return;
                             } else {
                                 // call the new-found_user_canister_id
                                 match call::<(&CTSUserTransferCyclesCallbackQuest,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
-                                    found_user_canister_id,
+                                    found_umc_user_data.user_canister_id,
                                     "cts_user_transfer_cycles_callback",
                                     (&cts_user_transfer_cycles_callback_quest,)
                                 ).await {
@@ -1284,13 +1289,13 @@ async fn do_cts_user_transfer_cycles_callback(cts_user_transfer_cycles_callback_
                                         Ok(()) => (),
                                         Err(cts_user_transfer_cycles_callback_error) => {
                                             // :log and re-try in this cts-canister
-                                            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
                                             return;
                                         }
                                     },
                                     Err(cts_user_transfer_cycles_callback_call_error) => {
                                         // :log and re-try in this cts-canister
-                                        with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackCallError((cts_user_transfer_cycles_callback_call_error.0 as u32, cts_user_transfer_cycles_callback_call_error.1)), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                        with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackCallError((cts_user_transfer_cycles_callback_call_error.0 as u32, cts_user_transfer_cycles_callback_call_error.1)), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
                                         return;
                                     }
                                 }
@@ -1442,7 +1447,7 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanist
         } else {
             with(&USERS_MAP_CANISTERS, |umcs| { umcs.clone() })
         }
-    };    
+    };     
     
     let sponses: Vec<Result<(), ControllerUpgradeUMCError>> = futures::future::join_all(
         upgrade_umcs.iter().map(|umc_id| {
@@ -1465,7 +1470,7 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanist
                     &encode_one(&ManagementCanisterInstallCodeQuest{
                         mode : ManagementCanisterInstallCodeMode::upgrade,
                         canister_id : *umc_id/*copy*/,
-                        wasm_module : unsafe { &*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> }) },
+                        wasm_module : unsafe {&*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> })},
                         arg : &post_upgrade_arg,
                     }).unwrap(),
                     0
@@ -1560,7 +1565,7 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<UsersMapC
                 match call::<(&CanisterCode,), ()>(
                     *call_umc,
                     "cts_put_user_canister_code",
-                    (unsafe { &*with(&USER_CANISTER_CODE, |uc_code| { uc_code as *const CanisterCode }) },)
+                    (unsafe{&*with(&USER_CANISTER_CODE, |uc_code| { uc_code as *const CanisterCode })},)
                 ).await {
                     Ok(_) => {},
                     Err(call_error) => {
@@ -1604,8 +1609,8 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: UsersMapCanisterId, opt_upgrad
     
     match call::<(Option<Vec<UserCanisterId>>, Vec<u8>/*post-upgrade-arg*/), (Vec<UMCUpgradeUCError>,)>(
         umc,
-        "cts_upgrade_ucs",
-        (None, post_upgrade_arg)
+        "cts_upgrade_ucs_chunk",
+        (opt_upgrade_ucs, post_upgrade_arg)
     ).await {
         Ok((uc_upgrade_fails,)) => Ok(uc_upgrade_fails),
         Err(call_error) => Err(ControllerUpgradeUCSOnAUMCError::CTSUpgradeUCSCallError((call_error.0 as u32, call_error.1)))
@@ -1764,7 +1769,7 @@ pub enum ControllerUpgradeCTCCallErrorType {
 
 // we upgrade the ctcs one at a time because if one of them takes too long to stop, we dont want to wait for it to come back, we will stop_calls, uninstall, and reinstall
 #[update]
-pub async fn controller_upgrade_ctcs(upgrade_ctc: Principal, post_upgrade_arg: Vec<u8>) -> Result<(), ControllerUpgradeCTCError> {
+pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Vec<u8>) -> Result<(), ControllerUpgradeCTCError> {
     if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
         trap("Caller must be a controller for this method.")
     }
@@ -1777,7 +1782,6 @@ pub async fn controller_upgrade_ctcs(upgrade_ctc: Principal, post_upgrade_arg: V
         trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", upgrade_ctc));
     }
        
-
     match call::<(CanisterIdRecord,), ()>(
         MANAGEMENT_CANISTER_ID,
         "stop_canister",
@@ -1799,7 +1803,7 @@ pub async fn controller_upgrade_ctcs(upgrade_ctc: Principal, post_upgrade_arg: V
         &encode_one(&ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::upgrade,
             canister_id : upgrade_ctc,
-            wasm_module : unsafe { &*with(&CYCLES_TRANSFERRER_CANISTER_CODE, |ctc_code| { ctc_code.module() as *const Vec<u8> }) },
+            wasm_module : unsafe{&*with(&CYCLES_TRANSFERRER_CANISTER_CODE, |ctc_code| { ctc_code.module() as *const Vec<u8> })},
             arg : &post_upgrade_arg,
         }).unwrap(),
         0
