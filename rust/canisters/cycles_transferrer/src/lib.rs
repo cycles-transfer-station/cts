@@ -53,7 +53,7 @@ use cts_lib::{
         cycles_transferrer::{
             CyclesTransferRefund,
             ReTryCyclesTransferrerUserTransferCyclesCallback,
-            CyclesTransferrerInit,
+            CyclesTransferrerCanisterInit,
             CTSUserTransferCyclesQuest,
             CTSUserTransferCyclesError,
         }
@@ -85,7 +85,7 @@ use std::cell::{Cell, RefCell};
 
 
 
-pub const MAX_ONGOING_CYCLES_TRANSFERS: usize = 1000;
+pub const MAX_ONGOING_CYCLES_TRANSFERS: u64 = 1000;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
@@ -93,7 +93,7 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 thread_local! {
     static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static ONGOING_CYCLES_TRANSFERS_COUNT: Cell<usize> = Cell::new(0);
+    static ONGOING_CYCLES_TRANSFERS_COUNT: Cell<u64> = Cell::new(0);
     static RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>> = RefCell::new(Vec::new()); // (cycles_transferrer_user_transfer_cycles_call_error, CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)
 
     // not save in a CTCData
@@ -104,14 +104,14 @@ thread_local! {
 
 
 #[init]
-fn init(cycles_transferrer_init: CyclesTransferrerInit) {
+fn init(cycles_transferrer_init: CyclesTransferrerCanisterInit) {
     CTS_ID.with(|cts_id| { cts_id.set(cycles_transferrer_init.cts_id); });
 }
 
 #[derive(CandidType, Deserialize)]
 struct CTCData {
     cts_id: Principal,
-    ongoing_cycles_transfers_count: usize,
+    ongoing_cycles_transfers_count: u64,
     re_try_cycles_transferrer_user_transfer_cycles_callbacks: Vec<((u32, String), CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)>
 }
 
@@ -182,7 +182,7 @@ fn cts_id() -> Principal {
 // ---------------------------------------------------
 
 
-// (cts_q: CTSUserTransferCyclesQuest) -> Result<(), CTSUserTransferCyclesError>
+// (cts_q: CTSUserTransferCyclesQuest) -> Result<(), CTSUserTransferCyclesError> 
 #[update(manual_reply = true)]
 pub async fn cts_user_transfer_cycles() {
     
@@ -195,7 +195,8 @@ pub async fn cts_user_transfer_cycles() {
     }
     
     if ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| octs.get()) >= MAX_ONGOING_CYCLES_TRANSFERS {
-        reply::<(Result<(), CTSUserTransferCyclesError>,)>((Err(CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(MAX_ONGOING_CYCLES_TRANSFERS)),));
+        //trap("Max Ongoing Cycles-Transfers in this cycles_transferrer");
+        reply::<(Result<(), CTSUserTransferCyclesError>,)>((Err(CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(get(&ONGOING_CYCLES_TRANSFERS_COUNT))),));    
         return;
     }
     
@@ -212,7 +213,7 @@ pub async fn cts_user_transfer_cycles() {
         },
     };
     
-    // make sure to cept the cts cycles for the call after any possibility of a reply() and return; make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the cts gets the cycles back 
+    // make sure to cept the cts cycles for the call after any possibility of a reply(Err()) and return; make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the cts gets the cycles back 
     // cept the cts cycles before the cycles_transfer call
     let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
     if cycles != cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles {

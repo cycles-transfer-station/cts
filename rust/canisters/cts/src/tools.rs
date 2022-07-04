@@ -155,6 +155,19 @@ pub fn main_cts_icp_id() -> IcpId {  // do once
 
 
 
+pub fn put_new_canister(put_new_canister: Principal) -> Result<(), ()> {
+    with_mut(&NEW_CANISTERS, |new_canisters| { 
+        if new_canisters.contains(&put_new_canister) {
+            return Err(());
+        }
+        new_canisters.push_back(put_new_canister);  
+        Ok(())
+    })
+}
+
+
+
+
 
 
 
@@ -362,7 +375,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
         match set_canister(new_canister, optional_canister_settings.clone(), with_cycles).await {
             Ok(canister_id) => return Ok(canister_id),
             Err(set_canister_error) => {
-                with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_canister); });
+                put_new_canister(new_canister);
                 // continue
             }
         }
@@ -626,7 +639,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     
     // install code
     if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.module().len() == 0 ) {
-        with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
+        put_new_canister(new_users_map_canister_id);
         CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
@@ -637,7 +650,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe{&*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> })},   // .unwrap bc we checked if .is_none() before
+            wasm_module : unsafe{&*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> })},
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
@@ -649,7 +662,7 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
             Ok(new_users_map_canister_id)    
         },
         Err(install_code_call_error) => {
-            with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.push_back(new_users_map_canister_id); });
+            put_new_canister(new_users_map_canister_id);
             CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
             return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }

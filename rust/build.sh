@@ -1,4 +1,10 @@
 
+ls
+
+rm -rf target/
+
+ls
+
 cargo build --target wasm32-unknown-unknown --release
 
 ic-cdk-optimizer target/wasm32-unknown-unknown/release/cts.wasm -o target/wasm32-unknown-unknown/release/cts-o.wasm

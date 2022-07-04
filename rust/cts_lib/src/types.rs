@@ -221,7 +221,7 @@ pub mod cycles_transferrer {
     pub type CyclesTransferRefund = Cycles;
     
     #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransferrerInit {
+    pub struct CyclesTransferrerCanisterInit {
         pub cts_id: Principal
     }
     
@@ -233,7 +233,7 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]
     pub enum CTSUserTransferCyclesError {
-        MaxOngoingCyclesTransfers(usize),
+        MaxOngoingCyclesTransfers(u64),
         CyclesTransferQuestCandidCodeError(String)
     }
     
@@ -258,7 +258,8 @@ pub mod cts {
         MaxReTryCtsUserTransferCyclesCallbacks(usize),
         NoCyclesTransferrerCanistersFound,
         CTSUserTransferCyclesError(cycles_transferrer::CTSUserTransferCyclesError),
-        CTSUserTransferCyclesCallError(String)
+        CTSUserTransferCyclesCallError(String),
+        CTSUserTransferCyclesUnknownError,
     }
     
     #[derive(CandidType, Deserialize, Clone)]
