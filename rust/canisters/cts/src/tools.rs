@@ -677,11 +677,10 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
 
 #[derive(CandidType, Deserialize)]
 pub enum FindUserInTheUsersMapCanistersError {
-    UserNotFound,
     UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, (u32, String))>)
 }
 
-pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UMCUserData, UsersMapCanisterId), FindUserInTheUsersMapCanistersError> {
+pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<Option<(UMCUserData, UsersMapCanisterId)>, FindUserInTheUsersMapCanistersError> {
     
     let call_results: Vec<CallResult<(Option<UMCUserData>,)>> = with(&USERS_MAP_CANISTERS, |umcs| { futures::future::join_all(
         umcs.iter().map(|umc| { 
@@ -699,7 +698,7 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UM
         let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
         match call_result {
             Ok((optional_umc_user_data,)) => match optional_umc_user_data {
-                Some(umc_user_data) => return Ok((umc_user_data, umc_id)),
+                Some(umc_user_data) => return Ok(Some((umc_user_data, umc_id))),
                 None => continue
             },
             Err(find_user_call_error) => call_fails.push((umc_id, (find_user_call_error.0 as u32, find_user_call_error.1)))
@@ -707,7 +706,7 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<(UM
     }
     
     match call_fails.len() {
-        0 => Err(FindUserInTheUsersMapCanistersError::UserNotFound),
+        0 => Ok(None),
         _ => Err(FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(call_fails))
     }
 

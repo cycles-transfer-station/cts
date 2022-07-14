@@ -281,6 +281,7 @@ thread_local! {
     // not save in a CTSData
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static     USER_CANISTER_CACHE: RefCell<UserCanisterCache> = RefCell::new(UserCanisterCache::new());
 }
 
 
@@ -542,22 +543,27 @@ pub async fn cycles_transfer() {
     let original_caller: Principal = caller(); // before the first await
     let timestamp_nanos: u64 = time(); // before the first await
 
-    let user_canister_id: UserCanisterId = match find_user_in_the_users_map_canisters(user_id).await {
-        Ok((umc_user_data, users_map_canister_id)) => umc_user_data.user_canister_id,
-        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
-            FindUserInTheUsersMapCanistersError::UserNotFound => {
+
+    let user_canister_id: UserCanisterId = match find_user_canister_of_the_specific_user(user_id).await {
+        Ok(opt_user_canister_id) => match opt_user_canister_id {
+            Some(user_canister_id) => user_canister_id,
+            None => {
                 msg_cycles_accept128(CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE); // test that the cycles are taken on the reject.
                 reject(&format!("User for the top up not found. {} cycles taken for a cycles_transfer-into-a-nonexistentuser-fee", CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE));
-                return;
-            },
+                return;                        
+            }
+        }, 
+        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
             FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
                 reject(&format!("User lookup error. umc_call_errors: {:?}", umc_call_errors)); // reject not trap because we are after an await here
                 return;
             }
         }
+    
     };
     
-    // take a fee for the cycles_transfer_into_user? 
+    
+    // take a fee for the cycles_transfer_into_user? there is a minimum_cycles_transfer_into_user
     
     match call::<(CTSCyclesTransferIntoUser,), ()>(
         user_canister_id,
@@ -616,30 +622,30 @@ pub fn see_fees() -> Fees {
 
 
 #[derive(CandidType, Deserialize)]
-pub struct TopUpCyclesBalanceData {
+pub struct UserTopUpCyclesBalanceData {
     topup_cycles_transfer_memo: CyclesTransferMemo,
 }
 
 #[derive(CandidType, Deserialize)]
-pub struct TopUpIcpBalanceData {
+pub struct UserTopUpIcpBalanceData {
     topup_icp_id: IcpId
 }
 
 #[derive(CandidType, Deserialize)]
-pub struct TopUpBalanceData {
-    topup_cycles_balance: TopUpCyclesBalanceData, 
-    topup_icp_balance: TopUpIcpBalanceData,
+pub struct UserTopUpBalanceData {
+    user_topup_cycles_balance_data: UserTopUpCyclesBalanceData, 
+    user_topup_icp_balance_data: UserTopUpIcpBalanceData,
 }
 
 
 #[query]
-pub fn topup_balance() -> TopUpBalanceData {
+pub fn user_topup_balance_data() -> UserTopUpBalanceData {
     let user_id: Principal = caller();
-    TopUpBalanceData {
-        topup_cycles_balance: TopUpCyclesBalanceData {
+    UserTopUpBalanceData {
+        user_topup_cycles_balance_data: UserTopUpCyclesBalanceData {
             topup_cycles_transfer_memo: CyclesTransferMemo::Blob(user_cycles_balance_topup_memo_bytes(&user_id).to_vec())
         },
-        topup_icp_balance: TopUpIcpBalanceData {
+        user_topup_icp_balance_data: UserTopUpIcpBalanceData {
             topup_icp_id: cts_lib::tools::user_icp_id(&id(), &user_id)
         }
     }
@@ -854,23 +860,25 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     if new_user_data.look_if_user_is_in_the_users_map_canisters == false {
         // check in the list of the users-whos cycles-balance is save but without a user-canister 
         
-        match find_user_in_the_users_map_canisters(user_id).await {
-            Ok((umc_user_data, users_map_canister_id)) => {
-                // take a fee for this?
-                with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
-                return Err(NewUserError::FoundUserCanister(umc_user_data.user_canister_id));
+        match find_user_canister_of_the_specific_user(user_id).await {
+            Ok(opt_user_canister_id) => match opt_user_canister_id {
+                Some(user_canister_id) => {
+                    // take a fee for this?
+                    with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+                    return Err(NewUserError::FoundUserCanister(user_canister_id));
+                }, 
+                None => {
+                    new_user_data.look_if_user_is_in_the_users_map_canisters = true;
+                }
             },
-            Err(find_user_error) => match find_user_error {
-                FindUserInTheUsersMapCanistersError::UserNotFound => {
-                    new_user_data.look_if_user_is_in_the_users_map_canisters = true;                    
-                },
+            Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
                 FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
                     new_user_data.lock = false;
                     write_new_user_data(&user_id, new_user_data);
                     return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanistersFindUserCallFails(umc_call_errors)));
                 }
             }
-        };
+        }
         
     }
     
@@ -967,6 +975,7 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
             }
         };
         
+        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(*new_user_data.user_canister.as_ref().unwrap())); });
         new_user_data.users_map_canister = Some(users_map_canister_id);
     }
     
@@ -1151,12 +1160,58 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
 
 
 
+mod user_canister_cache {
+    use super::{UserId, UserCanisterId, time};
+    use std::collections::{HashMap};
+    
+    // private
+    #[derive(Clone, Copy)]
+    struct FindUserSponseCacheData {
+        timestamp_nanos: u64,
+        opt_user_canister_id: Option<UserCanisterId>
+    }
 
 
 
+    // cacha for this. with a max users->user-canisters
+    // on a new user, put/update insert the new user into this cache 
+    pub struct UserCanisterCache {
+        hashmap: HashMap<UserId, FindUserSponseCacheData>    
+    }
+    impl UserCanisterCache {
+        
+        pub const MAX_SIZE: usize = 1400;
+        
+        pub fn new() -> Self {
+            Self {
+                hashmap: HashMap::new()
+            }
+        }
+        
+        pub fn put(&mut self, user_id: UserId, opt_user_canister_id: Option<UserCanisterId>) {
+            if self.hashmap.len() >= Self::MAX_SIZE {
+                self.hashmap.remove(
+                    &((*(self.hashmap.iter().min_by_key(
+                        |(user_id, find_user_sponse_cache_data)| {
+                            find_user_sponse_cache_data.timestamp_nanos
+                        }
+                    ).unwrap().0)).clone())
+                );
+            }
+            self.hashmap.insert(user_id, FindUserSponseCacheData{ opt_user_canister_id, timestamp_nanos: time() });
+        }
+        
+        pub fn check(&self, user_id: UserId) -> Option<Option<UserCanisterId>> {
+            match self.hashmap.get(&user_id) {
+                None => None,
+                Some(find_user_sponse_cache_data) => Some(find_user_sponse_cache_data.opt_user_canister_id)
+            }
+        }
+    }
 
+}
 
-
+use user_canister_cache::UserCanisterCache;
 
 
 #[derive(CandidType, Deserialize)]
@@ -1166,7 +1221,7 @@ pub enum FindUserCanisterError {
 }
 
 #[update]
-pub async fn find_user_canister() -> Result<UserCanisterId, FindUserCanisterError> {
+pub async fn find_user_canister() -> Result<Option<UserCanisterId>, FindUserCanisterError> {
     if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
     
     let user_id: UserId = caller();
@@ -1175,15 +1230,30 @@ pub async fn find_user_canister() -> Result<UserCanisterId, FindUserCanisterErro
         return Err(FindUserCanisterError::UserIsInTheNewUsersMap);
     }
     
-    match find_user_in_the_users_map_canisters(user_id).await {
-        Ok((umc_user_data, _users_map_canister_id)) => Ok(umc_user_data.user_canister_id),
-        Err(e) => Err(FindUserCanisterError::FindUserInTheUsersMapCanistersError(e))
-    }
-    
+    find_user_canister_of_the_specific_user(user_id).await.map_err(
+        |find_user_in_the_users_map_canisters_error| { 
+            FindUserCanisterError::FindUserInTheUsersMapCanistersError(find_user_in_the_users_map_canisters_error) 
+        }
+    )
+
 }
 
 
 
+async fn find_user_canister_of_the_specific_user(user_id: UserId) -> Result<Option<UserCanisterId>, FindUserInTheUsersMapCanistersError> {
+    if let Some(opt_user_canister_id) = with(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.check(user_id) }) {
+        return Ok(opt_user_canister_id);
+    } 
+    find_user_in_the_users_map_canisters(user_id).await.map(
+        |opt_umc_user_data_and_umc_id| {
+            let opt_user_canister_id: Option<UserCanisterId> = opt_umc_user_data_and_umc_id.map(|(umc_user_data, _umc_id)| { umc_user_data.user_canister_id });
+            with_mut(&USER_CANISTER_CACHE, |uc_cache| {
+                uc_cache.put(user_id, opt_user_canister_id);
+            });    
+            opt_user_canister_id
+        }
+    )   
+} 
 
 
 
@@ -1371,42 +1441,45 @@ async fn do_cts_user_transfer_cycles_callback(cts_user_transfer_cycles_callback_
             Err(cts_user_transfer_cycles_callback_error) => match cts_user_transfer_cycles_callback_error {
                 CTSUserTransferCyclesCallbackError::WrongUserId => {
                     match find_user_in_the_users_map_canisters(cts_user_transfer_cycles_callback_quest.user_id).await {
-                        Ok((found_umc_user_data, _users_map_canister_id)) => {
-                            if found_umc_user_data.user_canister_id == user_canister_id {
-                                // :log and re-try in this cts-canister
-                                with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
-                                return;
-                            } else {
-                                // call the new-found_user_canister_id
-                                match call::<(&CTSUserTransferCyclesCallbackQuest,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
-                                    found_umc_user_data.user_canister_id,
-                                    "cts_user_transfer_cycles_callback",
-                                    (&cts_user_transfer_cycles_callback_quest,)
-                                ).await {
-                                    Ok((cts_user_transfer_cycles_callback_sponse,)) => match cts_user_transfer_cycles_callback_sponse {
-                                        Ok(()) => { 
-                                            set(&CYCLES_TRANSFERS_COUNT, get(&CYCLES_TRANSFERS_COUNT)+1); 
+                        Ok(opt_umc_user_data_and_umc_id) => match opt_umc_user_data_and_umc_id {
+                            Some((found_umc_user_data, _users_map_canister_id)) => {
+                                if found_umc_user_data.user_canister_id == user_canister_id {
+                                    // :log and re-try in this cts-canister
+                                    with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
+                                    return;
+                                } else {
+                                    // call the new-found_user_canister_id
+                                    match call::<(&CTSUserTransferCyclesCallbackQuest,), (Result<(), CTSUserTransferCyclesCallbackError>,)>(
+                                        found_umc_user_data.user_canister_id,
+                                        "cts_user_transfer_cycles_callback",
+                                        (&cts_user_transfer_cycles_callback_quest,)
+                                    ).await {
+                                        Ok((cts_user_transfer_cycles_callback_sponse,)) => match cts_user_transfer_cycles_callback_sponse {
+                                            Ok(()) => { 
+                                                set(&CYCLES_TRANSFERS_COUNT, get(&CYCLES_TRANSFERS_COUNT)+1); 
+                                            },
+                                            Err(cts_user_transfer_cycles_callback_error) => {
+                                                // :log and re-try in this cts-canister
+                                                with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
+                                                return;
+                                            }
                                         },
-                                        Err(cts_user_transfer_cycles_callback_error) => {
+                                        Err(cts_user_transfer_cycles_callback_call_error) => {
                                             // :log and re-try in this cts-canister
-                                            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
+                                            with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackCallError((cts_user_transfer_cycles_callback_call_error.0 as u32, cts_user_transfer_cycles_callback_call_error.1)), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
                                             return;
                                         }
-                                    },
-                                    Err(cts_user_transfer_cycles_callback_call_error) => {
-                                        // :log and re-try in this cts-canister
-                                        with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackCallError((cts_user_transfer_cycles_callback_call_error.0 as u32, cts_user_transfer_cycles_callback_call_error.1)), cts_user_transfer_cycles_callback_quest, found_umc_user_data.user_canister_id,)); });
-                                        return;
                                     }
-                                }
-                            }
-                        },
-                        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
-                            FindUserInTheUsersMapCanistersError::UserNotFound => {
+                                }                                
+                            },
+                            None => {
                                 // check the save users-cycles-balance for the (time/)space if a user-canister runs out of time. if not there either:
                                 // do nothing let it drop
                                 return;
-                            },
+                            }
+
+                        },
+                        Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
                             FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
                                 // :log and re-try in this cts-canister
                                 with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.push((ReTryCTSUserTransferCyclesCallbackErrorKind::CTSUserTransferCyclesCallbackError(cts_user_transfer_cycles_callback_error), cts_user_transfer_cycles_callback_quest, user_canister_id)); });
