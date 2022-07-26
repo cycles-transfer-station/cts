@@ -8,6 +8,8 @@ use cts_lib::{
         api::{
             trap,
             caller,
+            canister_balance128,
+            performance_counter,
             call::{
                 reply,
                 arg_data,
@@ -75,6 +77,7 @@ use cts_lib::{
     consts::{
         WASM_PAGE_SIZE_BYTES,
         MANAGEMENT_CANISTER_ID,
+        NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES
         
     },
     global_allocator_counter::get_allocated_bytes_count

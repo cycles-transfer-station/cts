@@ -1,5 +1,13 @@
 // this canister can safe stop before upgrade
 
+
+// use the heartbeat/timer for the check of the per_month_storage cost and check the cts-fuel in each call. if either one is 0, send the cycles-balance to the cts to save for the 10 years (calculate that the user pays for these 10 years in the first create_user_contract payment.)and delete 
+
+// once the cts fuel is 0, send the cycles balance and the user_id to the cts for the safekeep. and block user calls (stop-calls flag?). the user can topup the user-contract-ctsfuel through the CTS-MAIN.
+// when the storage/contract-duration is done, send the cycles balance and the user_id to the cts for the safekeep. and transfer the user-canister-cycles to the cts-main and delete the user-canister.
+
+// let the user dowload the cycles-transfers (of the specific-logs-ids?)  with an autograph by the cts-main. charge for the cts-fuel. autograph by the cts-main is given when the user-contract is create that this user-contract is a part of the CTS.
+
 use std::{
     cell::{RefCell,Cell},
     collections::HashMap,
@@ -12,6 +20,8 @@ use cts_lib::{
             time,
             trap,
             caller,
+            canister_balance128,
+            performance_counter,
             call::{
                 msg_cycles_accept128,
                 msg_cycles_available128,
@@ -83,7 +93,11 @@ use cts_lib::{
         }
     },
     consts::{
-        WASM_PAGE_SIZE_BYTES
+        KiB,
+        MiB,
+        GiB,
+        WASM_PAGE_SIZE_BYTES,
+        NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES
     },
     tools::{
         localkey::{
@@ -106,13 +120,14 @@ use cts_lib::{
 
 
 // cycles transfer purchases that are complete dont need an id.
+// but i want an id so that the user can delete a record.
 
 #[derive(CandidType, Deserialize, Clone)]
 struct UserData {
 
     cycles_balance: Cycles,
-    cycles_transfers_in: Vec<CTSCyclesTransferIntoUser>,
-    cycles_transfers_out: Vec<CyclesTransferPurchaseLog>,
+    cycles_transfers_in: Vec<(u64,CTSCyclesTransferIntoUser)>,
+    cycles_transfers_out: Vec<(u64,CyclesTransferPurchaseLog)>,
     icp_transfers_in: Vec<IcpBlockHeight>,
     icp_transfers_out: Vec<IcpBlockHeight>,
     
@@ -140,8 +155,8 @@ pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate th
 pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = /*TEST-VALUE*/1; // 100_000_000_000
 
 
-pub const CYCLES_BANK_COST: Cycles = 1; // 10_000_000_000_000;
-pub const CYCLES_BANK_UPGRADE_COST: Cycles = 5; // 5_000_000_000_000;
+//pub const CYCLES_BANK_COST: Cycles = ; // 10_000_000_000_000;
+//pub const CYCLES_BANK_UPGRADE_COST: Cycles = ; // 5_000_000_000_000;
 
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
@@ -161,12 +176,17 @@ thread_local! {
     static UMC_ID:      Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USER_ID:     Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static USER_ICP_ID: Cell<Option<IcpId>>                     = Cell::new(None); // option cause no way to const an IcpId while checking the crc32 checksum
-    static USER_CANISTER_MAX_MEMORY_SIZE: Cell<u64>             = Cell::new(1024*1024*100); // starting at a 100mb-limit 
     static USER_CANISTER_CREATION_TIMESTAMP_NANOS: Cell<u64>    = Cell::new(0); // is with the set in the canister_init
+    
+    static USER_CANISTER_STORAGE_SIZE:                                    Cell<u64>               = Cell::new(0); // is with the set in the canister_init // in the bytes // starting at a 100mb-limit 10T-CYCLES   // half is usable for the transfer-logs. half is for the user_canister-upgrades.
+    static USER_CANISTER_LIFETIME_TERMINATION_TIMESTAMP_SECONDS:          Cell<u64>               = Cell::new(0); // is with the set in the canister_init
+    static USER_CANISTER_CTSFUEL_BALANCE:                            Cell<CTSFuel>               = Cell::new(0); // fuel topup possible.
+    static USER_CANISTER_CTSFUEL_AUTO_TOPUP_PER_MONTH:               Cell<CTSFuel>               = Cell::new(0);   
+    static USER_CANISTER_CTSFUEL_AUTO_TOPUP_PER_MONTH_LAST_CHARGE_TIMESTAMP_SECONDS: Cell<u64>   = Cell::new(0);
     
     static USER_DATA: RefCell<UserData>                         = RefCell::new(UserData::new());    
     static CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER: Cell<u64>   = Cell::new(0);
-    static ONGOING_USER_TRANSFER_CYCLES: RefCell<HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>> = RefCell::new(HashMap::new());
+    static CYCLES_TRANSFERS_IN_ID_COUNTER: Cell<u64>            = Cell::new(0);
 
     // not save in a UCData
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
@@ -177,32 +197,37 @@ thread_local! {
 
 
 #[init]
-fn init(user_canister_init: UserCanisterInit) {
+fn canister_init(user_canister_init: UserCanisterInit) {
+
     CTS_ID.with(|cts_id| { cts_id.set(user_canister_init.cts_id); });
     UMC_ID.with(|umc_id| { umc_id.set(user_canister_init.umc_id); });
     USER_ID.with(|user_id| { user_id.set(user_canister_init.user_id); });
     USER_ICP_ID.with(|user_icp_id| { user_icp_id.set(Some(cts_lib::tools::user_icp_id(&user_canister_init.cts_id, &user_canister_init.user_id))); });
     USER_CANISTER_CREATION_TIMESTAMP_NANOS.with(|user_canister_creation_timestamp_nanos| { user_canister_creation_timestamp_nanos.set(time()); });
+
+    
 }
 
 
 
-/*
+
+
+
+
 #[derive(CandidType, Deserialize)]
 struct OldUCData {
     cts_id: Principal,
     umc_id: UsersMapCanisterId,
     user_id: UserId,
     user_icp_id: Option<IcpId>,
-    user_canister_max_memory_size: usize,
+    user_canister_max_memory_size: u64,
     user_canister_creation_timestamp_nanos: u64,
-    user_data: OldUserData,
+    user_data: UserData,
     cycles_transfer_purchase_log_id_counter: u64,
-    ongoing_user_transfer_cycles: Vec<(CyclesTransferPurchaseLogId, OldCyclesTransferPurchaseLog)>
+    ongoing_user_transfer_cycles: Vec<(CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog)>
 }
 
-
-
+/*
 #[derive(CandidType, Deserialize, Clone)]
 struct OldUserData {
 
@@ -264,7 +289,7 @@ struct UCData {
     user_canister_creation_timestamp_nanos: u64,
     user_data: UserData,
     cycles_transfer_purchase_log_id_counter: u64,
-    ongoing_user_transfer_cycles: Vec<(CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog)>
+    cycles_transfers_in_id_counter: u64,
 }
 
 
@@ -279,7 +304,7 @@ fn create_uc_data_candid_bytes() -> Vec<u8> {
             user_canister_creation_timestamp_nanos:     get(&USER_CANISTER_CREATION_TIMESTAMP_NANOS),
             user_data: with(&USER_DATA, |user_data| { (*user_data).clone() }),
             cycles_transfer_purchase_log_id_counter:    get(&CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER),
-            ongoing_user_transfer_cycles: with(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { (*ongoing_user_transfer_cycles).clone().into_iter().collect::<Vec<(CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog)>>() }),
+            cycles_transfers_in_id_counter:             get(&CYCLES_TRANSFERS_IN_ID_COUNTER),
         }
     ).unwrap();
     uc_data_candid_bytes.shrink_to_fit();
@@ -329,9 +354,7 @@ fn re_store_uc_data_candid_bytes(uc_data_candid_bytes: Vec<u8>) {
     set(&USER_CANISTER_CREATION_TIMESTAMP_NANOS, uc_data.user_canister_creation_timestamp_nanos);
     with_mut(&USER_DATA, |user_data| { *user_data = uc_data.user_data; });
     set(&CYCLES_TRANSFER_PURCHASE_LOG_ID_COUNTER, uc_data.cycles_transfer_purchase_log_id_counter);
-    with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { 
-        *ongoing_user_transfer_cycles = uc_data.ongoing_user_transfer_cycles.into_iter().collect::<HashMap<CyclesTransferPurchaseLogId, CyclesTransferPurchaseLog>>(); 
-    });
+    set(&CYCLES_TRANSFERS_IN_ID_COUNTER, uc_data.cycles_transfers_in_id_counter);
 }
 
 
@@ -399,7 +422,20 @@ fn get_new_cycles_transfer_purchase_log_id() -> u64 {
         counter.get()
     })
 }
+
+fn get_new_cycles_transfer_in_id() -> u64 {
+    CYCLES_TRANSFERS_IN_ID_COUNTER.with(|counter| {
+        counter.set(counter.get() + 1);
+        counter.get()
+    })
+}
     
+
+
+
+
+
+
 
 
 
@@ -476,7 +512,7 @@ pub fn cts_cycles_transfer_into_user() {
     if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
     
     if is_canister_full() {
-        reject("user is full");
+        reject("user storage is full.");
         return;
     }
     
@@ -484,7 +520,7 @@ pub fn cts_cycles_transfer_into_user() {
     
     with_mut(&USER_DATA, |user_data| {
         user_data.cycles_balance += cycles_transfer_into_user.cycles;
-        user_data.cycles_transfers_in.push(cycles_transfer_into_user);
+        user_data.cycles_transfers_in.push((get_new_cycles_transfer_in_id(), cycles_transfer_into_user));
     });
     
     reply::<()>(());
@@ -505,7 +541,7 @@ pub fn user_download_cycles_transfers_in() {
     
     with(&USER_DATA, |user_data| {
         let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
-        reply::<(Option<&[CTSCyclesTransferIntoUser]>,)>((user_data.cycles_transfers_in.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[(u64,CTSCyclesTransferIntoUser)]>,)>((user_data.cycles_transfers_in.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -537,7 +573,6 @@ pub enum UserTransferCyclesError {
     InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
     CheckUserCyclesBalanceError(UserCyclesBalanceError),
     BalanceTooLow { user_cycles_balance: Cycles, cycles_transfer_fee: Cycles },
-    //CyclesTransferCallError { call_error: String, paid_fee: bool, cycles_accepted: Cycles }, // fee_paid: u128 ??
     UCUserTransferCyclesError(UCUserTransferCyclesError),
     UCUserTransferCyclesCallError(String)
 }
@@ -577,13 +612,13 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
     }
     
 
-    // take the user-cycles before the transfer, and refund in the callback 
-    with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance -= q.cycles + CYCLES_TRANSFER_FEE;
-    });
     let cycles_transfer_purchase_log_id: u64 = get_new_cycles_transfer_purchase_log_id(); 
-    with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| {
-        ongoing_user_transfer_cycles.insert(
+    
+    with_mut(&USER_DATA, |user_data| {
+        // take the user-cycles before the transfer, and refund in the callback 
+        user_data.cycles_balance -= q.cycles + CYCLES_TRANSFER_FEE;
+        
+        user_data.cycles_transfers_out.push((
             cycles_transfer_purchase_log_id,
             CyclesTransferPurchaseLog{
                 canister_id: q.canister_id,
@@ -594,18 +629,22 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<CyclesTr
                 call_error: None,
                 fee_paid: CYCLES_TRANSFER_FEE as u64
             }
-        );
+        ));
     });
     
     let q_cycles: Cycles = q.cycles; // copy cause want the value to stay on the stack for the closure to run with it. after the q is move into the candid params
-    
+    let cycles_transfer_fee: Cycles = CYCLES_TRANSFER_FEE; // copy the value to stay on the stack for the closure to run with it.
     let cancel_user_transfer_cycles = || {
         with_mut(&USER_DATA, |user_data| {
-            user_data.cycles_balance += q_cycles + CYCLES_TRANSFER_FEE;
+            user_data.cycles_balance += q_cycles + cycles_transfer_fee;
+            
+            match user_data.cycles_transfers_out.iter().rposition(|cycles_transfer_purchase: &(CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)| { 
+                (*cycles_transfer_purchase).0 == cycles_transfer_purchase_log_id 
+            }) {
+                Some(i) => user_data.cycles_transfers_out.remove(i),
+                None => {}
+            }
         });
-        with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| {
-            ongoing_user_transfer_cycles.remove(&cycles_transfer_purchase_log_id);
-        })
     };
         
     match call::<(UCUserTransferCyclesQuest,), (Result<(), UCUserTransferCyclesError>,)>(
@@ -659,6 +698,23 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
         return Err(CTSUserTransferCyclesCallbackError::WrongUserId)
     }
 
+
+    with_mut(&USER_DATA, |user_data| {
+        user_data.cycles_balance += cts_q.cycles_transfer_refund;
+        
+        if let Some(cycles_transfer_purchase/*: &mut (CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)*/) = user_data.cycles_transfers_out.iter_mut.rev().find(|cycles_transfer_purchase: &&mut (CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)| { (**cycles_transfer_purchase).0 == cts_q.cycles_transfer_purchase_log_id }) {
+            if let Some(ref call_error) = cts_q.cycles_transfer_call_error {
+                if let  0 | 1 | 2 = (*call_error).0 {        
+                    user_data.cycles_balance += (*cycles_transfer_purchase).1.fee_paid as Cycles; 
+                    (*cycles_transfer_purchase).1.fee_paid = 0u64;
+                }
+            }
+            (*cycles_transfer_purchase).1.call_error = cts_q.cycles_transfer_call_error;
+            (*cycles_transfer_purchase).1.cycles_accepted = Some((*cycles_transfer_purchase).1.cycles_sent - cts_q.cycles_transfer_refund);
+        }
+    });
+
+    /*
     let opt_cycles_transfer_purchase_log: Option<CyclesTransferPurchaseLog> = with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { 
         ongoing_user_transfer_cycles.remove(&cts_q.cycles_transfer_purchase_log_id)
     });
@@ -679,6 +735,7 @@ pub fn cts_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQue
             user_data.cycles_balance += cts_q.cycles_transfer_refund + (give_back_the_fee as Cycles);     
        });
     }       
+    */
     
     Ok(())
 }
@@ -698,7 +755,7 @@ pub fn user_download_cycles_transfers_out() {
     
     with(&USER_DATA, |user_data| {
         let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
-        reply::<(Option<&[CyclesTransferPurchaseLog]>,)>((user_data.cycles_transfers_out.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[(CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)]>,)>((user_data.cycles_transfers_out.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 

@@ -4,6 +4,8 @@ use cts_lib::{
         api::{
             trap,
             caller,
+            canister_balance128,
+            performance_counter,
             call::{
                 call,
                 call_raw128,
@@ -72,7 +74,8 @@ use cts_lib::{
         }
     },
     consts::{
-        WASM_PAGE_SIZE_BYTES
+        WASM_PAGE_SIZE_BYTES,
+        NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES
     }
 };
 use std::cell::{Cell, RefCell};

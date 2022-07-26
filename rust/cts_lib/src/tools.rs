@@ -4,6 +4,7 @@ use crate::{
     ic_ledger_types::{
         IcpIdSub,
         IcpId,
+        IcpTokens
     },
 };
 
@@ -114,6 +115,28 @@ pub fn user_icp_id(cts_id: &Principal, user_id: &Principal) -> IcpId {
 }
 
 
+
+
+
+
+
+
+
+pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
+    icpts.e8s() as u128 
+    * xdr_permyriad_per_icp as u128 
+    * DEFAULT_CYCLES_PER_XDR 
+    / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
+}
+
+pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpTokens {
+    IcpTokens::from_e8s(
+        ( cycles
+        * (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
+        / DEFAULT_CYCLES_PER_XDR
+        / xdr_permyriad_per_icp as u128 ) as u64    
+    )
+}
 
 
 

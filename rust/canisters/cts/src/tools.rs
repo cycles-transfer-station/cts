@@ -38,7 +38,11 @@ use cts_lib::{
     },
     consts::{
         MANAGEMENT_CANISTER_ID,
-        ICP_FEE_MEMO
+        ICP_LEDGER_CREATE_CANISTER_MEMO,
+        ICP_LEDGER_TOP_UP_CANISTER_MEMO,
+        ICP_CTS_TAKE_FEE_MEMO,
+        CTS_CYCLES_TRANSFER_MEMO_START_USER_CYCLES_BALANCE_TOPUP, //USER_CYCLES_BALANCE_TOPUP_MEMO_START,
+        
     },
     tools::{
         sha256,
@@ -50,6 +54,8 @@ use cts_lib::{
         user_icp_id,
         principal_icp_subaccount,
         principal_as_thirty_bytes,
+        icptokens_to_cycles,
+        cycles_to_icptokens,
     },
     ic_cdk::{
         api::{
@@ -94,14 +100,6 @@ use cts_lib::{
 };
 
 
-
-
-
-pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
-pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
-pub const DEFAULT_CYCLES_PER_XDR: u128 = 1_000_000_000_000; // 1T cycles = 1 XDR
-
-pub const USER_CYCLES_BALANCE_TOPUP_MEMO_START: &'static [u8] = b"UT";
 
 
 
@@ -222,22 +220,6 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
 
 
 
-
-pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
-    icpts.e8s() as u128 
-    * xdr_permyriad_per_icp as u128 
-    * DEFAULT_CYCLES_PER_XDR 
-    / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
-}
-
-pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpTokens {
-    IcpTokens::from_e8s(
-        ( cycles
-        * (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
-        / DEFAULT_CYCLES_PER_XDR
-        / xdr_permyriad_per_icp as u128 ) as u64    
-    )
-}
 
 
 
@@ -422,7 +404,6 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
 
 
 
-
 #[derive(CandidType, Deserialize)]
 pub struct CmcNotifyCreateCanisterQuest {
     pub block_index: IcpBlockHeight,
@@ -431,7 +412,7 @@ pub struct CmcNotifyCreateCanisterQuest {
 
 
 #[derive(CandidType, Deserialize)]
-struct NotifyTopUpArg {
+struct CmcNotifyTopUpCyclesQuest {
     block_index: IcpBlockHeight,
     canister_id: Principal,
 }
@@ -449,20 +430,24 @@ type NotifyTopUpResult = Result<Cycles, CmcNotifyError>;
 
 
 
+
+
+
+
+
+
 #[derive(CandidType, Deserialize)]
-pub enum LedgerTopupCyclesError {
-    IcpTransferCallError(String),
+pub enum LedgerTopupCyclesCmcIcpTransferError {
+    IcpTransferCallError((u32, String)),
     IcpTransferError(IcpTransferError),
-    CmcNotifyTopUpQuestCandidEncodeError{candid_error: String, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifySponseCandidDecodeError{candid_error: String, candid_bytes: Vec<u8>, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifyCallError{notify_call_error: String, topup_transfer_block_height: IcpBlockHeight },
-    CmcNotifyError{cmc_notify_error: CmcNotifyError, topup_transfer_block_height: IcpBlockHeight},
 }
 
-// make a public method to re-try a block-height
-pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, topup_canister: Principal) -> Result<Cycles, LedgerTopupCyclesError> {
 
-    let topup_cycles_icp_transfer_call_block_index: IcpBlockHeight = match icp_transfer(
+
+// make a public method to re-try a block-height
+pub async fn ledger_topup_cycles_cmc_icp_transfer(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, topup_canister: Principal) -> Result<IcpBlockHeight, LedgerTopupCyclesCmcIcpTransferError> {
+
+    let cmc_icp_transfer_block_height: IcpBlockHeight = match icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
             memo: ICP_LEDGER_TOP_UP_CANISTER_MEMO,
@@ -476,25 +461,37 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
         Ok(transfer_call_sponse) => match transfer_call_sponse {
             Ok(block_index) => block_index,
             Err(transfer_error) => {
-                return Err(LedgerTopupCyclesError::IcpTransferError(transfer_error));
+                return Err(LedgerTopupCyclesCmcIcpTransferError::IcpTransferError(transfer_error));
             }
         },
         Err(transfer_call_error) => {
-            return Err(LedgerTopupCyclesError::IcpTransferCallError(format!("{:?}", transfer_call_error)));
+            return Err(LedgerTopupCyclesCmcIcpTransferError::IcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1)));
         }
     };
+    
+    Ok(cmc_icp_transfer_block_height)
+}
 
-    // :give-back: topup_cycles_icp_transfer_call_block_index on each follow[ing]-error-case.
+
+#[derive(CandidType, Deserialize)]
+pub enum LedgerTopupCyclesCmcNotifyError {
+    CmcNotifyTopUpQuestCandidEncodeError(String),
+    CmcNotifyCallError((u32, String)),
+    CmcNotifySponseCandidDecodeError{candid_error: String, candid_bytes: Vec<u8>},
+    CmcNotifyError(CmcNotifyError),
+}
+
+pub async fn ledger_topup_cycles_cmc_notify(cmc_icp_transfer_block_height: IcpBlockHeight, topup_canister_id: Principal) -> Result<Cycles, LedgerTopupCyclesCmcNotifyError> {
 
     let topup_cycles_cmc_notify_call_candid: Vec<u8> = match encode_one(
-        & NotifyTopUpArg {
-            block_index: topup_cycles_icp_transfer_call_block_index,
-            canister_id: topup_canister
+        & CmcNotifyTopUpCyclesQuest {
+            block_index: cmc_icp_transfer_block_height,
+            canister_id: topup_canister_id
         }
     ) {
         Ok(b) => b,
         Err(candid_error) => {
-            return Err(LedgerTopupCyclesError::CmcNotifyTopUpQuestCandidEncodeError { candid_error: format!("{}", candid_error), topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
+            return Err(LedgerTopupCyclesCmcNotifyError::CmcNotifyTopUpQuestCandidEncodeError(format!("{}", candid_error)));
         }
     };
 
@@ -508,15 +505,15 @@ pub async fn ledger_topup_cycles(icp: IcpTokens, from_subaccount: Option<IcpIdSu
             Ok(notify_topup_result) => match notify_topup_result {
                 Ok(cycles) => cycles,
                 Err(cmc_notify_error) => {
-                    return Err(LedgerTopupCyclesError::CmcNotifyError{cmc_notify_error: cmc_notify_error, topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index});
+                    return Err(LedgerTopupCyclesCmcNotifyError::CmcNotifyError(cmc_notify_error));
                 }
             },
             Err(candid_error) => {
-                return Err(LedgerTopupCyclesError::CmcNotifySponseCandidDecodeError { candid_error: format!("{}", candid_error), candid_bytes: candid_bytes, topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
+                return Err(LedgerTopupCyclesCmcNotifyError::CmcNotifySponseCandidDecodeError{candid_error: format!("{}", candid_error), candid_bytes: candid_bytes});
             }
         },
         Err(notify_call_error) => {
-            return Err(LedgerTopupCyclesError::CmcNotifyCallError { notify_call_error: format!("{:?}", notify_call_error), topup_transfer_block_height: topup_cycles_icp_transfer_call_block_index });
+            return Err(LedgerTopupCyclesCmcNotifyError::CmcNotifyCallError((notify_call_error.0 as u32, notify_call_error.1)));
         }
     };
 

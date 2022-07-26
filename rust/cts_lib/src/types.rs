@@ -345,6 +345,8 @@ pub mod user_canister {
         pub user_id: UserId,
         pub umc_id: UsersMapCanisterId,
         pub cts_id: Principal,
+        
+        pub user_canister_storage_plan: 
     }
     
     #[derive(CandidType, Deserialize, Clone, Copy)]

@@ -27,7 +27,11 @@ Caller controller3 = CallerEd25519(
 
 
 
-//Canister canister = Canister(Principal('thp4z-laaaa-aaaam-qaaea-cai'));
+
+
+
+
+//Canister cts_main = Canister(Principal('thp4z-laaaa-aaaam-qaaea-cai'));
 
 Canister canister = Canister(Principal('bayhi-7yaaa-aaaai-qahca-cai'));
 
@@ -42,6 +46,14 @@ Canister controller3_user_canister = Canister(Principal('sqotk-taaaa-aaaak-qaroa
 //woddh-aqaaa-aaaal-aazqq-cai
 //2ch7a-wqaaa-aaaai-qnh3q-cai
 //2fgzu-3iaaa-aaaai-qnh3a-cai
+
+
+Uint8List get_user_subaccount_bytes() {
+    Uint8List user_subaccount_bytes = Uint8List.fromList([...utf8.encode('UT'), controller3.principal.bytes.length, ...controller3.principal.bytes ]);
+    while (user_subaccount_bytes.length < 32) { user_subaccount_bytes.add(0); }
+    return user_subaccount_bytes;
+}
+
 
 Future<void> main(List<String> arguments) async {
     
@@ -397,50 +409,7 @@ Future<void> main(List<String> arguments) async {
         print(sha256.convert(File('../rust/target/wasm32-unknown-unknown/release/users_map_canister-o.wasm').readAsBytesSync()).bytes);
 
 
-
-
-        /*
-
-        /// certified data test
-        Uint8List sponse = await common.cycles_mint.call(
-            calltype: 'query',
-            method_name: 'get_icp_xdr_conversion_rate',
-        );
-        // print(sponse);
-        List<CandidType> cs = c_backwards(sponse);
-        // print(cs);
-
-        Record rc = cs[0] as Record;
-        Record r = rc['data'] as Record;
-        Uint8List certificate_bytes = Blob.oftheVector((rc['certificate'] as Vector).cast_vector<Nat8>()).bytes;
-        print('certificate_bytes len: ${certificate_bytes.length}');
-        Map certificate = cbor.cborbytesasadart(certificate_bytes);
-        await verify_certificate(certificate);
-        dynamic time = lookuppathvalueinaniccertificatetree(certificate['tree'], ['time']);
-        BigInt btime = time is int ? BigInt.from(time) : time; //as BigInt
-        if (btime < get_current_time_nanoseconds() - BigInt.from(30*1000000000)) { throw Exception('time is too old on the certificate'); }
-        print(btime);
-
-        Uint8List certified_data = lookuppathvalueinaniccertificatetree(certificate['tree'], ['canister', common.cycles_mint.principal.bytes, 'certified_data']);
-        print(certified_data);
-
-        List canister_hash_tree = cbor.cborbytesasadart((rc['hash_tree'] as Blob).bytes);
-        // print(canister_hash_tree);
-
-        Uint8List treeroothash = constructicsystemstatetreeroothash(canister_hash_tree);
-        print(treeroothash);
-
-        if (!aresamebytes(certified_data, treeroothash)) { throw Exception('certified data doesn\'t match the tree'); }
-
-        Record certified_icpxdrrate = c_backwards(lookuppathvalueinaniccertificatetree(canister_hash_tree, ["ICP_XDR_CONVERSION_RATE"], 'blob'))[0] as Record;
-        
-        print(r['xdr_permyriad_per_icp']);
-        print(r['timestamp_seconds']);
-        print(certified_icpxdrrate['xdr_permyriad_per_icp']);
-        print(certified_icpxdrrate['timestamp_seconds']);
-
-        */
-
+        //print(await cts_main.controllers());
 
 
 
@@ -466,7 +435,8 @@ Future<void> main(List<String> arguments) async {
 
 Future<void> create_controller() async {
     CallerEd25519 controller = CallerEd25519.new_keys();
-    print(controller);
+    
+    
     print(controller.principal.icp_id());
     print('pub: ${controller.public_key}');
     print('priv: ${controller.private_key}');
@@ -567,14 +537,13 @@ Future<void> change_canister_settings() async {
         method_name: 'update_settings',
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': canister2.principal.candid,
+                'canister_id': canister.principal.candid,
                 'settings': Record.oftheMap({
                     // freezing_threshold : opt nat,
                     'controllers' : Option(value: Vector.oftheList<PrincipalReference>([
-                        controller.principal.candid, 
+                        controller.principal.candid,
                         controller2.principal.candid,
                         controller3.principal.candid,
-                        canister.principal.candid
 
                     ])),
                     // memory_allocation : opt nat,
@@ -655,9 +624,9 @@ Future<void> call_user_canister_user_download_cycles_transfers_in(int chunk_i) a
         caller: controller3,
         put_bytes: c_forwards([Nat32(chunk_i)])
     );
-    print(sponse);
+    //print(sponse);
     List<CandidType> cs = c_backwards(sponse); 
-    print(cs);
+    //print(cs);
     Option opt_l = (cs[0] as Option);
     if (opt_l.value != null) {
         Vector<Record> l = (opt_l.value as Vector).cast_vector<Record>();
@@ -677,6 +646,7 @@ Future<void> call_user_canister_user_download_cycles_transfers_in(int chunk_i) a
 }
 
 Future<void> call_user_canister_user_transfer_cycles() async {
+
     Uint8List sponse = await controller3_user_canister.call(
         calltype: CallType.call,
         method_name: 'user_transfer_cycles',
@@ -687,7 +657,7 @@ Future<void> call_user_canister_user_transfer_cycles() async {
                 'cycles': Nat(3),
                 'canister_id': canister.principal.candid,
                 'cycles_transfer_memo': Variant.oftheMap({
-                    'Blob': Blob([...utf8.encode('UT'), controller3.principal.bytes.length, ...controller3.principal.bytes ])
+                    'Blob': Blob(get_user_subaccount_bytes())
                 })
             })
         ])
@@ -704,9 +674,9 @@ Future<void> call_user_canister_user_download_cycles_transfers_out(int chunk_i) 
         caller: controller3,
         put_bytes: c_forwards([Nat32(chunk_i)])
     );
-    print(sponse);
+    //print(sponse);
     List<CandidType> cs = c_backwards(sponse); 
-    print(cs);
+    //print(cs);
     Option opt_l = (cs[0] as Option);
     if (opt_l.value != null) {
         Vector<Record> l = (opt_l.value as Vector).cast_vector<Record>();
@@ -1300,7 +1270,7 @@ Future<void> controller_cts_call_canister() async {
                 'arg_raw': Blob(c_forwards([
                     Record.oftheMap({
                         'memo': Variant.oftheMap({
-                            'Blob': Blob([...utf8.encode('UT'), controller3.principal.bytes.length, ...controller3.principal.bytes ])
+                            'Blob': Blob(get_user_subaccount_bytes())
                         })
                     })
                 ])),
@@ -1847,17 +1817,22 @@ Future<void> put_canister_controllers() async {
 Future<void> put_frontcode_build_web() async {
     Canister put_frontcode_on_the_canister = canister;
     print('putting frontcode on the canister: ${put_frontcode_on_the_canister.principal}');
+    print('confirm y/n');
+    String confirm = stdin.readLineSync()!;
+    if (confirm != 'y') { throw Exception('void-confirm'); }
     Directory build_web_dir = Directory('../frontcode/build/web/');
     await for (FileSystemEntity fse in build_web_dir.list(recursive: true, followLinks: false)) {
         print(fse.path);
         if ( await FileSystemEntity.isFile(fse.path) && !fse.path.contains('/canvaskit.wasm') ) {
+            String content_type = '';
+            if (fse.path.substring(fse.path.length-5) == '.wasm') { content_type = 'application/wasm'; }
             List<CandidType> cs = c_backwards(await put_frontcode_on_the_canister.call(
                 calltype: CallType.call,
                 method_name: 'controller_upload_frontcode_file_chunks',
                 put_bytes: c_forwards([
                     Text( fse.path.contains('/index.html') ? '/' : fse.path.replaceFirst('../frontcode/build/web', '')),
                     Record.oftheMap({
-                        'content_type': Text(''),
+                        'content_type': Text(content_type),
                         'content_encoding': Text('gzip'),
                         'content': Blob(gzip.encode(File(fse.path).readAsBytesSync()))
                     })
@@ -1875,7 +1850,15 @@ Future<void> put_frontcode_build_web() async {
 
 
 Future<void> clear_frontcode_files() async {
-    List<CandidType> cs = c_backwards(await canister.call(
+    Canister clear_frontcode_on_the_canister = canister;
+    print('clear frontcode on the canister: ${clear_frontcode_on_the_canister.principal}');
+    print('confirm y/n');
+    String confirm = stdin.readLineSync()!;
+    if (confirm != 'y') {
+        throw Exception('confirmation cancel');
+    }
+    
+    List<CandidType> cs = c_backwards(await clear_frontcode_on_the_canister.call(
         calltype: CallType.call,
         method_name: 'controller_clear_frontcode_files',
         caller: controller

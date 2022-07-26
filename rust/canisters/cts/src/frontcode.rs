@@ -59,6 +59,7 @@ pub struct HttpRequest {
 pub struct HttpResponse {
     pub status_code: u16,
     pub headers: Vec<(String, String)>,
+    #[serde(with = "serde_bytes")]
     pub body: Vec<u8>,
     pub streaming_strategy: Option<StreamingStrategy>,
 }
