@@ -36,6 +36,8 @@
 // when taking icp as a payment for a service, take the icp fee first , then do the service
 
 
+// the CTS can take (only) the CTS-governance-token for the payments for the cts-user-contracts. and burn them.
+
 
 
 
@@ -248,7 +250,15 @@ pub const CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE: Cy
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = /*TEST-VALUE*/1; //50_000_000_000; // enough to pay for a find_and_lock_user-call.
-pub const MAX_RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS: usize = 100;
+
+pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = /*TEST-VALUE*/1; // 100_000_000_000
+
+pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate through the xdr conversion rate ? // 100_000_000_000-cycles
+
+
+//pub const CYCLES_BANK_COST: Cycles = ; // 10_000_000_000_000;
+//pub const CYCLES_BANK_UPGRADE_COST: Cycles = ; // 5_000_000_000_000;
+
 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;

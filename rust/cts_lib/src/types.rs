@@ -349,13 +349,6 @@ pub mod user_canister {
         pub user_canister_storage_plan: 
     }
     
-    #[derive(CandidType, Deserialize, Clone, Copy)]
-    pub struct CTSCyclesTransferIntoUser {
-        pub canister: Principal,
-        pub cycles: Cycles,
-        pub timestamp_nanos: u64
-    }
-    
     #[derive(CandidType, Deserialize, Clone)]
     pub struct UserTransferCyclesQuest {
         pub cycles: Cycles,

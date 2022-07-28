@@ -10,9 +10,9 @@ pub const KiB: u64 = 1024;
 pub const MiB: u64 = KiB * 1024;
 pub const GiB: u64 = MiB * 1024;
 
-
-
 pub const WASM_PAGE_SIZE_BYTES: u64 = 65536; // 2^16 // 64KiB
+
+
 pub const MANAGEMENT_CANISTER_ID: Principal = Principal::management_canister();
 
 
