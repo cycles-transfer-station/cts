@@ -345,8 +345,8 @@ pub mod user_canister {
         pub user_id: UserId,
         pub umc_id: UsersMapCanisterId,
         pub cts_id: Principal,
-        
-        pub user_canister_storage_plan: 
+        pub memory_size: u64,                                   // in the bytes
+        pub lifetime_termination_timestamp_seconds: u64
     }
     
     #[derive(CandidType, Deserialize, Clone)]
