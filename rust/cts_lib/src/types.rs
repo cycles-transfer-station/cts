@@ -38,7 +38,7 @@ pub type UsersMapCanisterId = Principal;
 pub enum CyclesTransferMemo {
     Nat(u128),
     Text(String),
-    Blob(Vec<u8>)
+    Blob(Vec<u8>)   // with serde bytes
 }
 
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
@@ -225,14 +225,17 @@ pub mod cycles_transferrer {
         pub cts_id: Principal
     }
     
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct CTSUserTransferCyclesQuest {
-        pub users_map_canister_id: UsersMapCanisterId,
-        pub umc_user_transfer_cycles_quest: cts::UMCUserTransferCyclesQuest
+    #[derive(CandidType, Deserialize)]    
+    pub struct UserTransferCyclesQuest{
+        user_id: UserId,
+        user_cycles_transfer_id: u64,
+        for_the_canister: Principal,
+        cycles: Cycles,
+        cycles_transfer_memo: CyclesTransferMemo
     }
     
     #[derive(CandidType, Deserialize)]
-    pub enum CTSUserTransferCyclesError {
+    pub enum UserTransferCyclesError {
         MaxOngoingCyclesTransfers(u64),
         CyclesTransferQuestCandidCodeError(String)
     }
@@ -347,16 +350,17 @@ pub mod user_canister {
         pub cts_id: Principal,
         pub memory_size: u64,                                   // in the bytes
         pub lifetime_termination_timestamp_seconds: u64
+        pub cycles_transferrer_canisters: Vec<Principal>
     }
     
     #[derive(CandidType, Deserialize, Clone)]
     pub struct UserTransferCyclesQuest {
+        pub for_the_canister: Principal,
         pub cycles: Cycles,
-        pub canister_id: Principal,
         pub cycles_transfer_memo: CyclesTransferMemo
     }
     
-    pub type CyclesTransferPurchaseLogId = u64;
+    //pub type CyclesTransferPurchaseLogId = u64;
     
     #[derive(CandidType, Deserialize, Clone)]
     pub struct CTSUserTransferCyclesCallbackQuest {

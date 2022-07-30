@@ -631,40 +631,6 @@ pub fn see_fees() -> Fees {
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct UserTopUpCyclesBalanceData {
-    topup_cycles_transfer_memo: CyclesTransferMemo,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct UserTopUpIcpBalanceData {
-    topup_icp_id: IcpId
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct UserTopUpBalanceData {
-    user_topup_cycles_balance_data: UserTopUpCyclesBalanceData, 
-    user_topup_icp_balance_data: UserTopUpIcpBalanceData,
-}
-
-
-#[query]
-pub fn user_topup_balance_data() -> UserTopUpBalanceData {
-    let user_id: Principal = caller();
-    UserTopUpBalanceData {
-        user_topup_cycles_balance_data: UserTopUpCyclesBalanceData {
-            topup_cycles_transfer_memo: CyclesTransferMemo::Blob(user_cycles_balance_topup_memo_bytes(&user_id).to_vec())
-        },
-        user_topup_icp_balance_data: UserTopUpIcpBalanceData {
-            topup_icp_id: cts_lib::tools::user_icp_id(&id(), &user_id)
-        }
-    }
-}
-
-
-
-
-
 
 
 
