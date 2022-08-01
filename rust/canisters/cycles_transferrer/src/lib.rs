@@ -218,7 +218,7 @@ pub async fn cts_user_transfer_cycles() {
     
     // make sure to cept the cts cycles for the call after any possibility of a reply(Err()) and return; make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the cts gets the cycles back 
     // cept the cts cycles before the cycles_transfer call
-    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());                                                   // before calling reply or reject.
     if cycles != cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles {
         trap("check the cts call of this cycles_transferrer.")
     }
@@ -242,7 +242,7 @@ pub async fn cts_user_transfer_cycles() {
     
     let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;
     
-    let cycles_transfer_refund: Cycles = msg_cycles_refunded128(); // now that we are for sure in a callback
+    let cycles_transfer_refund: Cycles = msg_cycles_refunded128(); // now that we are for the sure in a callback
 
     let cycles_transfer_call_error: Option<(u32, String)>;
     
@@ -256,7 +256,7 @@ pub async fn cts_user_transfer_cycles() {
     }
     
     
-    // we make a new call here because we already replied to the cts before the cycles_transfer call.
+    // we make a new call here because we already replied to the user_transfer_cycles before the cycles_transfer call.
     do_cycles_transferrer_user_transfer_cycles_callback(
         CyclesTransferrerUserTransferCyclesCallbackQuest{
             cycles_transfer_call_error,

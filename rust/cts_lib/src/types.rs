@@ -227,7 +227,6 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]    
     pub struct UserTransferCyclesQuest{
-        user_id: UserId,
         user_cycles_transfer_id: u64,
         for_the_canister: Principal,
         cycles: Cycles,
@@ -240,7 +239,13 @@ pub mod cycles_transferrer {
         CyclesTransferQuestCandidCodeError(String)
     }
     
-    pub type ReTryCyclesTransferrerUserTransferCyclesCallback = ((u32, String)/*the call-error of the last try*/, cts::CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund);
+    #[derive(CandidType, Deserialize, Clone)]
+    pub struct UserTransferCyclesCallbackQuest {
+        pub user_cycles_transfer_id: u64,
+        pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+    }
+    
+    //pub type ReTryCyclesTransferrerUserTransferCyclesCallback = ((u32, String)/*the call-error of the last try*/, cts::CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund);
     
 }
 
@@ -360,20 +365,9 @@ pub mod user_canister {
         pub cycles_transfer_memo: CyclesTransferMemo
     }
     
-    //pub type CyclesTransferPurchaseLogId = u64;
     
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct CTSUserTransferCyclesCallbackQuest {
-        pub user_id: UserId,
-        pub cycles_transfer_purchase_log_id: CyclesTransferPurchaseLogId,
-        pub cycles_transfer_refund: Cycles,
-        pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
-    }
     
-    #[derive(CandidType, Deserialize, Clone)]
-    pub enum CTSUserTransferCyclesCallbackError {
-        WrongUserId,
-    }
+    
 }
 
 

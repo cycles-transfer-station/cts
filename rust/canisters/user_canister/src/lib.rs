@@ -530,7 +530,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
         trap("Caller must be the user for this method.");
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
     
     if is_canister_full {
         return Err(UserTransferCyclesError::UserCanisterMemoryIsFull);
@@ -585,8 +585,8 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
             user_data.cycles_balance += q_cycles + cycles_transfer_fee;
             
             match user_data.cycles_transfers_out.iter().rposition(
-                |cycles_transfer_purchase: &(u64,CyclesTransferPurchaseLog)| { 
-                    (*cycles_transfer_purchase).0 == cycles_transfer_id
+                |cycles_transfer_out_log: &(u64,CyclesTransferOut)| { 
+                    (*cycles_transfer_out_log).0 == cycles_transfer_id
                 }
             ) {
                 Some(i) => user_data.cycles_transfers_out.remove(i),
@@ -599,7 +599,6 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
         next_cycles_transferrer_canister(),
         "user_transfer_cycles",
         (cycles_transferrer::UserTransferCyclesQuest{
-            user_id: localkey::cell::get(&USER_ID),
             user_cycles_transfer_id: cycles_transfer_id,
             for_the_canister: q.for_the_canister,
             cycles: q.cycles,
@@ -623,67 +622,33 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
 }
 
 
-// :checkpoint.
+
 
 
 #[update]
-pub fn cycles_transferrer_user_transfer_cycles_callback(cts_q: CTSUserTransferCyclesCallbackQuest) -> Result<(), CTSUserTransferCyclesCallbackError> {
+pub fn cycles_transferrer_user_transfer_cycles_callback(q: cycles_transferrer::UserTransferCyclesCallbackQuest) -> () {
     
-    if caller() != cts_id() {
-        trap("caller must be the cts for this method.")
+    if with(&CYCLES_TRANSFERRER_CANISTERS, |cycles_transferrer_canisters| { cycles_transferrer_canisters.contains(&caller()) }) == false  {
+        trap("caller must be one of the CTS-cycles-transferrer-canisters for this method.");
     }
     
-    if get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); } // make sure that when set a stop-call-flag, there are 0 ongoing-$cycles-transfers. cycles-transfer-callback errors will hold for
     
-    if cts_q.user_id != user_id() {
-        return Err(CTSUserTransferCyclesCallbackError::WrongUserId)
-    }
-
+    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128()); 
 
     with_mut(&USER_DATA, |user_data| {
-        user_data.cycles_balance += cts_q.cycles_transfer_refund;
-        
-        if let Some(cycles_transfer_purchase/*: &mut (CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)*/) = user_data.cycles_transfers_out.iter_mut.rev().find(|cycles_transfer_purchase: &&mut (CyclesTransferPurchaseLogId,CyclesTransferPurchaseLog)| { (**cycles_transfer_purchase).0 == cts_q.cycles_transfer_purchase_log_id }) {
-            if let Some(ref call_error) = cts_q.cycles_transfer_call_error {
-                if let  0 | 1 | 2 = (*call_error).0 {        
-                    user_data.cycles_balance += (*cycles_transfer_purchase).1.fee_paid as Cycles; 
-                    (*cycles_transfer_purchase).1.fee_paid = 0u64;
-                }
-            }
-            (*cycles_transfer_purchase).1.call_error = cts_q.cycles_transfer_call_error;
-            (*cycles_transfer_purchase).1.cycles_accepted = Some((*cycles_transfer_purchase).1.cycles_sent - cts_q.cycles_transfer_refund);
+        user_data.cycles_balance = user_data.cycles_balance.checked_add(cycles_transfer_refund).unwrap_or(u128::MAX);
+        if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = user_data.cycles_transfers_out.iter_mut.rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 == q.user_cycles_transfer_id }) {
+            (*cycles_transfer_out_log).1.cycles_refunded = Some(cycles_transfer_refund);
+            (*cycles_transfer_out_log).1.call_error = q.cycles_transfer_call_error;
         }
     });
 
-    /*
-    let opt_cycles_transfer_purchase_log: Option<CyclesTransferPurchaseLog> = with_mut(&ONGOING_USER_TRANSFER_CYCLES, |ongoing_user_transfer_cycles| { 
-        ongoing_user_transfer_cycles.remove(&cts_q.cycles_transfer_purchase_log_id)
-    });
-    
-    if let Some(mut cycles_transfer_purchase_log) = opt_cycles_transfer_purchase_log {
-        let mut give_back_the_fee: u64 = 0;
-        if let Some(ref call_error) = cts_q.cycles_transfer_call_error {
-            if let  0 | 1 | 2 = (*call_error).0 {        
-                give_back_the_fee = cycles_transfer_purchase_log.fee_paid;
-                cycles_transfer_purchase_log.fee_paid = 0u64;
-            }
-        }
-        cycles_transfer_purchase_log.call_error = cts_q.cycles_transfer_call_error;
-        cycles_transfer_purchase_log.cycles_accepted = Some(cycles_transfer_purchase_log.cycles_sent - cts_q.cycles_transfer_refund);
-        
-        with_mut(&USER_DATA, |user_data| {
-            user_data.cycles_transfers_out.push(cycles_transfer_purchase_log); 
-            user_data.cycles_balance += cts_q.cycles_transfer_refund + (give_back_the_fee as Cycles);     
-       });
-    }       
-    */
-    
-    Ok(())
 }
 
 
 
-
+:checkpoint.
 
 
 
