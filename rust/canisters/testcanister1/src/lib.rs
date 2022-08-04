@@ -1,7 +1,8 @@
 //Test the reply::<>() before a call.await 
 
 
-use std::cell::Cell;
+use std::cell::{Cell,RefCell};
+/*
 use cts_lib::{
     ic_cdk::{
         self,
@@ -34,12 +35,12 @@ use cts_lib::{
         
     }
 };
-
+*/
 
 
 thread_local! {
     /*static CYCLES_TRANSFER_CYCLES: Cell<Cycles> = Cell::new(0);*/
-    
+    static TVEC: RefCell<Vec<u64>> = RefCell::new(Vec::new());
 
 }
 
@@ -59,7 +60,7 @@ pub fn see_cycles_transfer_cycles() -> Cycles {
 }
 */
 
-
+/*
 #[update]
 pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Principal, cycles: Cycles) -> (u32, String, Cycles) {
     // send cycles to testcanister2
@@ -85,8 +86,21 @@ pub async fn test_cycles_transfer_pogation_ingress_start(test_canister_id: Princ
 pub fn test_manual_reply() {
     reject("reject-message-here");
 }
+*/
 
 
+#[derive(candid::CandidType, serde::Deserialize)]
+#[serde(bound(deserialize = "'a: 'de"))]
+pub struct Test<'a> {
+    tvec: &'a Vec<u64>
+}
+
+fn main() {
+    let t = Test{
+        tvec: unsafe { &*(TVEC.with(|tvec| { &(*(tvec.borrow())) as *const Vec<u64> })) }
+    };
+    
+}
 
 
 

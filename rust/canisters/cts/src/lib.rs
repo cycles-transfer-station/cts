@@ -1086,11 +1086,14 @@ pub async fn new_user() -> Result<NewUserSuccessData, NewUserError> {
     }
 
     //update the controller to clude the users_map_canister
-    if new_user_data.user_canister_status_record.as_ref().unwrap().settings.controllers.contains(new_user_data.users_map_canister.as_ref().unwrap()) == false {
+    if new_user_data.user_canister_status_record.as_ref().unwrap().settings.controllers.contains(new_user_data.users_map_canister.as_ref().unwrap()) 
+    && new_user_data.user_canister_status_record.as_ref().unwrap().settings.controllers.contains(new_user_data.user_canister.as_ref().unwrap())  
+     == false {
         
         let user_canister_controllers: Vec<Principal> = vec![
             id(), 
-            *new_user_data.users_map_canister.as_ref().unwrap()
+            *new_user_data.users_map_canister.as_ref().unwrap(),
+            *new_user_data.user_canister.as_ref().unwrap(),
         ];
         
         match call::<(ChangeCanisterSettingsRecord,), ()>(

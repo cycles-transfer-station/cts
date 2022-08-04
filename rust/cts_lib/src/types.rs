@@ -353,7 +353,7 @@ pub mod user_canister {
         pub user_id: UserId,
         pub umc_id: UsersMapCanisterId,
         pub cts_id: Principal,
-        pub memory_size: u64,                                   // in the bytes
+        pub memory_size_mib: u64,                         
         pub lifetime_termination_timestamp_seconds: u64
         pub cycles_transferrer_canisters: Vec<Principal>
     }

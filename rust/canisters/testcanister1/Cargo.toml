@@ -11,5 +11,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-cts_lib = { path = "../../cts_lib" }
+#cts_lib = { path = "../../cts_lib" }
 candid = "0.7.11"
+serde = "1"
