@@ -94,7 +94,8 @@ use cts_lib::{
             CTSUserTransferCyclesCallbackQuest,
             CTSUserTransferCyclesCallbackError,
         
-        }
+        },
+        management_canister,
     },
     consts::{
         KiB,
@@ -114,6 +115,10 @@ use cts_lib::{
     },
     global_allocator_counter::get_allocated_bytes_count
 };
+
+fn set_global_timer(seconds: u64) {
+    // re-place this with the system-api-call when the feature is in the replica.
+}
 
 // -------------------------------------------------------------------------
 
@@ -216,6 +221,7 @@ thread_local! {
 
     // not save in a UCData
     static MEMORY_SIZE_AT_THE_START: Cell<usize> = Cell::new(0); 
+    static CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
     static STOP_CALLS: Cell<bool> = Cell::new(false);
     static STATE_SNAPSHOT_UC_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 
@@ -366,7 +372,7 @@ fn canister_global_timer() {
         ).await {
             Ok(_) => {},
             Err(call_error) => {
-                set_global_timer(10); // re-try in the 10-seconds
+                set_global_timer(100); // re-try in the 100-seconds
             }
         }
     }
@@ -392,6 +398,30 @@ fn new_cycles_transfer_id() -> u64 {
         let id: u64 = uc_data.cycles_transfers_id_counter.clone();
         uc_data.cycles_transfers_id_counter += 1;
         id
+    })
+}
+
+// round-robin on the cycles-transferrer-canisters
+fn next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
+    with(&UC_DATA, |uc_data| { 
+        let ctcs: &Vec<Principal> = &(uc_data.cycles_transferrer_canisters);
+        match ctcs.len() {
+            0 => None,
+            1 => Some(ctcs[0]),
+            l => {
+                CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|ctcs_rrc| { 
+                    let c_i: usize = ctcs_rrc.get();                    
+                    if c_i <= l-1 {
+                        let ctc_id: Principal = ctcs[c_i];
+                        if c_i == l-1 { ctcs_rrc.set(0); } else { ctcs_rrc.set(c_i + 1); }
+                        Some(ctc_id)
+                    } else {
+                        ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match                         
+                        Some(ctcs[0])
+                    } 
+                })
+            }
+        } 
     })
 }
     
@@ -627,7 +657,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
     };
         
     match call_with_payment128::<(cycles_transferrer::TransferCyclesQuest,), (Result<(), cycles_transferrer::TransferCyclesError>,)>(
-        next_cycles_transferrer_canister(),
+        next_cycles_transferrer_canister_round_robin().expect("0 known cycles transferrer canisters.")/*before the first await*/,
         "transfer_cycles",
         (cycles_transferrer::TransferCyclesQuest{
             user_cycles_transfer_id: cycles_transfer_id,
@@ -807,6 +837,7 @@ pub fn user_cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Re
     
     with_mut(&UC_DATA, |uc_data| {
         uc_data.user_data.cycles_balance -= cycles_for_the_ctsfuel;
+        // cycles-transfer-out log? what if storage is full and ctsfuel is empty?
     });
     
     Ok(())
@@ -870,8 +901,9 @@ pub struct UserChangeUserCanisterStorageSizeMibQuest {
 
 #[update]
 pub enum UserChangeUserCanisterStorageSizeMibError {
-    CurrentStorageUsageTooHigh{ current_storage_usage: u64 },
-    
+    NewStorageSizeMibTooLow{ minimum_new_storage_size_mib: u64 },
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
+    ManagementCanisterUpdateSettingsCallError((u32, String))
 }
 
 #[update]
@@ -880,12 +912,54 @@ pub fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStora
         trap("caller must be the user for this method.");
     }
     
-    let current_storage_usage: u64 = calculate_current_storage_usage();
-    if q.new_storage_size_mib*MiB < current_storage_usage {
-        return Err(CTSChangeUserCanisterStorageSizeMibError::CurrentStorageUsageTooHigh{ current_storage_usage })
+    let minimum_new_storage_size_mib: u64 = with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) + 5; 
+    
+    if minimum_new_storage_size_mib > q.new_storage_size_mib {
+        return Err(UserChangeUserCanisterStorageSizeMibError::NewStorageSizeMibTooLow{ minimum_new_storage_size_mib }); 
+    };
+    
+    let new_storage_size_mib_cost_cycles: Cycles = {
+        ( q.new_storage_size_mib - with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
+        * with(&UC_DATA, |uc_data| { uc_data.user_canister_lifetime_termination_timestamp_seconds }).checked_sub(time()/1_000_000_000).expect("user-contract-lifetime is with the termination.")
+        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
+    };
+    
+    if user_cycles_balance() < new_storage_size_mib_cost_cycles {
+        return Err(UserChangeUserCanisterStorageSizeMibError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), new_storage_size_mib_cost_cycles });
     }
 
+    // take the cycles before the .await and if error after here, refund the cycles
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cycles_balance -= new_storage_size_mib_cost_cycles; 
+    });
 
+    match call::<(management_canister::ChangeCanisterSettingsRecord,), ()>(
+        MANAGEMENT_CANISTER_ID,
+        "update_settings",
+        (management_canister::ChangeCanisterSettingsRecord{
+            canister_id: ic_cdk::api::id(),
+            settings: management_canister::ManagementCanisterOptionalCanisterSettings{
+                controllers : None,
+                compute_allocation : None,
+                memory_allocation : Some(q.new_storage_size_mib * 2 * MiB),
+                freezing_threshold : None,
+            }
+        },)
+    ).await {
+        Ok(()) => {
+            with_mut(&UC_DATA, |uc_data| {
+                uc_data.user_canister_storage_size_mib = q.new_storage_size_mib;
+            });
+        
+            Ok(())
+        },
+        Err(call_error) => {
+            with_mut(&UC_DATA, |uc_data| {
+                uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(new_storage_size_mib_cost_cycles).unwrap_or(Cycles::MAX); 
+            });
+            return Err(UserChangeUserCanisterStorageSizeMibError::ManagementCanisterUpdateSettingsCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
 
 
 }
