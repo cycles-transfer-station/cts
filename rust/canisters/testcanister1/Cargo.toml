@@ -11,6 +11,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-#cts_lib = { path = "../../cts_lib" }
+ic-cdk = { path = "../../../../../DFINITY/cdk-rs/src/ic-cdk" }
+ic-cdk-macros = "0.5.5" #{ path = "../../../../../DFINITY/cdk-rs/src/ic-cdk" }
 candid = "0.7.11"
 serde = "1"

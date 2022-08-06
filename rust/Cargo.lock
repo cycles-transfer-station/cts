@@ -237,7 +237,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "ic-cdk 0.5.5",
- "ic-cdk-macros",
+ "ic-cdk-macros 0.5.1",
  "ic-certified-map",
  "ic-ledger-types",
  "serde",
@@ -517,6 +517,21 @@ source = "git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a8106
 dependencies = [
  "candid",
  "ic-cdk 0.5.1 (git+https://github.com/dfinity/cdk-rs?rev=468cc63b89453ec9c334e49a81060c7c7aa4b742)",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "syn",
+]
+
+[[package]]
+name = "ic-cdk-macros"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5196f57df320b206129d4aae96a0cea72ea2759a5c82651bbb60d721f834998"
+dependencies = [
+ "candid",
+ "ic-cdk 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2",
  "quote",
  "serde",
@@ -1051,6 +1066,8 @@ name = "testcanister1"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "ic-cdk 0.5.5",
+ "ic-cdk-macros 0.5.5",
  "serde",
 ]
 

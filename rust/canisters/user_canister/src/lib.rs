@@ -88,12 +88,7 @@ use cts_lib::{
         cycles_transferrer,
         user_canister::{
             UserCanisterInit,
-            CTSCyclesTransferIntoUser,
-            UserTransferCyclesQuest,
-            CyclesTransferPurchaseLogId,
-            CTSUserTransferCyclesCallbackQuest,
-            CTSUserTransferCyclesCallbackError,
-        
+            UserTransferCyclesQuest
         },
         management_canister,
     },
@@ -305,7 +300,7 @@ fn re_store_uc_data_candid_bytes(uc_data_candid_bytes: Vec<u8>) {
             uc_data
             */
        }
-    }
+    };
 
     std::mem::drop(uc_data_candid_bytes);
 
@@ -362,7 +357,7 @@ fn canister_global_timer() {
     if time()/1_000_000_000 > with(&UC_DATA, |uc_data| { uc_data.user_canister_lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
         // call the cts-main for the user-canister-termination
         // the CTS will save the user_id, user_canister_id, and user_cycles_balance for a minimum of the 10-years.
-        call::<(UserCanisterLifetimeTerminationQuest,), ()>(
+        match call::<(UserCanisterLifetimeTerminationQuest,), ()>(
             cts_id(),
             "user_canister_lifetime_termination",
             (UserCanisterLifetimeTerminationQuest{
@@ -430,9 +425,9 @@ fn calculate_current_storage_usage() -> u64 {
     localkey::cell::get(&MEMORY_SIZE_AT_THE_START) 
     + 
     with(&UC_DATA, |uc_data| { 
-        uc_data.user_data.cycles_transfers_in.len() * (std::mem::size_of<(u64,CyclesTransferIn)>() + 32/*for the cycles-transfer-memo-heap-size*/)
+        uc_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<(u64,CyclesTransferIn)>() + 32/*for the cycles-transfer-memo-heap-size*/ )
         + 
-        uc_data.user_data.cycles_transfers_out.len() * (std::mem::size_of<(u64,CyclesTransferOut)>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/)
+        uc_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<(u64,CyclesTransferOut)>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
     })
 }
 
@@ -684,7 +679,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
 
 
 
-// :lack of the check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method 
+// :lack of the check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method. set on the side the ctsfuel for the callback?
 
 #[update]
 pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::TransferCyclesCallbackQuest) -> () {
@@ -818,7 +813,7 @@ pub fn user_topup_ctsfuel_with_some_cycles() -> () {
 }
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCyclesBalanceForTheCTSFuelError {
     UserCyclesBalanceTooLow { user_cycles_balance: Cycles }
 }
@@ -894,12 +889,12 @@ pub fn user_lengthen_user_canister_lifetime_termination(q: UserLengthenUserCanis
 
 // ---------------------------
 
-#[update]
+#[derive(CandidType, Deserialize)]
 pub struct UserChangeUserCanisterStorageSizeMibQuest {
     new_storage_size_mib: u64
 }
 
-#[update]
+#[derive(CandidType, Deserialize)]
 pub enum UserChangeUserCanisterStorageSizeMibError {
     NewStorageSizeMibTooLow{ minimum_new_storage_size_mib: u64 },
     UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
@@ -950,7 +945,6 @@ pub fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStora
             with_mut(&UC_DATA, |uc_data| {
                 uc_data.user_canister_storage_size_mib = q.new_storage_size_mib;
             });
-        
             Ok(())
         },
         Err(call_error) => {

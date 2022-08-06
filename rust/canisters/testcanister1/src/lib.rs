@@ -2,6 +2,32 @@
 
 
 use std::cell::{Cell,RefCell};
+use ic_cdk::{
+    self,
+    export::Principal,
+    api::{
+        trap,
+        id,
+        canister_balance128,
+        call::{
+            call_with_payment128,
+            msg_cycles_accept128,
+            msg_cycles_available128,
+            msg_cycles_refunded128,
+            reject,
+            CallFutureRaw,
+            RejectionCode,
+            call_raw128
+        }
+        
+    }
+};
+use ic_cdk_macros::{
+    update,
+    query
+};
+
+
 /*
 use cts_lib::{
     ic_cdk::{
@@ -40,7 +66,6 @@ use cts_lib::{
 
 thread_local! {
     /*static CYCLES_TRANSFER_CYCLES: Cell<Cycles> = Cell::new(0);*/
-    static TVEC: RefCell<Vec<u64>> = RefCell::new(Vec::new());
 
 }
 
@@ -88,18 +113,19 @@ pub fn test_manual_reply() {
 }
 */
 
-
-#[derive(candid::CandidType, serde::Deserialize)]
-#[serde(bound(deserialize = "'a: 'de"))]
-pub struct Test<'a> {
-    tvec: &'a Vec<u64>
-}
-
-fn main() {
-    let t = Test{
-        tvec: unsafe { &*(TVEC.with(|tvec| { &(*(tvec.borrow())) as *const Vec<u64> })) }
-    };
+#[update]
+pub async fn test_call_future_raw() {
+    let callfutureraw: CallFutureRaw = call_raw128(
+        Principal::from_slice(&[]),
+        "t",
+        &[1,2,3],
+        0
+    );
     
+    println!("{:?}", callfutureraw.call_perform_status_code);
+    println!("{:?}", callfutureraw.will_perform());
+    callfutureraw.await;
+
 }
 
 
