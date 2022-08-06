@@ -20,6 +20,7 @@ use crate::{
 
 
 pub type Cycles = u128;
+pub type CTSFuel = Cycles;
 pub type UserId = Principal;
 pub type UserCanisterId = Principal;
 pub type UsersMapCanisterId = Principal;
@@ -227,10 +228,10 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]    
     pub struct TransferCyclesQuest{
-        user_cycles_transfer_id: u64,
-        for_the_canister: Principal,
-        cycles: Cycles,
-        cycles_transfer_memo: CyclesTransferMemo
+        pub user_cycles_transfer_id: u64,
+        pub for_the_canister: Principal,
+        pub cycles: Cycles,
+        pub cycles_transfer_memo: CyclesTransferMemo
     }
     
     #[derive(CandidType, Deserialize)]
@@ -254,6 +255,12 @@ pub mod cycles_transferrer {
 
 pub mod cts {
     use super::*;
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct UserCanisterLifetimeTerminationQuest {
+        pub user_id: UserId,
+        pub user_cycles_balance: Cycles
+    }
     
 }
 

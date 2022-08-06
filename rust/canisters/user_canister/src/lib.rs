@@ -40,7 +40,9 @@ use cts_lib::{
                 reply,
                 CallResult,
                 arg_data,
-                call
+                arg_data_raw_size,
+                call,
+                call_with_payment128,
             },
             stable::{
                 stable64_grow,
@@ -80,11 +82,13 @@ use cts_lib::{
     },
     types::{
         Cycles,
+        CTSFuel,
         CyclesTransfer,
         CyclesTransferMemo,
         UserId,
         UserCanisterId,
         UsersMapCanisterId,
+        cts,
         cycles_transferrer,
         user_canister::{
             UserCanisterInit,
@@ -97,7 +101,8 @@ use cts_lib::{
         MiB,
         GiB,
         WASM_PAGE_SIZE_BYTES,
-        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
+        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
+        MANAGEMENT_CANISTER_ID,
     },
     tools::{
         localkey::{
@@ -199,6 +204,7 @@ pub const CYCLES_TRANSFER_FEE/*CYCLES_TRANSFERRER_FEE*/: Cycles = 10_000_000_000
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
+const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 
 const USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE: usize = 500usize;
 const USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE: usize = 500usize;
@@ -304,7 +310,7 @@ fn re_store_uc_data_candid_bytes(uc_data_candid_bytes: Vec<u8>) {
 
     std::mem::drop(uc_data_candid_bytes);
 
-    with_mut(&UCData, |ucd| {
+    with_mut(&UC_DATA, |ucd| {
         *ucd = uc_data;
     });
 
@@ -320,11 +326,11 @@ fn pre_upgrade() {
     let uc_upgrade_data_candid_bytes: Vec<u8> = create_uc_data_candid_bytes();
     
     let current_stable_size_wasm_pages: u64 = stable64_size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the uc_upgrade_data_candid_bytes*/ + uc_upgrade_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((uc_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
@@ -353,14 +359,14 @@ fn post_upgrade() {
 // ---------------------------------------------------------------------------------
 
 #[no_mangle]
-fn canister_global_timer() {
+async fn canister_global_timer() {
     if time()/1_000_000_000 > with(&UC_DATA, |uc_data| { uc_data.user_canister_lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
         // call the cts-main for the user-canister-termination
         // the CTS will save the user_id, user_canister_id, and user_cycles_balance for a minimum of the 10-years.
-        match call::<(UserCanisterLifetimeTerminationQuest,), ()>(
+        match call::<(cts::UserCanisterLifetimeTerminationQuest,), ()>(
             cts_id(),
             "user_canister_lifetime_termination",
-            (UserCanisterLifetimeTerminationQuest{
+            (cts::UserCanisterLifetimeTerminationQuest{
                 user_id: user_id(),
                 user_cycles_balance: user_cycles_balance()
             },),
@@ -422,13 +428,15 @@ fn next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
     
 // compute the size of a CyclesTransferIn and of a CyclesTransferOut, check the length of both vectors, and compute the current storage usage. 
 fn calculate_current_storage_usage() -> u64 {
-    localkey::cell::get(&MEMORY_SIZE_AT_THE_START) 
-    + 
-    with(&UC_DATA, |uc_data| { 
-        uc_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<(u64,CyclesTransferIn)>() + 32/*for the cycles-transfer-memo-heap-size*/ )
+    (
+        localkey::cell::get(&MEMORY_SIZE_AT_THE_START) 
         + 
-        uc_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<(u64,CyclesTransferOut)>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
-    })
+        with(&UC_DATA, |uc_data| { 
+            uc_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<(u64,CyclesTransferIn)>() + 32/*for the cycles-transfer-memo-heap-size*/ )
+            + 
+            uc_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<(u64,CyclesTransferOut)>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
+        })
+    ) as u64
 }
 
 fn calculate_free_storage() -> u64 {
@@ -442,12 +450,12 @@ fn ctsfuel_balance() -> CTSFuel {
     .checked_sub(USER_CANISTER_BACKUP_CYCLES).unwrap_or(0)
     .checked_sub(
         with(&UC_DATA, |uc_data| { 
-            uc_data.user_canister_lifetime_termination_timestamp_seconds.checked_sub(time()/1_000_000_000).unwrap_or(0)
+            uc_data.user_canister_lifetime_termination_timestamp_seconds.checked_sub(time()/1_000_000_000).unwrap_or(0) as u128 
             * 
-            uc_data.user_canister_storage_size_mib * 2 // canister-memory-allocation in the mib
-        }) 
+            uc_data.user_canister_storage_size_mib as u128 * 2 // canister-memory-allocation in the mib
+        })
         *
-        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
+        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES as u128
         /
         1024/*network storage charge per MiB per second*/
     ).unwrap_or(0)
@@ -456,11 +464,14 @@ fn ctsfuel_balance() -> CTSFuel {
 fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -> CyclesTransferMemo {
     match cycles_transfer_memo {
         CyclesTransferMemo::Nat(_n) => {},
-        CyclesTransferMemo::Blob(b) | CyclesTransferMemo::Text(b) => {
+        CyclesTransferMemo::Blob(ref mut b) => {
             b.truncate(32);
             b.shrink_to_fit();
+        },
+         CyclesTransferMemo::Text(ref mut s) => {
+            s.truncate(32);
+            s.shrink_to_fit();
         }
-        //Text(s) => s.truncate(32)
     }
     cycles_transfer_memo
 }
@@ -495,7 +506,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
         return;
     }
 
-    if calculate_free_storage() < std::mem::size_of::<(u64,CyclesTransferIn)>() + 32 {
+    if calculate_free_storage() < std::mem::size_of::<(u64,CyclesTransferIn)>() as u64 + 32 {
         trap("Canister memory is full, cannot create a log of the cycles-transfer.");
     }
 
@@ -504,7 +515,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
     }
 
     if msg_cycles_available128() < CYCLES_TRANSFER_IN_MINIMUM_CYCLES {
-        trap(&format("minimum cycles transfer cycles: {}", CYCLES_TRANSFER_IN_MINIMUM_CYCLES));
+        trap(&format!("minimum cycles transfer cycles: {}", CYCLES_TRANSFER_IN_MINIMUM_CYCLES));
     }
         
     let cycles_cept: Cycles = msg_cycles_accept128(msg_cycles_available128());
@@ -512,7 +523,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
     let (ct,): (CyclesTransfer,) = arg_data::<(CyclesTransfer,)>();
     
     with_mut(&UC_DATA, |uc_data| {
-        uc_data.user_data.cycles_balance = user_data.cycles_balance.checked_add(cycles_cept).unwrap_or(u128::MAX);
+        uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_cept).unwrap_or(Cycles::MAX);
         uc_data.user_data.cycles_transfers_in.push((
             new_cycles_transfer_id(),
             CyclesTransferIn{
@@ -565,12 +576,13 @@ pub fn user_download_cycles_transfers_in() {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserTransferCyclesError {
+    UserCanisterCTSFuelBalanceTooLow,
     UserCanisterMemoryIsFull,
     InvalidCyclesTransferMemoSize{max_size_bytes: u64},
     InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
     UserCyclesBalanceTooLow { user_cycles_balance: Cycles, cycles_transfer_fee: Cycles },
-    CyclesTransferrerUserTransferCyclesError(CyclesTransferrerTransferCyclesError),
-    CyclesTransferrerUserTransferCyclesCallError((u32, String))
+    CyclesTransferrerTransferCyclesError(cycles_transferrer::TransferCyclesError),
+    CyclesTransferrerTransferCyclesCallError((u32, String))
 }
 
 #[update]
@@ -580,14 +592,13 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 15_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
     
-    if calculate_free_storage() < std::mem::size_of::<(u64,CyclesTransferOut)>() + 32 + 40 {
+    if ctsfuel_balance() < 15_000_000_000 {
+        return Err(UserTransferCyclesError::UserCanisterCTSFuelBalanceTooLow);
+    }
+    
+    if calculate_free_storage() < std::mem::size_of::<(u64,CyclesTransferOut)>() as u64 + 32 + 40 {
         return Err(UserTransferCyclesError::UserCanisterMemoryIsFull);
     }
     
@@ -601,17 +612,20 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
     
     // check memo size
     match q.cycles_transfer_memo {
-        CyclesTransferMemo::Blob(ref mut b) | CyclesTransferMemo::Text(ref mut b) => {
+        CyclesTransferMemo::Blob(ref b) => {
             if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
-                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u64}); 
             }
-            b.shrink_to_fit();
+            //b.shrink_to_fit();
+            if b.capacity() > b.len() { trap("check this out"); }
         },
-        /*CyclesTransferMemo::Text(ref b) => {
-            if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
-                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes:USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE}); 
+        CyclesTransferMemo::Text(ref s) => {
+            if s.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u64}); 
             }
-        }*/
+            //s.shrink_to_fit();
+            if s.capacity() > s.len() { trap("check this out"); }
+        },
         CyclesTransferMemo::Nat(_n) => {} 
     }
 
@@ -638,14 +652,14 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
     let cycles_transfer_fee: Cycles = CYCLES_TRANSFER_FEE; // copy the value to stay on the stack for the closure to run with it.
     let cancel_user_transfer_cycles = || {
         with_mut(&UC_DATA, |uc_data| {
-            uc_data.user_data.cycles_balance += q_cycles + cycles_transfer_fee;
+            uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(q_cycles + cycles_transfer_fee).unwrap_or(Cycles::MAX);
             
             match uc_data.user_data.cycles_transfers_out.iter().rposition(
                 |cycles_transfer_out_log: &(u64,CyclesTransferOut)| { 
                     (*cycles_transfer_out_log).0 == cycles_transfer_id
                 }
             ) {
-                Some(i) => uc_data.user_data.cycles_transfers_out.remove(i),
+                Some(i) => { uc_data.user_data.cycles_transfers_out.remove(i); },
                 None => {}
             }
         });
@@ -694,15 +708,9 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
 
     with_mut(&UC_DATA, |uc_data| {
         uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_transfer_refund).unwrap_or(u128::MAX);
-        if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = uc_data.user_data.cycles_transfers_out.iter_mut.rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 == q.user_cycles_transfer_id }) {
+        if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = uc_data.user_data.cycles_transfers_out.iter_mut().rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 == q.user_cycles_transfer_id }) {
             (*cycles_transfer_out_log).1.cycles_refunded = Some(cycles_transfer_refund);
-            (*cycles_transfer_out_log).1.call_error = {
-                if let Some(mut call_error) = q.cycles_transfer_call_error {
-                    // call_error.truncate(20) ?
-                    call_error.1.shrink_to_fit();
-                }
-                q.cycles_transfer_call_error
-            };
+            (*cycles_transfer_out_log).1.call_error = q.cycles_transfer_call_error;
         }
     });
 
@@ -827,7 +835,7 @@ pub fn user_cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Re
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
     
     if user_cycles_balance() < cycles_for_the_ctsfuel {
-        return Err(UserCyclesBalanceForTheCTSFuelError::UserCyclesBalanceTooLow{ user_cycles_balance: uc_data.user_data.cycles_balance });        
+        return Err(UserCyclesBalanceForTheCTSFuelError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance() });        
     } 
     
     with_mut(&UC_DATA, |uc_data| {
@@ -865,9 +873,11 @@ pub fn user_lengthen_user_canister_lifetime_termination(q: UserLengthenUserCanis
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
     
     let lengthen_seconds_cost_cycles: Cycles = {
-        q.lengthen_seconds 
-        * with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) * 2 // canister-memory-allocation in the mib 
-        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
+        (
+            q.lengthen_seconds 
+            * with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) * 2 // canister-memory-allocation in the mib 
+            * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
+        ).into()
     };
     
     if lengthen_seconds_cost_cycles > user_cycles_balance() {
@@ -902,8 +912,8 @@ pub enum UserChangeUserCanisterStorageSizeMibError {
 }
 
 #[update]
-pub fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStorageSizeMibQuest) -> Result<(), UserChangeUserCanisterStorageSizeMibError> {
-    if caller != user_id() {
+pub async fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStorageSizeMibQuest) -> Result<(), UserChangeUserCanisterStorageSizeMibError> {
+    if caller() != user_id() {
         trap("caller must be the user for this method.");
     }
     
@@ -914,9 +924,11 @@ pub fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStora
     };
     
     let new_storage_size_mib_cost_cycles: Cycles = {
-        ( q.new_storage_size_mib - with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
-        * with(&UC_DATA, |uc_data| { uc_data.user_canister_lifetime_termination_timestamp_seconds }).checked_sub(time()/1_000_000_000).expect("user-contract-lifetime is with the termination.")
-        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
+        (
+            ( q.new_storage_size_mib - with(&UC_DATA, |uc_data| { uc_data.user_canister_storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
+            * with(&UC_DATA, |uc_data| { uc_data.user_canister_lifetime_termination_timestamp_seconds }).checked_sub(time()/1_000_000_000).expect("user-contract-lifetime is with the termination.")
+            * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
+        ).into()
     };
     
     if user_cycles_balance() < new_storage_size_mib_cost_cycles {
@@ -936,7 +948,7 @@ pub fn user_change_user_canister_storage_size_mib(q: UserChangeUserCanisterStora
             settings: management_canister::ManagementCanisterOptionalCanisterSettings{
                 controllers : None,
                 compute_allocation : None,
-                memory_allocation : Some(q.new_storage_size_mib * 2 * MiB),
+                memory_allocation : Some((q.new_storage_size_mib * 2 * MiB).into()),
                 freezing_threshold : None,
             }
         },)
@@ -1009,7 +1021,7 @@ pub fn cts_download_state_snapshot() {
     if caller() != cts_id() {
         trap("Caller must be the CTS for this method.");
     }
-    let chunk_size: usize = 1*MiB;
+    let chunk_size: usize = 1 * MiB as usize;
     with(&STATE_SNAPSHOT_UC_DATA_CANDID_BYTES, |state_snapshot_uc_data_candid_bytes| {
         let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
         reply::<(Option<&[u8]>,)>((state_snapshot_uc_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
@@ -1091,7 +1103,7 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
             user_cycles_balance: uc_data.user_data.cycles_balance,
             user_canister_ctsfuel_balance: ctsfuel_balance(),
             wasm_memory_size_bytes: ( core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES ) as u64,
-            stable_memory_size_bytes: stable64_size() * WASM_PAGE_SIZE_BYTES,
+            stable_memory_size_bytes: stable64_size() * WASM_PAGE_SIZE_BYTES as u64,
             user_canister_storage_size_mib: uc_data.user_canister_storage_size_mib,
             user_canister_lifetime_termination_timestamp_seconds: uc_data.user_canister_lifetime_termination_timestamp_seconds,
             cycles_transferrer_canisters: uc_data.cycles_transferrer_canisters.clone(),
