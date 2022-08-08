@@ -224,40 +224,43 @@ use tools::{
     
 };
 
-
 mod frontcode;
 use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_hash, make_file_certificate_header};
 
 
 
+#[derive(CandidType, Deserialize)]
+struct CTSData {
+    controllers: Vec<Principal>,
+    user_canister_code: CanisterCode,
+    users_map_canister_code: CanisterCode,
+    cycles_transferrer_canister_code: CanisterCode,    
+    users_map_canisters: Vec<Principal>,
+    create_new_users_map_canister_lock: bool,
+    cycles_transferrer_canisters: Vec<Principal>,
+    cycles_transferrer_canisters_round_robin_counter: u32,
+    frontcode_files: Vec<(String, File)>,
+    frontcode_files_hashes: Vec<(String, [u8; 32])>,
+    canisters_not_in_use: Vec<Principal>,
+    new_users: Vec<(Principal, NewUserData)>,
 
-pub type ReTryCTSUserTransferCyclesCallback = (ReTryCTSUserTransferCyclesCallbackErrorKind/*the error of the last try*/, CTSUserTransferCyclesCallbackQuest, UserCanisterId);
-
-#[derive(CandidType, Deserialize, Clone)]
-pub enum ReTryCTSUserTransferCyclesCallbackErrorKind {
-    CTSUserTransferCyclesCallbackError(CTSUserTransferCyclesCallbackError),
-    CTSUserTransferCyclesCallbackCallError((u32, String))
 }
 
 
 
 
 
-pub const CYCLES_TRANSFER_INTO_USER_USER_NOT_FOUND_FEE: Cycles = /*TEST-VALUE*/3; //(100_000 + 260_000 + 590_000 + 1_000_000_000); // * with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u128); // :do: clude wasm-instructions-counts 1000000000 placeholder
-pub const CYCLES_PER_USER_PER_103_MiB_PER_YEAR: Cycles = /*TEST-VALUE*/2_000_000_000_000; //5_000_000_000_000;
+pub const CYCLES_COST_FOR_A_NEW_USER_CONTRACT: Cycles = 10_000_000_000_000; //10T-cycles for a new-user-contract. lifetime: 1-year, storage-size: 50mib/*100mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
+pub const NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS: u64 = 1*60*60*24*365; // 1-year. 
+pub const NEW_USER_CONTRACT_STORAGE_SIZE_MiB: u64 = 50; // 50-mib
+pub const NEW_USER_CONTRACT_CTSFUEL: CTSFuel = 5_000_000_000_000; // 5T-cycles.
+pub const NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION: u64 = NEW_USER_CONTRACT_STORAGE_SIZE_MiB * 2;
 
-pub const CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE: Cycles = /*TEST-VALUE*/1_000_000_000_000; //3_000_000_000_000; // MAKE SURE THIS IS < CYCLES_PER_USER_PER_103_MiB_PER_YEAR
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
-pub const MINIMUM_CYCLES_TRANSFER_INTO_USER: Cycles = /*TEST-VALUE*/1; //50_000_000_000; // enough to pay for a find_and_lock_user-call.
-
-pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = /*TEST-VALUE*/1; // 100_000_000_000
 
 pub const ICP_PAYOUT_FEE: IcpTokens = IcpTokens::from_e8s(30000);// calculate through the xdr conversion rate ? // 100_000_000_000-cycles
-
-
-//pub const CYCLES_BANK_COST: Cycles = ; // 10_000_000_000_000;
-//pub const CYCLES_BANK_UPGRADE_COST: Cycles = ; // 5_000_000_000_000;
+pub const CONVERT_ICP_FOR_THE_CYCLES_WITH_THE_CMC_RATE_FEE: Cycles = /*TEST-VALUE*/1; // 20_000_000_000
 
 
 
@@ -265,33 +268,36 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 thread_local! {
-
-    static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
-    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
-    pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
-    pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
-    
+    /*
+    static     CONTROLLERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+        
     pub static USER_CANISTER_CODE           : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
     pub static USERS_MAP_CANISTER_CODE      : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
     pub static CYCLES_TRANSFERRER_CANISTER_CODE: RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
     
-    pub static NEW_CANISTERS: RefCell<VecDeque<Principal>> = RefCell::new(VecDeque::new());
+    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
     
     static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
     static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<u32> = Cell::new(0);
-    static     RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS/*_LOGS*/: RefCell<Vec<ReTryCTSUserTransferCyclesCallback>> = RefCell::new(Vec::new());
+
+    pub static CANISTERS_NOT_IN_USE: RefCell<VecDeque<Principal>> = RefCell::new(VecDeque::new());
 
     static     FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
     static     FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
 
-    static     CONTROLLERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
     
-    static     CYCLES_TRANSFERS_COUNT: Cell<u64> = Cell::new(0);
+    */
     
-    // not save in a CTSData
+    static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
+    
+    // not save through upgrades
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static     LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     static     USER_CANISTER_CACHE: RefCell<UserCanisterCache> = RefCell::new(UserCanisterCache::new());
+    
 }
 
 
