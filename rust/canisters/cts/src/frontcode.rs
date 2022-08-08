@@ -16,7 +16,7 @@ use cts_lib::{
 
 use serde::Serialize;
 
-use crate::{FRONTCODE_FILES_HASHES, FRONTCODE_FILES};
+use crate::FRONTCODE_FILES_HASHES;
 
 
 const LABEL_ASSETS: &[u8; 11] = b"http_assets";
@@ -52,6 +52,7 @@ pub struct HttpRequest {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    #[serde(with = "serde_bytes")]
     pub body: Vec<u8>,
 }
 

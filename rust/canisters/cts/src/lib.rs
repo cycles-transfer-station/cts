@@ -234,21 +234,38 @@ struct CTSData {
     controllers: Vec<Principal>,
     user_canister_code: CanisterCode,
     users_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,    
+    cycles_transferrer_canister_code: CanisterCode,
+    frontcode_files: Files,
+    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
     users_map_canisters: Vec<Principal>,
     create_new_users_map_canister_lock: bool,
     cycles_transferrer_canisters: Vec<Principal>,
     cycles_transferrer_canisters_round_robin_counter: u32,
-    frontcode_files: Vec<(String, File)>,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>,
-    canisters_not_in_use: Vec<Principal>,
-    new_users: Vec<(Principal, NewUserData)>,
+    canisters_not_in_use: VecDeque<Principal>,
+    new_users: HashMap<Principal, NewUserData>,
 
+}
+impl CTSData {
+    fn new() -> Self {
+        Self {
+            controllers: Vec::new(),
+            user_canister_code: CanisterCode::new(Vec::new()),
+            users_map_canister_code: CanisterCode::new(Vec::new()),
+            cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
+            frontcode_files: Files::new(),
+            frontcode_files_hashes: Vec::new(), // field is [only] use for the upgrades.
+            users_map_canisters: Vec::new(),
+            create_new_users_map_canister_lock: false,
+            cycles_transferrer_canisters: Vec::new(),
+            cycles_transferrer_canisters_round_robin_counter: 0,
+            canisters_not_in_use: VecDeque::new(),
+            new_users: HashMap::new(),
+        }
+    }
 }
 
 
-
-
+    
 
 pub const CYCLES_COST_FOR_A_NEW_USER_CONTRACT: Cycles = 10_000_000_000_000; //10T-cycles for a new-user-contract. lifetime: 1-year, storage-size: 50mib/*100mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
 pub const NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS: u64 = 1*60*60*24*365; // 1-year. 
@@ -268,31 +285,11 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 thread_local! {
-    /*
-    static     CONTROLLERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
-        
-    pub static USER_CANISTER_CODE           : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
-    pub static USERS_MAP_CANISTER_CODE      : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
-    pub static CYCLES_TRANSFERRER_CANISTER_CODE: RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
-    
-    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
-    pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
-    
-    static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
-    static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<u32> = Cell::new(0);
-
-    pub static CANISTERS_NOT_IN_USE: RefCell<VecDeque<Principal>> = RefCell::new(VecDeque::new());
-
-    static     FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
-    static     FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
-
-    static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
-    
-    */
     
     static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
     // not save through upgrades
+    pub static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::new()); // is with the save through the upgrades by the frontcode_files_hashes field on the CTSData
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
     static     LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
@@ -302,7 +299,7 @@ thread_local! {
 
 
 
-
+// -------------------------------------------------------------
 
 
 #[derive(CandidType, Deserialize)]
@@ -316,140 +313,51 @@ fn init(cts_init: CTSInit) {
 } 
 
 
-// --- OLD UPGRADE DATA -------
-
-
-#[derive(CandidType, Deserialize)]
-struct OldCTSData {
-new_users: Vec<(Principal, NewUserData)>,
-    users_map_canisters: Vec<Principal>,
-    create_new_users_map_canister_lock: bool,
-    latest_known_cmc_rate: IcpXdrConversionRate,
-    user_canister_code: CanisterCode,
-    users_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
-    new_canisters: Vec<Principal>,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
-    re_try_cts_user_transfer_cycles_callbacks: Vec<ReTryCTSUserTransferCyclesCallback>,
-    frontcode_files: Vec<(String, File)>,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>,
-    controllers: Vec<Principal>,
-    cycles_transfers_count: u64,
-    users_cycles_sum: Cycles
-}
-
-
-
-
-
-
-// ----------------------------
-
-
-
-
-#[derive(CandidType, Deserialize)]
-struct CTSData {
-    new_users: Vec<(Principal, NewUserData)>,
-    users_map_canisters: Vec<Principal>,
-    create_new_users_map_canister_lock: bool,
-    latest_known_cmc_rate: IcpXdrConversionRate,
-    user_canister_code: CanisterCode,
-    users_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
-    new_canisters: Vec<Principal>,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
-    re_try_cts_user_transfer_cycles_callbacks: Vec<ReTryCTSUserTransferCyclesCallback>,
-    frontcode_files: Vec<(String, File)>,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>,
-    controllers: Vec<Principal>,
-    cycles_transfers_count: u64,
-}
-
+// -------------------------------------------------------------
 
 
 fn create_cts_data_candid_bytes() -> Vec<u8> {
-    let mut cts_data_candid_bytes: Vec<u8> = encode_one(
-        &CTSData {
-            new_users: with(&NEW_USERS, |new_users| { (*new_users).clone().into_iter().collect::<Vec<(Principal, NewUserData)>>() }),  //Vec<(Principal, NewUserData)>,
-            users_map_canisters: with(&USERS_MAP_CANISTERS, |users_map_canisters| { (*users_map_canisters).clone() }), // Vec<Principal>,
-            create_new_users_map_canister_lock: CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|create_new_users_map_canister_lock| { create_new_users_map_canister_lock.get() }), //bool, // the cts main canister can stop safe before upgrading. this value should always be false when upgrading for now becouse the canister stops and finishes ongoing callbacks before upgrading. leaving this here for when there is name-callbacks.
-            latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|latest_known_cmc_rate| { latest_known_cmc_rate.get() }),    // IcpXdrConversionRate,
-            user_canister_code: with(&USER_CANISTER_CODE, |user_canister_code| { (*user_canister_code).clone() }),
-            users_map_canister_code: with(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { (*users_map_canister_code).clone() }),
-            cycles_transferrer_canister_code: with(&CYCLES_TRANSFERRER_CANISTER_CODE, |cycles_transferrer_canister_code| { (*cycles_transferrer_canister_code).clone() }),
-            new_canisters: with(&NEW_CANISTERS, |new_canisters| { Vec::from((*new_canisters).clone()) }), // Vec<Principal>,
-            cycles_transferrer_canisters: with(&CYCLES_TRANSFERRER_CANISTERS, |cycles_transferrer_canisters| { (*cycles_transferrer_canisters).clone() }), // Vec<Principal>,
-            cycles_transferrer_canisters_round_robin_counter: get(&CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER),
-            re_try_cts_user_transfer_cycles_callbacks: with(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cts_user_transfer_cycles_callbacks| { (*re_try_cts_user_transfer_cycles_callbacks).clone() }), // Vec<ReTryCTSUserTransferCyclesCallback>,
-            frontcode_files: with(&FRONTCODE_FILES, |frontcode_files| { (*frontcode_files).clone().into_iter().collect::<Vec<(String, File)>>() }), //Vec<(String, File)>,
-            frontcode_files_hashes: with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { frontcode_files_hashes.iter().map(|(k, v): (&String, &[u8; 32])| { (k.clone(), *v/*copy*/) }).collect::<Vec<(String, [u8; 32])>>() }), //Vec<(String, [u8; 32])>, 
-            controllers: with(&CONTROLLERS, |controllers| { (*controllers).clone() }), // Vec<Principal>     
-            cycles_transfers_count: get(&CYCLES_TRANSFERS_COUNT)
-        }
-    ).unwrap();
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        cts_data.frontcode_files_hashes = with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { 
+            frontcode_files_hashes.iter().map(
+                |ferences| { ferences.clone() }
+            ).collect::<Vec<(String, [u8; 32])>>() 
+        });
+    });
+
+    let mut cts_data_candid_bytes: Vec<u8> = with(&CTS_DATA, |cts_data| { encode_one(cts_data).unwrap() });
     cts_data_candid_bytes.shrink_to_fit();
     cts_data_candid_bytes
 }
 
 fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
     
-    let cts_upgrade_data: CTSData = match decode_one::<OldCTSData>(&cts_data_candid_bytes) {
-        Ok(old_cts_data) => {
-
-            CTSData{
-                new_users: old_cts_data.new_users,
-                users_map_canisters: old_cts_data.users_map_canisters,
-                create_new_users_map_canister_lock: old_cts_data.create_new_users_map_canister_lock,
-                latest_known_cmc_rate: old_cts_data.latest_known_cmc_rate,
-                user_canister_code: old_cts_data.user_canister_code,
-                users_map_canister_code: old_cts_data.users_map_canister_code,
-                cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
-                new_canisters: old_cts_data.new_canisters,
-                cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
-                cycles_transferrer_canisters_round_robin_counter: old_cts_data.cycles_transferrer_canisters_round_robin_counter,
-                re_try_cts_user_transfer_cycles_callbacks: old_cts_data.re_try_cts_user_transfer_cycles_callbacks,
-                frontcode_files: old_cts_data.frontcode_files,
-                frontcode_files_hashes: old_cts_data.frontcode_files_hashes,
-                controllers: old_cts_data.controllers,
-                cycles_transfers_count: old_cts_data.cycles_transfers_count,
-                 
-            }
-            
-        }
-        Err(_e) => {
-            decode_one::<CTSData>(&cts_data_candid_bytes).unwrap()
+    let mut cts_data: CTSData = match decode_one::<CTSData>(&cts_data_candid_bytes) {
+        Ok(cts_data) => cts_data,
+        Err(_) {
+            trap("error decode of the CTSData");
+            /*
+            let old_cts_data: OldCTSData = decode_one::<CTSData>(&cts_data_candid_bytes).unwrap();
+            let cts_data: CTSData = CTSData{
+                controllers: old_cts_data.controllers
+                ........
+            };
+            cts_data
+            */
         }
     };
-    
-    
-    //let cts_upgrade_data: CTSData = decode_one::<CTSData>(&cts_data_candid_bytes).unwrap();
-    
+
     std::mem::drop(cts_data_candid_bytes);
     
-    with_mut(&NEW_USERS, |new_users| { *new_users = cts_upgrade_data.new_users.into_iter().collect::<HashMap<Principal, NewUserData>>(); });
-    with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { *users_map_canisters = cts_upgrade_data.users_map_canisters; });
-    CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|create_new_users_map_canister_lock| { create_new_users_map_canister_lock.set(cts_upgrade_data.create_new_users_map_canister_lock); });
-    LATEST_KNOWN_CMC_RATE.with(|latest_known_cmc_rate| { latest_known_cmc_rate.set(cts_upgrade_data.latest_known_cmc_rate); });
-    with_mut(&USER_CANISTER_CODE, |user_canister_code| { *user_canister_code = cts_upgrade_data.user_canister_code; });
-    with_mut(&USERS_MAP_CANISTER_CODE, |users_map_canister_code| { *users_map_canister_code = cts_upgrade_data.users_map_canister_code; });
-    with_mut(&CYCLES_TRANSFERRER_CANISTER_CODE, |cycles_transferrer_canister_code| { *cycles_transferrer_canister_code = cts_upgrade_data.cycles_transferrer_canister_code; });
-    with_mut(&NEW_CANISTERS, |new_canisters| { *new_canisters = VecDeque::from(cts_upgrade_data.new_canisters); });
-    with_mut(&CYCLES_TRANSFERRER_CANISTERS, |cycles_transferrer_canisters| { *cycles_transferrer_canisters = cts_upgrade_data.cycles_transferrer_canisters; });
-    set(&CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER, cts_upgrade_data.cycles_transferrer_canisters_round_robin_counter);
-    with_mut(&RE_TRY_CTS_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cts_user_transfer_cycles_callbacks| { *re_try_cts_user_transfer_cycles_callbacks = cts_upgrade_data.re_try_cts_user_transfer_cycles_callbacks; });
-    with_mut(&FRONTCODE_FILES, |frontcode_files| { *frontcode_files = cts_upgrade_data.frontcode_files.into_iter().collect::<HashMap<String, File>>(); });
     with_mut(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| {
-        cts_upgrade_data.frontcode_files_hashes.into_iter().for_each(|file_hash_pair| {
-            frontcode_files_hashes.insert(file_hash_pair.0, file_hash_pair.1);    
-        });
+        *frontcode_files_hashes = FilesHashes::from_iter(cts_data.frontcode_files_hashes.drain(..));
         set_root_hash(frontcode_files_hashes);
     });
-    with_mut(&CONTROLLERS, |controllers| { *controllers = cts_upgrade_data.controllers; });
-    set(&CYCLES_TRANSFERS_COUNT, cts_upgrade_data.cycles_transfers_count);    
-
+    
+    with_mut(&CTS_DATA, |ctsd| {
+        *ctsd = cts_data;    
+    });
     
 }
 
@@ -460,11 +368,11 @@ fn pre_upgrade() {
     let cts_upgrade_data_candid_bytes: Vec<u8> = create_cts_data_candid_bytes();
     
     let current_stable_size_wasm_pages: u64 = stable64_size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the cts_upgrade_data_candid_bytes*/ + cts_upgrade_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((cts_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
@@ -495,18 +403,18 @@ pub fn canister_inspect_message() {
     if caller() == Principal::anonymous() 
         && !["see_fees"].contains(&&method_name()[..])
         {
-        trap("caller cannot be anonymous for this method.")
+        trap("caller cannot be anonymous for this method.");
     }
     
     // check the size of the arg_data_raw_size()
 
     if &method_name()[..] == "cycles_transfer" {
-        trap("caller must be a canister for this method.")
+        trap("caller must be a canister for this method.");
     }
     
     if method_name()[..].starts_with("controller") {
-        if with(&CONTROLLERS, |controllers| { !controllers.contains(&caller()) }) {
-            trap("Caller must be a controller for this method.")
+        if with(&CONTROLLERS, |controllers| { controllers.contains(&caller()) }) == false {
+            trap("Caller must be a controller for this method.");
         }
     }
 
@@ -2838,4 +2746,23 @@ pub fn see_caller() -> Principal {
 
 
 
+tic     CONTROLLERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+        
+    pub static USER_CANISTER_CODE           : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
+    pub static USERS_MAP_CANISTER_CODE      : RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
+    pub static CYCLES_TRANSFERRER_CANISTER_CODE: RefCell<CanisterCode> = RefCell::new(CanisterCode::new(Vec::new()));
+    
+    pub static USERS_MAP_CANISTERS: RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    pub static CREATE_NEW_USERS_MAP_CANISTER_LOCK: Cell<bool> = Cell::new(false);
+    
+    static     CYCLES_TRANSFERRER_CANISTERS : RefCell<Vec<Principal>> = RefCell::new(Vec::new());
+    static     CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<u32> = Cell::new(0);
 
+    pub static CANISTERS_NOT_IN_USE: RefCell<VecDeque<Principal>> = RefCell::new(VecDeque::new());
+
+    static     FRONTCODE_FILES:        RefCell<Files>       = RefCell::new(Files::new());
+    static     FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::default());
+
+    static     NEW_USERS: RefCell<HashMap<Principal, NewUserData>> = RefCell::new(HashMap::new());
+    
+    */
