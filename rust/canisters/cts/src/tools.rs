@@ -173,7 +173,7 @@ pub fn put_new_canister(put_new_canister: Principal) -> Result<(), ()> {
 
 #[derive(CandidType, Deserialize)]
 pub enum CheckCurrentXdrPerMyriadPerIcpCmcRateError {
-    CmcGetRateCallError(String),
+    CmcGetRateCallError((u32, String)),
     CmcGetRateCallSponseCandidError(String),
 }
 
@@ -196,7 +196,7 @@ pub type CheckCurrentXdrPerMyriadPerIcpCmcRateSponse = Result<u64, CheckCurrentX
 pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPerMyriadPerIcpCmcRateSponse {
 
     let latest_known_cmc_rate: IcpXdrConversionRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
-    if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 10*60 {
+    if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 60*10 {
         return Ok(latest_known_cmc_rate.xdr_permyriad_per_icp);
     }
     
@@ -207,7 +207,7 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
         0
     ).await {
         Ok(b) => b,
-        Err(call_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError(format!("{:?}", call_error)))
+        Err(call_error) => return Err(CheckCurrentXdrPerMyriadPerIcpCmcRateError::CmcGetRateCallError((call_error.0 as u32, call_error.1)))
     };
     let icp_xdr_conversion_rate: IcpXdrConversionRate = match decode_one::<IcpXdrConversionRateCertifiedResponse>(&call_sponse_candid_bytes) {
         Ok(s) => s.data,
