@@ -174,7 +174,6 @@ impl UserData {
 struct UCData {
     user_canister_creation_timestamp_nanos: u64,
     cts_id: Principal,
-    umc_id: UsersMapCanisterId,
     user_id: UserId,
     user_canister_storage_size_mib: u64,
     user_canister_lifetime_termination_timestamp_seconds: u64,
@@ -188,7 +187,6 @@ impl UCData {
         Self {
             user_canister_creation_timestamp_nanos: 0u64,
             cts_id: Principal::from_slice(&[]),
-            umc_id: Principal::from_slice(&[]),
             user_id: Principal::from_slice(&[]),
             user_canister_storage_size_mib: 0u64,       // memory-allocation/2 // is with the set in the canister_init // in the mib // starting at a 50mib-storage with a 1-year-user_canister_lifetime with a 5T-cycles-ctsfuel-balance at a cost: 10T-CYCLES   // this value is half of the user-canister-memory_allocation. for the upgrades.  
             user_canister_lifetime_termination_timestamp_seconds: 0u64,
@@ -240,7 +238,6 @@ fn canister_init(user_canister_init: UserCanisterInit) {
         *uc_data = UCData{
             user_canister_creation_timestamp_nanos:                 time(),
             cts_id:                                                 user_canister_init.cts_id,
-            umc_id:                                                 user_canister_init.umc_id,
             user_id:                                                user_canister_init.user_id,
             user_canister_storage_size_mib:                         user_canister_init.user_canister_storage_size_mib,
             user_canister_lifetime_termination_timestamp_seconds:   user_canister_init.user_canister_lifetime_termination_timestamp_seconds,
@@ -1080,7 +1077,6 @@ pub struct CTSUCMetrics {
     user_canister_lifetime_termination_timestamp_seconds: u64,
     cycles_transferrer_canisters: Vec<Principal>,
     user_id: UserId,
-    umc_id: UsersMapCanisterId,
     user_canister_creation_timestamp_nanos: u64,
     cycles_transfers_id_counter: u64,
     cycles_transfers_out_len: u64,
@@ -1108,7 +1104,6 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
             user_canister_lifetime_termination_timestamp_seconds: uc_data.user_canister_lifetime_termination_timestamp_seconds,
             cycles_transferrer_canisters: uc_data.cycles_transferrer_canisters.clone(),
             user_id: uc_data.user_id,
-            umc_id: uc_data.umc_id,
             user_canister_creation_timestamp_nanos: uc_data.user_canister_creation_timestamp_nanos,
             cycles_transfers_id_counter: uc_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: uc_data.user_data.cycles_transfers_in.len() as u64,

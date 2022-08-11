@@ -849,55 +849,13 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         };
         
         new_user_data.user_canister = Some(user_canister);
+        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(user_canister)); });
         new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
         
-        
-    if new_user_data.users_map_canister.is_none() {
-        
-        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(
-            user_id, 
-            UMCUserData{
-                user_canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
-                user_canister_latest_known_module_hash: [0u8; 32] // 0s cause we are putting the user_canister_id onto the users_map_canister before install_code on the user_canister, cause we install_code with the umc_id in the user-canister-init-arg. we can update the umc_user_data on the umc after we install the code, but for now we will let it get upgrade
-            }
-        ).await {
-            Ok(umcid) => umcid,
-            Err(put_new_user_into_a_users_map_canister_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
-            }
-        };
-        
-        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(new_user_data.user_canister.as_ref().unwrap().clone())); });
-        new_user_data.users_map_canister = Some(users_map_canister_id);
-    }
     
     // :checkpoint.
  
-    // before collecting icp, hand out the referral-bonuses if there is.
-    if new_user_data.collect_icp == false {
-        match take_user_icp_ledger(&user_id, cycles_to_icptokens(, new_user_data.current_xdr_icp_rate)).await {
-            Ok(icp_transfer_result) => match icp_transfer_result {
-                Ok(_block_height) => {
-                    new_user_data.collect_icp = true;
-                },
-                Err(icp_transfer_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferError(icp_transfer_error)));          
-                }
-            }, 
-            Err(icp_transfer_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferCallError(format!("{:?}", icp_transfer_call_error))));          
-            }               
-        }
-    }
-
-
 
     if new_user_data.user_canister_uninstall_code == false {
         
@@ -936,7 +894,6 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
                 arg : &encode_one(&UserCanisterInit{ 
                     cts_id: id(), 
                     user_id: user_id,
-                    umc_id: new_user_data.users_map_canister.unwrap()
                 }).unwrap() 
             },),
         ).await {
@@ -1042,7 +999,51 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
     }
     
     
-    // call the umc to tell it what the module hash is of the user_canister? upgrades can still happen between
+    if new_user_data.users_map_canister.is_none() {
+        
+        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(
+            user_id, 
+            UMCUserData{
+                user_canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
+                user_canister_latest_known_module_hash: new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone()
+            }
+        ).await {
+            Ok(umcid) => umcid,
+            Err(put_new_user_into_a_users_map_canister_error) => {
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
+            }
+        };
+        
+        new_user_data.users_map_canister = Some(users_map_canister_id);
+    }
+    
+    
+    if new_user_data.give_out_the_referral_bonuses == false {
+    
+    }
+    
+    // before collecting icp, hand out the referral-bonuses if there is.
+    if new_user_data.collect_icp == false {
+        match take_user_icp_ledger(&user_id, cycles_to_icptokens(, new_user_data.current_xdr_icp_rate)).await {
+            Ok(icp_transfer_result) => match icp_transfer_result {
+                Ok(_block_height) => {
+                    new_user_data.collect_icp = true;
+                },
+                Err(icp_transfer_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferError(icp_transfer_error)));          
+                }
+            }, 
+            Err(icp_transfer_call_error) => {
+                new_user_data.lock = false;
+                write_new_user_data(&user_id, new_user_data);
+                return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferCallError(format!("{:?}", icp_transfer_call_error))));          
+            }               
+        }
+    }
     
 
 

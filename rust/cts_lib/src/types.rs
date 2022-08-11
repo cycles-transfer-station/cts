@@ -317,7 +317,6 @@ pub mod user_canister {
     #[derive(CandidType, Deserialize)]
     pub struct UserCanisterInit {
         pub user_id: UserId,
-        pub umc_id: UsersMapCanisterId,
         pub cts_id: Principal,
         pub user_canister_storage_size_mib: u64,                         
         pub user_canister_lifetime_termination_timestamp_seconds: u64,
