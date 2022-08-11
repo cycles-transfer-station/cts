@@ -99,7 +99,8 @@ use cts_lib::{
     consts::{
         MANAGEMENT_CANISTER_ID,
         WASM_PAGE_SIZE_BYTES,
-        NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES
+        NETWORK_CANISTER_CREATION_FEE_CYCLES,
+        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
     },
     tools::{
         sha256,
@@ -268,10 +269,21 @@ impl CTSData {
     
 
 pub const NEW_USER_CONTRACT_COST_CYCLES: Cycles = 10_000_000_000_000; //10T-cycles for a new-user-contract. lifetime: 1-year, storage-size: 50mib/*100mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
-pub const NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS: u64 = 1*60*60*24*365; // 1-year. 
-pub const NEW_USER_CONTRACT_STORAGE_SIZE_MiB: u64 = 50; // 50-mib
+pub const NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS: u64 = 1*60*60*24*365; // 1-year.
 pub const NEW_USER_CONTRACT_CTSFUEL: CTSFuel = 5_000_000_000_000; // 5T-cycles.
-pub const NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION: u64 = NEW_USER_CONTRACT_STORAGE_SIZE_MiB * 2;
+pub const NEW_USER_CONTRACT_STORAGE_SIZE_MiB: u64 = 50; // 50-mib
+pub const NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: u64 = NEW_USER_CONTRACT_STORAGE_SIZE_MiB * 2;
+pub const NEW_USER_CANISTER_BACKUP_CYCLES: Cycles = 1_400_000_000_000;
+pub const NEW_USER_CANISTER_CREATION_CYCLES: Cycles = {
+    NETWORK_CANISTER_CREATION_FEE_CYCLES
+    + (
+        NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS as u128 
+        * NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB as u128 
+        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES as u128 
+        / 1024 /*network mib storage per second*/ )
+    + NEW_USER_CONTRACT_CTSFUEL
+    + NEW_USER_CANISTER_BACKUP_CYCLES
+};
 
 pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
 pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
@@ -513,6 +525,7 @@ struct NewUserData {
     new_user_quest: NewUserQuest,
     // the options and bools are for the memberance of the steps
     look_if_user_is_in_the_users_map_canisters: bool,
+    look_if_referral_user_is_in_the_users_map_canisters: bool,
     create_user_canister_block_height: Option<IcpBlockHeight>,
     user_canister: Option<Principal>,
     users_map_canister: Option<UsersMapCanisterId>,
@@ -546,6 +559,7 @@ pub enum NewUserMidCallError{
 
 #[derive(CandidType, Deserialize)]
 pub enum NewUserError{
+    ReferralUserCannotBeTheCaller,
     CheckIcpBalanceCallError((u32, String)),
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
     UserIcpLedgerBalanceTooLow{
@@ -557,6 +571,7 @@ pub enum NewUserError{
     CallWithTheAlreadySetParameters(NewUserQuest), // on this error re-try the call with the already set parameters by an earlier unfinished call.
     MaxNewUsers,
     FoundUserCanister(UserCanisterId),
+    ReferralUserNotFound,
     CreateUserCanisterCmcNotifyError(CmcNotifyError),
     MidCallError(NewUserMidCallError),    // re-try the call on this sponse
 }
@@ -564,13 +579,12 @@ pub enum NewUserError{
 
 #[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
 pub struct NewUserQuest {
-    referral_user_id: Option<UserId>,
+    opt_referral_user_id: Option<UserId>,
 }
 
 
 #[derive(CandidType, Deserialize)]
 pub struct NewUserSuccessData {
-//    new_user_quest: NewUserQuest,
     user_canister_id: UserCanisterId,
 }
 
@@ -589,6 +603,12 @@ fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
 pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserError> {
 
     let user_id: Principal = caller();
+    
+    if let Some(ref referral_user_id) = q.opt_referral_user_id {
+        if *referral_user_id == user_id {
+            return Err(NewUserError::ReferralUserCannotBeTheCaller);
+        }
+    }
     
     let optional_new_user_data: Option<NewUserData> = {
         let r: Result<Option<NewUserData>, NewUserError> = with_mut(&CTS_DATA, |cts_data| {
@@ -676,6 +696,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
                             new_user_quest: q,
                             // the options and bools are for the memberance of the steps
                             look_if_user_is_in_the_users_map_canisters: false,
+                            look_if_referral_user_is_in_the_users_map_canisters: false,
                             create_user_canister_block_height: None,
                             user_canister: None,
                             users_map_canister: None,
@@ -705,8 +726,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         Some(nud) => nud        
         
     };
-
-    // :checkpoint.
+    
     
     if new_user_data.look_if_user_is_in_the_users_map_canisters == false {
         // check in the list of the users-whos cycles-balance is save but without a user-canister 
@@ -714,10 +734,9 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         match find_user_canister_of_the_specific_user(user_id).await {
             Ok(opt_user_canister_id) => match opt_user_canister_id {
                 Some(user_canister_id) => {
-                    // take a fee for this?
-                    with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+                    with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
                     return Err(NewUserError::FoundUserCanister(user_canister_id));
-                }, 
+                },
                 None => {
                     new_user_data.look_if_user_is_in_the_users_map_canisters = true;
                 }
@@ -733,13 +752,40 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         
     }
     
+    if new_user_data.look_if_referral_user_is_in_the_users_map_canisters == false {
+    
+        if new_user_data.new_user_quest.opt_referral_user_id.is_none() {
+            new_user_data.look_if_referral_user_is_in_the_users_map_canisters = true;
+        } else {      
+            match find_user_canister_of_the_specific_user(new_user_data.new_user_quest.opt_referral_user_id.as_ref().unwrap().clone()).await {
+                Ok(opt_user_canister_id) => match opt_user_canister_id {
+                    Some(user_canister_id) => {
+                        new_user_data.look_if_referral_user_is_in_the_users_map_canisters = true;
+                    },
+                    None => {
+                        with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
+                        return Err(NewUserError::ReferralUserNotFound);
+                    }
+                },
+                Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
+                    FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
+                        new_user_data.lock = false;
+                        write_new_user_data(&user_id, new_user_data);
+                        return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanistersFindUserCallFails(umc_call_errors)));
+                    }
+                }
+            }
+        }
+        
+    }
+    
 
     if new_user_data.create_user_canister_block_height.is_none() {
         let create_user_canister_block_height: IcpBlockHeight = match icp_transfer(
             MAINNET_LEDGER_CANISTER_ID,
             IcpTransferArgs {
                 memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
-                amount: cycles_to_icptokens(CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate),
+                amount: cycles_to_icptokens(NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate),
                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                 from_subaccount: Some(principal_icp_subaccount(&user_id)),
                 to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
@@ -755,10 +801,9 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
                 }
             },
             Err(transfer_call_error) => {
-                // match on the transfer_call_error?
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferCallError(format!("{:?}", transfer_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1))));
             }
         };
     
@@ -797,10 +842,9 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
                 }
             },
             Err(cmc_notify_call_error) => {
-                // match on the call errors?
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyCallError(format!("{:?}", cmc_notify_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyCallError((cmc_notify_call_error.0 as u32, cmc_notify_call_error.1))));
             }      
         };
         
@@ -814,7 +858,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(
             user_id, 
             UMCUserData{
-                user_canister_id: *new_user_data.user_canister.as_ref().unwrap(),
+                user_canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
                 user_canister_latest_known_module_hash: [0u8; 32] // 0s cause we are putting the user_canister_id onto the users_map_canister before install_code on the user_canister, cause we install_code with the umc_id in the user-canister-init-arg. we can update the umc_user_data on the umc after we install the code, but for now we will let it get upgrade
             }
         ).await {
@@ -826,13 +870,15 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
             }
         };
         
-        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(*new_user_data.user_canister.as_ref().unwrap())); });
+        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(new_user_data.user_canister.as_ref().unwrap().clone())); });
         new_user_data.users_map_canister = Some(users_map_canister_id);
     }
     
-    
+    // :checkpoint.
+ 
+    // before collecting icp, hand out the referral-bonuses if there is.
     if new_user_data.collect_icp == false {
-        match take_user_icp_ledger(&user_id, cycles_to_icptokens(CYCLES_PER_USER_PER_103_MiB_PER_YEAR - CYCLES_FOR_A_USER_CANISTER_PER_103_MiB_PER_YEAR_STANDARD_CALL_RATE, new_user_data.current_xdr_icp_rate)).await {
+        match take_user_icp_ledger(&user_id, cycles_to_icptokens(, new_user_data.current_xdr_icp_rate)).await {
             Ok(icp_transfer_result) => match icp_transfer_result {
                 Ok(_block_height) => {
                     new_user_data.collect_icp = true;
