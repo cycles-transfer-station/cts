@@ -9,8 +9,12 @@ members = [
     "canisters/cycles_transferrer",
     "canisters/cycles_market",
     
+]
+
+exclude = [
     "canisters/testcanister1",
     "canisters/testcanister2",
+        
 ]
 
 

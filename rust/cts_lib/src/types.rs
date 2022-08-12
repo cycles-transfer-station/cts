@@ -174,7 +174,7 @@ pub mod management_canister {
         pub freezing_threshold : Option<u128>,
     }
 
-    #[derive(CandidType, Deserialize, Clone)]
+    #[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
     pub struct ManagementCanisterCanisterSettings {
         pub controllers : Vec<Principal>,
         pub compute_allocation : u128,

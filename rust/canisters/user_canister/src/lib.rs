@@ -499,11 +499,21 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
 
     if ctsfuel_balance() < 10_000_000_000 {
+        if caller() == cts_id() {
+            with_mut(&UC_DATA, |uc_data| { uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(msg_cycles_accept128(msg_cycles_available128())).unwrap_or(Cycles::MAX); });
+            reply::<()>(());
+            return;            
+        }
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
 
     if calculate_free_storage() < std::mem::size_of::<(u64,CyclesTransferIn)>() as u64 + 32 {
+        if caller() == cts_id() {
+            with_mut(&UC_DATA, |uc_data| { uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(msg_cycles_accept128(msg_cycles_available128())).unwrap_or(Cycles::MAX); });
+            reply::<()>(());
+            return;            
+        }
         trap("Canister memory is full, cannot create a log of the cycles-transfer.");
     }
 

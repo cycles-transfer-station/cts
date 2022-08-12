@@ -525,7 +525,7 @@ struct NewUserData {
     new_user_quest: NewUserQuest,
     // the options and bools are for the memberance of the steps
     look_if_user_is_in_the_users_map_canisters: bool,
-    look_if_referral_user_is_in_the_users_map_canisters: bool,
+    referral_user_canister_id: Option<UserCanisterId>, // use if a referral
     create_user_canister_block_height: Option<IcpBlockHeight>,
     user_canister: Option<Principal>,
     users_map_canister: Option<UsersMapCanisterId>,
@@ -533,6 +533,11 @@ struct NewUserData {
     user_canister_install_code: bool,
     user_canister_status_record: Option<ManagementCanisterCanisterStatusRecord>,
     collect_icp: bool,
+    collect_cycles_cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
+    collect_cycles_cmc_notify_cycles: Option<Cycles>,
+    referral_user_referral_payment_cycles_transfer: bool,
+    user_referral_payment_cycles_transfer: bool
+    
 }
 
 
@@ -545,8 +550,6 @@ pub enum NewUserMidCallError{
     CreateUserCanisterIcpTransferCallError((u32, String)),
     CreateUserCanisterCmcNotifyError(CmcNotifyError),
     CreateUserCanisterCmcNotifyCallError((u32, String)),
-    CollectIcpTransferError(IcpTransferError),
-    CollectIcpTransferCallError((u32, String)),
     UserCanisterUninstallCodeCallError((u32, String)),
     UserCanisterCodeNotFound,
     UserCanisterInstallCodeCallError((u32, String)),
@@ -554,6 +557,13 @@ pub enum NewUserMidCallError{
     UserCanisterModuleVerificationError,
     UserCanisterStartCanisterCallError((u32, String)),
     UserCanisterUpdateSettingsCallError((u32, String)),
+    CollectCyclesLedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
+    CollectCyclesLedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+    ReferralUserReferralPaymentCyclesTransferCallError((u32, String)),
+    UserReferralPaymentCyclesTransferCallError((u32, String)),
+    CollectIcpTransferError(IcpTransferError),
+    CollectIcpTransferCallError((u32, String)),
+    
 }
 
 
@@ -752,15 +762,14 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         
     }
     
-    if new_user_data.look_if_referral_user_is_in_the_users_map_canisters == false {
+    if new_user_data.new_user_quest.opt_referral_user_id.is_some() {
     
-        if new_user_data.new_user_quest.opt_referral_user_id.is_none() {
-            new_user_data.look_if_referral_user_is_in_the_users_map_canisters = true;
-        } else {      
+        if new_user_data.referral_user_canister_id.is_none() {
+        
             match find_user_canister_of_the_specific_user(new_user_data.new_user_quest.opt_referral_user_id.as_ref().unwrap().clone()).await {
                 Ok(opt_user_canister_id) => match opt_user_canister_id {
                     Some(user_canister_id) => {
-                        new_user_data.look_if_referral_user_is_in_the_users_map_canisters = true;
+                        new_user_data.referral_user_canister_id = Some(user_canister_id);
                     },
                     None => {
                         with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
@@ -775,6 +784,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
                     }
                 }
             }
+            
         }
         
     }
@@ -853,8 +863,6 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
         
-    
-    // :checkpoint.
  
 
     if new_user_data.user_canister_uninstall_code == false {
@@ -878,7 +886,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
 
     if new_user_data.user_canister_install_code == false {
     
-        if with(&USER_CANISTER_CODE, |ucc| { ucc.module().len() == 0 }) {
+        if with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module().len() == 0 }) {
             new_user_data.lock = false;
             write_new_user_data(&user_id, new_user_data);
             return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
@@ -890,18 +898,21 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
             (ManagementCanisterInstallCodeQuest {
                 mode : ManagementCanisterInstallCodeMode::install,
                 canister_id : new_user_data.user_canister.unwrap(),
-                wasm_module : unsafe{&*with(&USER_CANISTER_CODE, |uc_code| { uc_code.module() as *const Vec<u8> })},
+                wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module() as *const Vec<u8> })},
                 arg : &encode_one(&UserCanisterInit{ 
                     cts_id: id(), 
                     user_id: user_id,
-                }).unwrap() 
+                    user_canister_storage_size_mib: NEW_USER_CONTRACT_STORAGE_SIZE_MiB,                         
+                    user_canister_lifetime_termination_timestamp_seconds: time()/1_000_000_000 + NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS,
+                    cycles_transferrer_canisters: with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.clone() })
+                }).unwrap()
             },),
         ).await {
             Ok(()) => {},
             Err(put_code_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterInstallCodeCallError(format!("{:?}", put_code_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterInstallCodeCallError((put_code_call_error.0 as u32, put_code_call_error.1))));
             }
         }
         
@@ -919,7 +930,7 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
             Err(canister_status_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError(format!("{:?}", canister_status_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError((canister_status_call_error.0, canister_status_call_error.1))));
             }
         };
         
@@ -927,12 +938,12 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
     }
         
     // no async in this if-block so no NewUserData field needed. can make it for the optimization though
-    if with(&USER_CANISTER_CODE, |ucc| { ucc.module().len() == 0 }) {
+    if with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module().len() == 0 }) {
         new_user_data.lock = false;
         write_new_user_data(&user_id, new_user_data);
         return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
     }
-    if new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.is_none() || *(new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap()) != with(&USER_CANISTER_CODE, |ucc| { *(ucc.module_hash()) }) {
+    if new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.is_none() || new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone() != with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module_hash().clone() }) {
         // go back a couple of steps
         new_user_data.user_canister_uninstall_code = false;                                  
         new_user_data.user_canister_install_code = false;
@@ -940,7 +951,6 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         new_user_data.lock = false;
         write_new_user_data(&user_id, new_user_data);
         return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterModuleVerificationError));
-    
     }
     
 
@@ -957,47 +967,12 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
             Err(start_canister_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStartCanisterCallError(format!("{:?}", start_canister_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1))));
             }
         }
         
     }
 
-    //update the controller to clude the users_map_canister
-    if new_user_data.user_canister_status_record.as_ref().unwrap().settings.controllers.contains(new_user_data.users_map_canister.as_ref().unwrap()) 
-    && new_user_data.user_canister_status_record.as_ref().unwrap().settings.controllers.contains(new_user_data.user_canister.as_ref().unwrap())  
-     == false {
-        
-        let user_canister_controllers: Vec<Principal> = vec![
-            id(), 
-            *new_user_data.users_map_canister.as_ref().unwrap(),
-            *new_user_data.user_canister.as_ref().unwrap(),
-        ];
-        
-        match call::<(ChangeCanisterSettingsRecord,), ()>(
-            MANAGEMENT_CANISTER_ID,
-            "update_settings",
-            (ChangeCanisterSettingsRecord{
-                canister_id: *new_user_data.user_canister.as_ref().unwrap(),
-                settings: ManagementCanisterOptionalCanisterSettings{
-                    controllers : Some(user_canister_controllers.clone()),
-                    compute_allocation : None,
-                    memory_allocation : None,
-                    freezing_threshold : None,
-                }
-            },)
-        ).await {
-            Ok(()) => {
-                new_user_data.user_canister_status_record.as_mut().unwrap().settings.controllers = user_canister_controllers;
-            },
-            Err(update_settings_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUpdateSettingsCallError(format!("{:?}", update_settings_call_error))));
-            }
-        }
-    }
-    
     
     if new_user_data.users_map_canister.is_none() {
         
@@ -1018,36 +993,149 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserErro
         
         new_user_data.users_map_canister = Some(users_map_canister_id);
     }
+
+
+
+    //update the controller to clude the users_map_canister
     
+    let put_user_canister_settings: ManagementCanisterCanisterSettings = ManagementCanisterCanisterSettings{
+        controllers : vec![
+            id(), 
+            new_user_data.users_map_canister.as_ref().unwrap().clone(),
+            new_user_data.user_canister.as_ref().unwrap().clone(),
+        ];,
+        compute_allocation : 0,
+        memory_allocation : NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128,
+        freezing_threshold : 2592000 
+    };
     
-    if new_user_data.give_out_the_referral_bonuses == false {
-    
-    }
-    
-    // before collecting icp, hand out the referral-bonuses if there is.
-    if new_user_data.collect_icp == false {
-        match take_user_icp_ledger(&user_id, cycles_to_icptokens(, new_user_data.current_xdr_icp_rate)).await {
-            Ok(icp_transfer_result) => match icp_transfer_result {
-                Ok(_block_height) => {
-                    new_user_data.collect_icp = true;
-                },
-                Err(icp_transfer_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferError(icp_transfer_error)));          
+    if new_user_data.user_canister_status_record.as_ref().unwrap().settings != put_user_canister_settings {
+                
+        match call::<(ChangeCanisterSettingsRecord,), ()>(
+            MANAGEMENT_CANISTER_ID,
+            "update_settings",
+            (ChangeCanisterSettingsRecord{
+                canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
+                settings: ManagementCanisterOptionalCanisterSettings{
+                    controllers : Some(put_user_canister_settings.controllers),
+                    compute_allocation : Some(put_user_canister_settings.compute_allocation),
+                    memory_allocation : Some(put_user_canister_settings.memory_allocation),
+                    freezing_threshold : Some(put_user_canister_settings.freezing_threshold),
                 }
-            }, 
-            Err(icp_transfer_call_error) => {
+            },)
+        ).await {
+            Ok(()) => {
+                new_user_data.user_canister_status_record.as_mut().unwrap().settings = put_user_canister_settings;
+            },
+            Err(update_settings_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferCallError(format!("{:?}", icp_transfer_call_error))));          
-            }               
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1))));
+            }
         }
     }
     
+    
+    // hand out the referral-bonuses if there is.
+    if new_user_data.new_user_quest.opt_referral_user_id.is_some() {
+        
+        if new_user_data.collect_cycles_cmc_icp_transfer_block_height.is_none() {
+            match ledger_topup_cycles_cmc_icp_transfer(
+                cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate), 
+                Some(principal_icp_subaccount(&user_id)), 
+                topup_canister: id()
+            ).await {
+                Ok(block_height) => {
+                    new_user_data.collect_cycles_cmc_icp_transfer_block_height = Some(block_height);
+                },
+                Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectCyclesLedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error)));
+                }
+            }
+        }
+        
+        if new_user_data.collect_cycles_cmc_notify.is_none() {
+            match ledger_topup_cycles_cmc_notify(new_user_data.collect_cycles_cmc_icp_transfer_block_height.unwrap(), id()).await {
+                Ok(topup_cycles) => {
+                    new_user_data.collect_cycles_cmc_notify = Some(topup_cycles); 
+                }, 
+                Err(ledger_topup_cycles_cmc_notify_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectCyclesLedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                }
+            }
+        }
+        
+        if new_user_data.referral_user_referral_payment_cycles_transfer == false {
+            match call_with_payment128::<(CyclesTransfer,), ()>(
+                new_user_data.referral_user_canister_id.as_ref().unwrap().clone()        
+                "cycles_transfer",
+                (CyclesTransfer{
+                    memo: CyclesTransferMemo::Blob(b"CTS-REFERRAL-PAYMENT".to_vec())
+                },),
+                1_000_000_000_000
+            ).await {
+                Ok(()) => {
+                    new_user_data.referral_user_referral_payment_cycles_transfer = true;
+                }, 
+                Err(referral_user_referral_payment_cycles_transfer_call_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::ReferralUserReferralPaymentCyclesTransferCallError((referral_user_referral_payment_cycles_transfer_call_error.0 as u32, referral_user_referral_payment_cycles_transfer_call_error.1))));
+                }
+            }
+        }
+        
+        if new_user_data.user_referral_payment_cycles_transfer == false {
+            match call_with_payment128::<(CyclesTransfer,), ()>(
+                new_user_data.user_canister.as_ref().unwrap().clone()        
+                "cycles_transfer",
+                (CyclesTransfer{
+                    memo: CyclesTransferMemo::Blob(b"CTS-REFERRAL-PAYMENT".to_vec())
+                },),
+                1_000_000_000_000
+            ).await {
+                Ok(()) => {
+                    new_user_data.user_referral_payment_cycles_transfer = true;
+                }, 
+                Err(user_referral_payment_cycles_transfer_call_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::UserReferralPaymentCyclesTransferCallError((user_referral_payment_cycles_transfer_call_error.0 as u32, user_referral_payment_cycles_transfer_call_error.1))));
+                }
+            }
+        }
+        
+    } else {
+        
+        if new_user_data.collect_icp == false {
+            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate)).await {
+                Ok(icp_transfer_result) => match icp_transfer_result {
+                    Ok(_block_height) => {
+                        new_user_data.collect_icp = true;
+                    },
+                    Err(icp_transfer_error) => {
+                        new_user_data.lock = false;
+                        write_new_user_data(&user_id, new_user_data);
+                        return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferError(icp_transfer_error)));          
+                    }
+                }, 
+                Err(icp_transfer_call_error) => {
+                    new_user_data.lock = false;
+                    write_new_user_data(&user_id, new_user_data);
+                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1))));          
+                }               
+            }
+        }
+    
+    }
+    
 
 
-    with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+    with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
     
     Ok(NewUserSuccessData {
         user_canister_id: new_user_data.user_canister.unwrap()
