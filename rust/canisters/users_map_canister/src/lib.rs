@@ -106,7 +106,7 @@ impl UMCData {
 
 
 
-const MAX_USERS: usize = 10_000; 
+const MAX_USERS: usize = 20_000; 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
@@ -600,7 +600,7 @@ pub fn cts_clear_user_canister_upgrade_fails() {
         
     with_mut(&UMC_DATA, |umc_data| {
         umc_data.user_canister_upgrade_fails.clear();
-        // shrink to fit?
+        umc_data.user_canister_upgrade_fails.shrink_to_fit();
     });
 }
 

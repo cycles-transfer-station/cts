@@ -9,6 +9,7 @@ use crate::{
         export::{
             Principal,
             candid::{
+                self,
                 CandidType,
                 Deserialize,   
             }
@@ -106,7 +107,7 @@ impl UserLock {
 
 
 pub mod canister_code {
-    use super::{CandidType, Deserialize};
+    use super::{candid, CandidType, Deserialize};
     
     #[derive(CandidType, Deserialize, Clone)]
     pub struct CanisterCode {

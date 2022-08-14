@@ -45,12 +45,6 @@ pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 
 
 
 
-pub const CTS_CYCLES_TRANSFER_MEMO_START_USER_CYCLES_BALANCE_TOPUP          : &'static [u8] = b"UT";            /*USER_CYCLES_BALANCE_TOPUP_MEMO_START*/ 
-pub const CTS_CYCLES_TRANSFER_MEMO_START_USER_CANISTER_CTSFUEL_TOPUP        : &'static [u8] = b"FT";
-
-
-
-
 
 pub const ICP_PAYOUT_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-POUT"));
 pub const ICP_CTS_TAKE_FEE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TFEE"));

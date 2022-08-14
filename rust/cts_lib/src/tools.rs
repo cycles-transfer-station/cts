@@ -142,6 +142,12 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 }
 
 
+#[test]
+fn test_icp_cycles_transform() {
+    let t: IcpTokens = IcpTokens::from_e8s(0123456789);
+    let xdr_permyriad_per_icp: u64 = 45628;
+    assert_eq!(t, cycles_to_icptokens(icptokens_to_cycles(t, xdr_permyriad_per_icp), xdr_permyriad_per_icp));
+}
 
 
 

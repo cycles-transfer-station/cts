@@ -41,7 +41,7 @@ use cts_lib::{
         ICP_LEDGER_CREATE_CANISTER_MEMO,
         ICP_LEDGER_TOP_UP_CANISTER_MEMO,
         ICP_CTS_TAKE_FEE_MEMO,
-        CTS_CYCLES_TRANSFER_MEMO_START_USER_CYCLES_BALANCE_TOPUP, //USER_CYCLES_BALANCE_TOPUP_MEMO_START,
+        NETWORK_CANISTER_CREATION_FEE_CYCLES
         
     },
     tools::{
@@ -186,6 +186,7 @@ struct IcpXdrConversionRateCertifiedResponse {
 
 #[derive(CandidType, Deserialize, Copy, Clone)]
 pub struct IcpXdrConversionRate {
+    /// Number of 1/10,000ths of XDR that 1 ICP is worth.
     pub xdr_permyriad_per_icp : u64,
     pub timestamp_seconds : u64
 }
@@ -231,6 +232,7 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
 
 enum SetCanisterError {
     CanisterStatusCallError((u32, String)),
+    UninstallCanisterCallError((u32, String)),
     StartCanisterCallError((u32, String)),
     UpdateSettingsCallError((u32, String)),    
     PositCyclesCallError((u32, String)),
@@ -238,7 +240,7 @@ enum SetCanisterError {
 
 async fn set_canister(canister_id: Principal, optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, SetCanisterError> {
     // get status
-    let canister_status_record: ManagementCanisterCanisterStatusRecord = match call(
+    let canister_status_record: ManagementCanisterCanisterStatusRecord = match call::<(CanisterIdRecord,), (ManagementCanisterCanisterStatusRecord,)>(
         MANAGEMENT_CANISTER_ID,
         "canister_status",
         (CanisterIdRecord { canister_id: canister_id },),
@@ -255,7 +257,7 @@ async fn set_canister(canister_id: Principal, optional_canister_settings: Option
             (CanisterIdRecord{ canister_id: canister_id },)
         ).await {
             Ok(()) => {},
-            Err(canister_status_call_error) => return Err(SetCanisterError::CanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1)))
+            Err(uninstall_canister_call_error) => return Err(SetCanisterError::UninstallCanisterCallError((uninstall_canister_call_error.0 as u32, uninstall_canister_call_error.1)))
         }
     }
     
@@ -294,35 +296,18 @@ async fn set_canister(canister_id: Principal, optional_canister_settings: Option
             settings.freezing_threshold = Some(freezing_threshold);
         }
     }
-    
-    let mut update_settings_call_flag: bool = false;
-    
-    if settings.controllers.as_ref().unwrap() != &canister_status_record.settings.controllers {
-        update_settings_call_flag = true;
-    }
-    else if settings.compute_allocation.as_ref().unwrap() != &canister_status_record.settings.compute_allocation {
-        update_settings_call_flag = true;
-    }
-    else if settings.memory_allocation.as_ref().unwrap() != &canister_status_record.settings.memory_allocation {
-        update_settings_call_flag = true;
-    }
-    else if settings.freezing_threshold.as_ref().unwrap() != &canister_status_record.settings.freezing_threshold {
-        update_settings_call_flag = true;
+    match call::<(ChangeCanisterSettingsRecord,), ()>(
+        MANAGEMENT_CANISTER_ID,
+        "update_settings",
+        (ChangeCanisterSettingsRecord{
+            canister_id,
+            settings
+        },)
+    ).await {
+        Ok(()) => {},
+        Err(update_settings_call_error) => return Err(SetCanisterError::UpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1)))
     }
     
-    if update_settings_call_flag == true {
-        match call::<(ChangeCanisterSettingsRecord,), ()>(
-            MANAGEMENT_CANISTER_ID,
-            "update_settings",
-            (ChangeCanisterSettingsRecord{
-                canister_id: canister_id,
-                settings: settings
-            },)
-        ).await {
-            Ok(()) => {},
-            Err(update_settings_call_error) => return Err(SetCanisterError::UpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1)))
-        }
-    }
     
     // put cycles (or take cycles? later.) if not enough
     if canister_status_record.cycles < with_cycles {
@@ -348,7 +333,7 @@ async fn set_canister(canister_id: Principal, optional_canister_settings: Option
 pub enum GetNewCanisterError {
     CreateCanisterManagementCallQuestCandidError(String),
     CreateCanisterManagementCallSponseCandidError{candid_error: String, candid_bytes: Vec<u8>},
-    CreateCanisterManagementCallError(String)
+    CreateCanisterManagementCallError((u32, String))
 }
 
 pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
@@ -374,7 +359,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
         MANAGEMENT_CANISTER_ID,
         "create_canister",
         &create_canister_management_call_quest_candid_bytes,
-        100_000_000_000/*create_canister-cost*/ + with_cycles
+        NETWORK_CANISTER_CREATION_FEE_CYCLES + with_cycles
     ).await {
         Ok(call_sponse_candid_bytes) => match decode_one::<CanisterIdRecord>(&call_sponse_candid_bytes) {
             Ok(canister_id_record) => canister_id_record.canister_id,
@@ -383,7 +368,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
             }
         },
         Err(call_error) => {
-            return Err(GetNewCanisterError::CreateCanisterManagementCallError(format!("{:?}", call_error)));
+            return Err(GetNewCanisterError::CreateCanisterManagementCallError((call_error.0 as u32, call_error.1)));
         }
     };
     
@@ -613,16 +598,16 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         return Err(CreateNewUsersMapCanisterError::MaxUsersMapCanisters);
     }
     
-    if CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| l.get()) == true {
+    if localkey::cell::get(&CREATE_NEW_USERS_MAP_CANISTER_LOCK) == true {
         return Err(CreateNewUsersMapCanisterError::CreateNewUsersMapCanisterLockIsOn);
     }
-    CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(true); });
+    localkey::cell::set(&CREATE_NEW_USERS_MAP_CANISTER_LOCK, true);
     
     let new_users_map_canister_id: Principal = match get_new_canister(
         Some(ManagementCanisterOptionalCanisterSettings{
             controllers : None,
             compute_allocation : None,
-            memory_allocation : /*TEST-VALUE*/None, // Some(1024*1024*100),
+            memory_allocation : Some(100 * MiB as u128),
             freezing_threshold : None,
         }),
         /*TEST-VALUE*/3_000_000_000_000  //7_000_000_000_000
