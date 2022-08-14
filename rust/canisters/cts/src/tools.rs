@@ -143,20 +143,6 @@ pub fn main_cts_icp_id() -> IcpId {  // do once
 
 
 
-pub fn put_new_canister(put_new_canister: Principal) -> Result<(), ()> {
-    with_mut(&NEW_CANISTERS, |new_canisters| { 
-        if new_canisters.contains(&put_new_canister) {
-            return Err(());
-        }
-        new_canisters.push_back(put_new_canister);  
-        Ok(())
-    })
-}
-
-
-
-
-
 
 
  
@@ -328,11 +314,13 @@ pub enum GetNewCanisterError {
 
 pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
     
-    if let Some(new_canister) = with_mut(&NEW_CANISTERS, |new_canisters| { new_canisters.pop_front() }) {
+    if with(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.len() }) >= 1 {
+        let new_canister: Principal = with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.take(&(cts_data.canisters_for_the_use.iter().next().unwrap().clone())).unwrap() }); 
+     
         match set_canister(new_canister, optional_canister_settings.clone(), with_cycles).await {
             Ok(canister_id) => return Ok(canister_id),
             Err(set_canister_error) => {
-                put_new_canister(new_canister);
+                with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_canister); });
                 // continue
             }
         }
@@ -498,24 +486,6 @@ pub async fn ledger_topup_cycles_cmc_notify(cmc_icp_transfer_block_height: IcpBl
 
 
 
-/*
-#[derive(CandidType, Deserialize)]
-pub enum LedgerCreateCanisterError {
-    IcpTransferCallError(String),
-    IcpTransferError(IcpTransferError),
-    CmcNotifyCallError{call_error: String, block_height: IcpBlockHeight},   //create_canister_icp_transfer_block_height    
-    CmcNotifyError{error: CmcNotifyError, block_height: IcpBlockHeight}
-}
-
-pub async fn ledger_create_canister(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, controller: Principal) -> Result<Principal, LedgerCreateCanisterError> {
-
-}
-*/
-
-
-
-
-
 
 
 
@@ -532,8 +502,8 @@ pub enum PutNewUserIntoAUsersMapCanisterError {
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
 pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, umc_user_data: UMCUserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
     
-    for i in (0..with(&USERS_MAP_CANISTERS, |umcs| umcs.len())).rev() {
-        let umc_id:Principal = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
+    for i in (0..with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.len() })).rev() {
+        let umc_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters[i] });
         match call::<(UserId, UMCUserData), (Result<(), UsersMapCanisterPutNewUserError>,)>(
             umc_id,
             "put_new_user",
@@ -584,14 +554,14 @@ pub enum CreateNewUsersMapCanisterError {
 }
 
 pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, CreateNewUsersMapCanisterError> {
-    if with(&USERS_MAP_CANISTERS, |umcs| umcs.len()) >= MAX_USERS_MAP_CANISTERS {
+    if with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.len() }) >= MAX_USERS_MAP_CANISTERS {
         return Err(CreateNewUsersMapCanisterError::MaxUsersMapCanisters);
     }
     
-    if localkey::cell::get(&CREATE_NEW_USERS_MAP_CANISTER_LOCK) == true {
+    if with(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock }) == true {
         return Err(CreateNewUsersMapCanisterError::CreateNewUsersMapCanisterLockIsOn);
     }
-    localkey::cell::set(&CREATE_NEW_USERS_MAP_CANISTER_LOCK, true);
+    with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = true; });
     
     let new_users_map_canister_id: Principal = match get_new_canister(
         Some(ManagementCanisterOptionalCanisterSettings{
@@ -604,15 +574,15 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     ).await {
         Ok(canister_id) => canister_id,
         Err(get_new_canister_error) => {
-            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
             return Err(CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error));
         }
     };    
     
     // install code
-    if with(&USERS_MAP_CANISTER_CODE, |umcc| umcc.module().len() == 0 ) {
-        put_new_canister(new_users_map_canister_id);
-        CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+    if with(&CTS_DATA, |cts_data| cts_data.users_map_canister_code.module().len() ) == 0 {
+        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_users_map_canister_id); });
+        with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
         return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
     }
     
@@ -622,20 +592,20 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
             canister_id : new_users_map_canister_id,
-            wasm_module : unsafe{&*with(&USERS_MAP_CANISTER_CODE, |umc_code| { umc_code.module() as *const Vec<u8> })},
+            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.users_map_canister_code.module() as *const Vec<u8> })},
             arg : &encode_one(&UsersMapCanisterInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
         },)
     ).await {
         Ok(_) => {
-            with_mut(&USERS_MAP_CANISTERS, |users_map_canisters| { users_map_canisters.push(new_users_map_canister_id); }); 
-            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.push(new_users_map_canister_id); }); 
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
             Ok(new_users_map_canister_id)    
         },
         Err(install_code_call_error) => {
-            put_new_canister(new_users_map_canister_id);
-            CREATE_NEW_USERS_MAP_CANISTER_LOCK.with(|l| { l.set(false); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_users_map_canister_id); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
             return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }
     }
@@ -654,20 +624,24 @@ pub enum FindUserInTheUsersMapCanistersError {
 
 pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<Option<(UMCUserData, UsersMapCanisterId)>, FindUserInTheUsersMapCanistersError> {
     
-    let call_results: Vec<CallResult<(Option<UMCUserData>,)>> = with(&USERS_MAP_CANISTERS, |umcs| { futures::future::join_all(
-        umcs.iter().map(|umc| { 
-            call::<(UserId,), (Option<UMCUserData>,)>(
-                *umc/*copy*/, 
-                "find_user", 
-                (user_id,)
-            )
+    let call_results: Vec<CallResult<(Option<UMCUserData>,)>> = futures::future::join_all(
+        with(&CTS_DATA, |cts_data| { 
+            cts_data.users_map_canisters.iter().map(
+                |umc| { 
+                    call::<(UserId,), (Option<UMCUserData>,)>(
+                        umc.clone(), 
+                        "find_user", 
+                        (user_id,)
+                    )
+                }
+            ).collect::<Vec<_>>()
         })
-    )}).await;
+    ).await;
     
     let mut call_fails: Vec<(UsersMapCanisterId, (u32, String))> = Vec::new();
     
     for (i,call_result) in call_results.into_iter().enumerate() {
-        let umc_id: UsersMapCanisterId = with(&USERS_MAP_CANISTERS, |umcs| umcs[i]);
+        let umc_id: UsersMapCanisterId = with(&CTS_DATA, |cts_data| cts_data.users_map_canisters[i]);
         match call_result {
             Ok((optional_umc_user_data,)) => match optional_umc_user_data {
                 Some(umc_user_data) => return Ok(Some((umc_user_data, umc_id))),

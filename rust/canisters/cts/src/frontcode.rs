@@ -26,7 +26,7 @@ pub struct File {
     pub content_type: String,
     pub content_encoding: String,
     #[serde(with = "serde_bytes")]
-    pub content: Box<[u8]>
+    pub content: Vec<u8>
 }
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
@@ -56,12 +56,11 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
 }
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct HttpResponse {
+#[derive(Clone, Debug, CandidType)]
+pub struct HttpResponse<'a> {
     pub status_code: u16,
     pub headers: Vec<(String, String)>,
-    #[serde(with = "serde_bytes")]
-    pub body: Vec<u8>,
+    pub body: &'a Vec<u8>,
     pub streaming_strategy: Option<StreamingStrategy>,
 }
 

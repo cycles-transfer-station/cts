@@ -47,7 +47,7 @@
 
 use std::{
     cell::{Cell, RefCell, RefMut}, 
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet},
     future::Future,
     
 };
@@ -91,9 +91,11 @@ use cts_lib::{
     },
     consts::{
         MANAGEMENT_CANISTER_ID,
+        MiB,
         WASM_PAGE_SIZE_BYTES,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
-        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
+        NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
+        ICP_LEDGER_CREATE_CANISTER_MEMO,
     },
     tools::{
         sha256,
@@ -110,6 +112,7 @@ use cts_lib::{
         },
         thirty_bytes_as_principal,
         principal_icp_subaccount,
+        cycles_to_icptokens
     },
     ic_cdk::{
         self,
@@ -191,26 +194,23 @@ mod t;
 
 mod tools;
 use tools::{
-    user_cycles_balance_topup_memo_bytes,
     check_user_icp_ledger_balance,
     main_cts_icp_id,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError,
     CheckCurrentXdrPerMyriadPerIcpCmcRateSponse,
     check_current_xdr_permyriad_per_icp_cmc_rate,
-    // icptokens_to_cycles,
-    cycles_to_icptokens,
     get_new_canister,
     GetNewCanisterError,
     IcpXdrConversionRate,
     take_user_icp_ledger,
-    ICP_LEDGER_CREATE_CANISTER_MEMO,
     CmcNotifyError,
     CmcNotifyCreateCanisterQuest,
     PutNewUserIntoAUsersMapCanisterError,
     put_new_user_into_a_users_map_canister,
     FindUserInTheUsersMapCanistersError,
     find_user_in_the_users_map_canisters,
-    put_new_canister,
+    ledger_topup_cycles_cmc_icp_transfer,
+    ledger_topup_cycles_cmc_notify,
     LedgerTopupCyclesCmcIcpTransferError,
     LedgerTopupCyclesCmcNotifyError,
 
@@ -223,7 +223,7 @@ use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_ha
 
 
 #[derive(CandidType, Deserialize)]
-struct CTSData {
+pub struct CTSData {
     controllers: Vec<Principal>,
     user_canister_code: CanisterCode,
     users_map_canister_code: CanisterCode,
@@ -297,7 +297,7 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 thread_local! {
     
-    static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
+    pub static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
     // not save through upgrades
     pub static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::new()); // is with the save through the upgrades by the frontcode_files_hashes field on the CTSData
@@ -332,7 +332,7 @@ fn create_cts_data_candid_bytes() -> Vec<u8> {
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files_hashes = with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { 
             frontcode_files_hashes.iter().map(
-                |ferences| { ferences.clone() }
+                |(name, hash)| { (name.clone(), hash.clone()) }
             ).collect::<Vec<(String, [u8; 32])>>() 
         });
     });
@@ -523,7 +523,7 @@ pub fn see_fees() -> Fees {
 // save the fees in the new_user_data so the fees cant change while creating a new user
 
 #[derive(Clone, CandidType, Deserialize)]
-struct NewUserData {
+pub struct NewUserData {
     start_time_nanos: u64,
     lock: bool,    
     current_xdr_icp_rate: u64,
@@ -618,7 +618,7 @@ fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
 pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccessData, NewUserError> {
 
     let user_id: Principal = caller();
-    
+
     new_user_(user_id, q).await
 }
 
@@ -716,7 +716,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
                             new_user_quest: q,
                             // the options and bools are for the memberance of the steps
                             look_if_user_is_in_the_users_map_canisters: false,
-                            look_if_referral_user_is_in_the_users_map_canisters: false,
+                            referral_user_canister_id: None,
                             create_user_canister_block_height: None,
                             user_canister: None,
                             users_map_canister: None,
@@ -724,6 +724,10 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
                             user_canister_install_code: false,
                             user_canister_status_record: None,
                             collect_icp: false,
+                            collect_cycles_cmc_icp_transfer_block_height: None,
+                            collect_cycles_cmc_notify_cycles: None,
+                            referral_user_referral_payment_cycles_transfer: false,
+                            user_referral_payment_cycles_transfer: false
                         };
                         cts_data.new_users.insert(user_id, nud.clone());
                         Ok(nud)
@@ -847,7 +851,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
                     // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
                     match cmc_notify_error {
                         CmcNotifyError::TransactionTooOld(_) | CmcNotifyError::Refunded{ .. } => {
-                            with_mut(&NEW_USERS, |nus| { nus.remove(&user_id); });
+                            with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
                             return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
                         },
                         CmcNotifyError::InvalidTransaction(_) // 
@@ -886,7 +890,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
             Err(uninstall_code_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUninstallCodeCallError(format!("{:?}", uninstall_code_call_error))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUninstallCodeCallError((uninstall_code_call_error.0 as u32, uninstall_code_call_error.1))));
             }
         }
         
@@ -940,7 +944,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
             Err(canister_status_call_error) => {
                 new_user_data.lock = false;
                 write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError((canister_status_call_error.0, canister_status_call_error.1))));
+                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1))));
             }
         };
         
@@ -1027,7 +1031,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
             (ChangeCanisterSettingsRecord{
                 canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
                 settings: ManagementCanisterOptionalCanisterSettings{
-                    controllers : Some(put_user_canister_settings.controllers),
+                    controllers : Some(put_user_canister_settings.controllers.clone()),
                     compute_allocation : Some(put_user_canister_settings.compute_allocation),
                     memory_allocation : Some(put_user_canister_settings.memory_allocation),
                     freezing_threshold : Some(put_user_canister_settings.freezing_threshold),
@@ -1053,7 +1057,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
             match ledger_topup_cycles_cmc_icp_transfer(
                 cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate), 
                 Some(principal_icp_subaccount(&user_id)), 
-                topup_canister: id()
+                id()
             ).await {
                 Ok(block_height) => {
                     new_user_data.collect_cycles_cmc_icp_transfer_block_height = Some(block_height);
@@ -1066,10 +1070,10 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
             }
         }
         
-        if new_user_data.collect_cycles_cmc_notify.is_none() {
+        if new_user_data.collect_cycles_cmc_notify_cycles.is_none() {
             match ledger_topup_cycles_cmc_notify(new_user_data.collect_cycles_cmc_icp_transfer_block_height.unwrap(), id()).await {
                 Ok(topup_cycles) => {
-                    new_user_data.collect_cycles_cmc_notify = Some(topup_cycles); 
+                    new_user_data.collect_cycles_cmc_notify_cycles = Some(topup_cycles); 
                 }, 
                 Err(ledger_topup_cycles_cmc_notify_error) => {
                     new_user_data.lock = false;
@@ -1226,8 +1230,8 @@ pub enum FindUserCanisterError {
 
 #[update]
 pub async fn find_user_canister() -> Result<Option<UserCanisterId>, FindUserCanisterError> {
-    if localkey::get::(&STOP_CALLS) { trap("Maintenance. try again soon."); }
-    
+    //if localkey::get::(&STOP_CALLS) { trap("Maintenance. try again soon."); }
+
     let user_id: UserId = caller();
     
     if with(&CTS_DATA, |cts_data| { cts_data.new_users.contains_key(&user_id) }) {
@@ -1271,8 +1275,8 @@ async fn find_user_canister_of_the_specific_user(user_id: UserId) -> Result<Opti
 
 // options are for the memberance of the steps
 
-#[derive(CandidType, Deserialize)]
-struct UserBurnIcpMintCyclesData {
+#[derive(CandidType, Deserialize, Clone)]
+pub struct UserBurnIcpMintCyclesData {
     start_time_nanos: u64,
     lock: bool,
     user_burn_icp_mint_cycles_quest: UserBurnIcpMintCyclesQuest, 
@@ -1292,7 +1296,7 @@ pub struct UserBurnIcpMintCyclesQuest {
 pub enum UserBurnIcpMintCyclesError {
     UserIsInTheMiddleOfAnotherUserBurnIcpMintCyclesCall,
     CompleteCallWithTheAlreadySetParameters(UserBurnIcpMintCyclesQuest),
-    MinimumUserBurnIcpMintCycles{minimum_user_burn_icp_mint_cycles: Cycles},
+    MinimumUserBurnIcpMintCycles{minimum_user_burn_icp_mint_cycles: IcpTokens},
     IcpCheckBalanceCallError((u32, String)),
     UserIcpBalanceTooLow{user_icp_balance: IcpTokens, icp_ledger_transfer_fee: IcpTokens},
     FindUserInTheUsersMapCanistersError(FindUserInTheUsersMapCanistersError),
@@ -1309,12 +1313,22 @@ pub enum UserBurnIcpMintCyclesMidCallError {
     CallUserCanisterCallError((u32, String)),
 }
 
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+pub struct UserBurnIcpMintCyclesSuccess {
+    mint_cycles_for_the_user: Cycles,
+    cts_fee_taken: Cycles
+}
+
 
 #[update]
-pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<Cycles, UserBurnIcpMintCyclesError> {
+pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError> {
 
     let user_id: UserId = caller(); 
 
+    user_burn_icp_mint_cycles_(user_id, q).await
+}
+
+async fn user_burn_icp_mint_cycles_(user_id: UserId, q: UserBurnIcpMintCyclesQuest) -> Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError> {
 
     let opt_user_burn_icp_mint_cycles_data: Option<UserBurnIcpMintCyclesData> = {
         let r: Result<Option<UserBurnIcpMintCyclesData>, UserBurnIcpMintCyclesError> = with_mut(&CTS_DATA, |cts_data| {
@@ -1411,7 +1425,7 @@ pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<
         match ledger_topup_cycles_cmc_icp_transfer(user_burn_icp_mint_cycles_data.user_burn_icp_mint_cycles_quest.burn_icp, Some(principal_icp_subaccount(&user_id)), id()).await {
             Ok(block_height) => { user_burn_icp_mint_cycles_data.cmc_icp_transfer_block_height = Some(block_height); },
             Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
-                with_mut(CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); }); // remove? or unlock, write_data, and mid call error?
+                with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); }); // remove? or unlock, write_data, and mid call error?
                 return Err(UserBurnIcpMintCyclesError::LedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error));
             }
         }
@@ -1433,6 +1447,7 @@ pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<
         }
     }
     
+    let user_burn_icp_mint_cycles_fee: Cycles = USER_BURN_ICP_MINT_CYCLES_FEE;
     let cycles_for_the_user_canister: Cycles = user_burn_icp_mint_cycles_data.cmc_cycles.unwrap().checked_sub(USER_BURN_ICP_MINT_CYCLES_FEE).unwrap_or(user_burn_icp_mint_cycles_data.cmc_cycles.unwrap());
     if user_burn_icp_mint_cycles_data.call_user_canister == false {
         match call_with_payment128::<(CyclesTransfer,), ()>(
@@ -1457,8 +1472,11 @@ pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<
         }
     }
     
-    with_mut(CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
-    Ok(cycles_for_the_user_canister)
+    with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
+    Ok(UserBurnIcpMintCyclesSuccess{
+        mint_cycles_for_the_user: cycles_for_the_user_canister,
+        cts_fee_taken: user_burn_icp_mint_cycles_fee 
+    })
     
 }
 
@@ -1485,33 +1503,6 @@ pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<
 
 // --------------------------------------------------------------------------
 // :CONTROLLER-METHODS.
-
-
-
-
-
-/*
-#[update]
-pub async fn controller_see_balance() -> SeeBalanceSponse {
-    let cycles_balance: u128 = ic_cdk::api::canister_balance128();
-    let icp_balance: IcpTokens = match icp_account_balance(
-        MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs {
-            account : main_cts_icp_id()
-        }
-    ).await {
-        Ok(tokens) => tokens,
-        Err(balance_call_error) => {
-            return Err(SeeBalanceError::IcpLedgerCheckBalanceCallError(format!("{:?}", balance_call_error)));
-        } 
-    };
-    Ok(UserBalance {
-        cycles_balance,
-        icp_balance,
-    })
-}
-*/
-
 
 
 
@@ -1840,7 +1831,7 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
     
     // install code
     if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
-        put_new_canister(new_cycles_transferrer_canister_id);
+        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
         return Err(ControllerCreateNewCyclesTransferrerCanisterError::CyclesTransferrerCanisterCodeNotFound);
     }
     
@@ -1861,7 +1852,7 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
             Ok(new_cycles_transferrer_canister_id)    
         },
         Err(install_code_call_error) => {
-            put_new_canister(new_cycles_transferrer_canister_id);
+            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
             return Err(ControllerCreateNewCyclesTransferrerCanisterError::InstallCodeCallError((install_code_call_error.0 as u32, install_code_call_error.1)));
         }
     }
@@ -1891,6 +1882,7 @@ pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Pri
 }
 */
 
+/*
 
 #[update]
 pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
@@ -1960,7 +1952,7 @@ pub async fn controller_drain_cycles_transferrer_canister_re_try_cycles_transfer
 
 
 
-
+*/
 
 
 
@@ -2061,20 +2053,20 @@ pub fn controller_see_new_users() {
 
 // put new user data
 #[update]
-pub fn put_new_user_data(new_user_id: UserId, put_new_user_data: NewUserData, override_lock: bool) -> {
+pub fn put_new_user_data(new_user_id: UserId, put_data: NewUserData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        if let Some(new_user_data) = cts_data.get(&new_user_id) {
+        if let Some(new_user_data) = cts_data.new_users.get(&new_user_id) {
             if new_user_data.lock == true {
                 if override_lock == false {
                     trap("user is with the lock == true in the new_users. set the override_lock flag if want override.")
                 }
             }
         }
-        cts_data.insert(new_user_id, put_new_user_data);
+        cts_data.new_users.insert(new_user_id, put_data);
     });
 
 }
@@ -2086,7 +2078,7 @@ pub fn remove_new_user(new_user_id: UserId, override_lock: bool) {
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        if let Some(new_user_data) = cts_data.get(&new_user_id) {
+        if let Some(new_user_data) = cts_data.new_users.get(&new_user_id) {
             if new_user_data.lock == true {
                 if override_lock == false {
                     trap("user is with the lock == true in the new_users. set the override_lock flag if want override.")
@@ -2148,32 +2140,124 @@ pub async fn complete_new_users(opt_complete_new_users_ids: Option<Vec<UserId>>,
 // ------ UserBurnIcpMintCycles-METHODS -----------------
 
 
+#[export_name = "canister_query controller_see_users_burn_icp_mint_cycles"]
+pub fn controller_see_users_burn_icp_mint_cycles() {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    with(&CTS_DATA, |cts_data| {
+        ic_cdk::api::call::reply::<(Vec<(&UserId, &UserBurnIcpMintCyclesData)>,)>((cts_data.users_burn_icp_mint_cycles.iter().collect::<Vec<(&UserId, &UserBurnIcpMintCyclesData)>>(),));
+    });
+}
+
+#[update]
+pub fn put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: UserBurnIcpMintCyclesData, override_lock: bool) {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        if let Some(user_burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
+            if user_burn_icp_mint_cycles_data.lock == true {
+                if override_lock == false {
+                    trap("user is with the lock == true in the users_burn_icp_mint_cycles. set the override_lock flag if want override.")
+                }
+            }
+        }
+        cts_data.users_burn_icp_mint_cycles.insert(user_id, put_data);
+    });
+
+}
+
+#[update]
+pub fn remove_user_burn_icp_mint_cycles(user_id: UserId, override_lock: bool) {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        if let Some(user_burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
+            if user_burn_icp_mint_cycles_data.lock == true {
+                if override_lock == false {
+                    trap("user is with the lock == true in the users_burn_icp_mint_cycles. set the override_lock flag if want override.")
+                }
+            }
+        }
+        cts_data.users_burn_icp_mint_cycles.remove(&user_id);
+    });
+}
+
+
+#[update]
+pub async fn complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<UserId>>,) -> Vec<((UserId, UserBurnIcpMintCyclesQuest), Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError>)> {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+
+    let complete_users: Vec<(UserId, UserBurnIcpMintCyclesQuest)> = match opt_complete_users_ids {
+        Some(complete_users_ids) => {
+            with(&CTS_DATA, |cts_data| {
+                complete_users_ids.into_iter().map( 
+                    |complete_user_id| {
+                        match cts_data.users_burn_icp_mint_cycles.get(&complete_user_id) {
+                            Some(user_burn_icp_mint_cycles_data) => {
+                                (complete_user_id, user_burn_icp_mint_cycles_data.user_burn_icp_mint_cycles_quest.clone())
+                            },
+                            None => trap(&format!("users_burn_icp_mint_cycles.get({:?}) == None", complete_user_id))
+                        }    
+                    }
+                ).collect::<Vec<(UserId, UserBurnIcpMintCyclesQuest)>>()  
+            })
+        },
+        None => {
+            with(&CTS_DATA, |cts_data| { 
+                cts_data.users_burn_icp_mint_cycles.iter().map(
+                    |(user_id_ref, user_burn_icp_mint_cycles_data_ref): (&UserId, &UserBurnIcpMintCyclesData)| { 
+                        ((*user_id_ref).clone(), (*user_burn_icp_mint_cycles_data_ref).user_burn_icp_mint_cycles_quest.clone()) 
+                    }
+                ).collect::<Vec<(UserId, UserBurnIcpMintCyclesQuest)>>() 
+            })
+        }
+    };
+    
+    let rs: Vec<Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError>> = futures::future::join_all(
+        complete_users.iter().map(
+            |complete_user: &(UserId, UserBurnIcpMintCyclesQuest)| {
+                user_burn_icp_mint_cycles_(complete_user.0.clone(), complete_user.1.clone())
+            }
+        ).collect::<Vec<_>>()
+    ).await;
+    
+    complete_users.into_iter().zip(rs.into_iter()).collect::<Vec<((UserId,UserBurnIcpMintCyclesQuest),Result<UserBurnIcpMintCyclesSuccess,UserBurnIcpMintCyclesError>)>>()
+
+}
+
+
+
+
 
 
 // ----- NEW_CANISTERS-METHODS --------------------------
 
 #[update]
-pub fn controller_put_new_canisters(mut put_new_canisters: Vec<Principal>) {
+pub fn controller_put_canisters_for_the_use(canisters_for_the_use: Vec<Principal>) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    with_mut(&NEW_CANISTERS, |new_canisters| {
-        for put_new_canister in put_new_canisters.iter() {
-            if new_canisters.contains(put_new_canister) {
-                trap(&format!("{:?} already in the new_canisters list", put_new_canister));
-            }
+    with_mut(&CTS_DATA, |cts_data| {
+        for canister_for_the_use in canisters_for_the_use.into_iter() {
+            cts_data.canisters_for_the_use.insert(canister_for_the_use);
         }
-        new_canisters.append(&mut VecDeque::from(put_new_canisters)); // .extend_from_slice(&new_canisters) also works but it clones each item. .append moves each item
     });
 }
 
-#[export_name = "canister_query controller_see_new_canisters"]
-pub fn controller_see_new_canisters() -> () {
+#[export_name = "canister_query controller_see_canisters_for_the_use"]
+pub fn controller_see_canisters_for_the_use() -> () {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    with(&NEW_CANISTERS, |ncs| {
-        ic_cdk::api::call::reply::<(Vec<&Principal>,)>((ncs.iter().collect::<Vec<&Principal>>(),));
+    with(&CTS_DATA, |cts_data| {
+        ic_cdk::api::call::reply::<(&HashSet<Principal>,)>((&(cts_data.canisters_for_the_use),));
     });
 
 }
@@ -2230,7 +2314,7 @@ pub fn controller_download_state_snapshot() {
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
         reply::<(Option<&[u8]>,)>((state_snapshot_cts_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
     });
 }
@@ -2282,18 +2366,18 @@ pub fn controller_see_controllers() {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    with(&CONTROLLERS, |controllers| { 
-        reply::<(&Vec<Principal>,)>((controllers,)); 
+    with(&CTS_DATA, |cts_data| { 
+        reply::<(&Vec<Principal>,)>((&(cts_data.controllers),)); 
     })
 }
 
 
 #[update]
-pub fn controller_set_controllers(set_controllers: Vec<Principal>) {
+pub fn controller_set_new_controller(set_controller: Principal) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    with_mut(&CONTROLLERS, |controllers| { *controllers = set_controllers; });
+    with_mut(&CTS_DATA, |cts_data| { cts_data.controllers.push(set_controller); });
 }
 
 
@@ -2346,11 +2430,11 @@ pub async fn controller_call_canister() {
 // ----- METRICS --------------------------
 
 #[derive(CandidType, Deserialize)]
-pub struct Metrics {
+pub struct CTSMetrics {
     global_allocator_counter: u64,
     stable_size: u64,
     cycles_balance: u128,
-    new_canisters_count: u64,
+    canisters_for_the_use_count: u64,
     users_map_canister_code_hash: Option<[u8; 32]>,
     user_canister_code_hash: Option<[u8; 32]>,
     cycles_transferrer_canister_code_hash: Option<[u8; 32]>,
@@ -2358,31 +2442,33 @@ pub struct Metrics {
     cycles_transferrer_canisters_count: u64,
     latest_known_cmc_rate: IcpXdrConversionRate,
     new_users_count: u64,
-    cycles_transfers_count: u64,
+    users_burn_icp_mint_cycles_count: u64,
 }
 
 
 #[query]
-pub fn controller_see_metrics() -> Metrics {
+pub fn controller_see_metrics() -> CTSMetrics {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    Metrics {
-        global_allocator_counter: get_allocated_bytes_count() as u64,
-        stable_size: ic_cdk::api::stable::stable64_size(),
-        cycles_balance: ic_cdk::api::canister_balance128(),
-        new_canisters_count: with(&NEW_CANISTERS, |ncs| ncs.len() as u64),
-        users_map_canister_code_hash: with(&USERS_MAP_CANISTER_CODE, |umcc| { if umcc.module().len() != 0 { Some(*umcc.module_hash()) } else { None } }),
-        user_canister_code_hash: with(&USER_CANISTER_CODE, |ucc| { if ucc.module().len() != 0 { Some(*ucc.module_hash()) } else { None } }),
-        cycles_transferrer_canister_code_hash: with(&CYCLES_TRANSFERRER_CANISTER_CODE, |ctcc| { if ctcc.module().len() != 0 { Some(*ctcc.module_hash()) } else { None } }),
-        users_map_canisters_count: with(&USERS_MAP_CANISTERS, |umcs| umcs.len() as u64),
-        cycles_transferrer_canisters_count: with(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| ctcs.len() as u64),
-        latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
-        new_users_count: with(&NEW_USERS, |new_users| { new_users.len() as u64 }),
-        cycles_transfers_count: get(&CYCLES_TRANSFERS_COUNT)
-        
-    }
+    with(&CTS_DATA, |cts_data| {
+        CTSMetrics {
+            global_allocator_counter: get_allocated_bytes_count() as u64,
+            stable_size: ic_cdk::api::stable::stable64_size(),
+            cycles_balance: ic_cdk::api::canister_balance128(),
+            canisters_for_the_use_count: cts_data.canisters_for_the_use.len() as u64,
+            users_map_canister_code_hash: if cts_data.users_map_canister_code.module().len() != 0 { Some(cts_data.users_map_canister_code.module_hash().clone()) } else { None },
+            user_canister_code_hash: if cts_data.user_canister_code.module().len() != 0 { Some(cts_data.user_canister_code.module_hash().clone()) } else { None },
+            cycles_transferrer_canister_code_hash: if cts_data.cycles_transferrer_canister_code.module().len() != 0 { Some(cts_data.cycles_transferrer_canister_code.module_hash().clone()) } else { None },
+            users_map_canisters_count: cts_data.users_map_canisters.len() as u64,
+            cycles_transferrer_canisters_count: cts_data.cycles_transferrer_canisters.len() as u64,
+            latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
+            new_users_count: cts_data.new_users.len() as u64,
+            users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64
+            
+        }
+    })
 }
 
 
@@ -2398,22 +2484,13 @@ pub fn controller_upload_frontcode_file_chunks(file_path: String, file: File) ->
         trap("Caller must be a controller for this method.")
     }
     
-    // let mut file_hashes: FileHashes = get_file_hashes();
-    // file_hashes.insert(file_path.clone(), sha256(&file.content));
-    // put_file_hashes(&file_hashes);
-    // set_root_hash(&file_hashes);
-
-    // let mut files: Files = get_files();
-    // files.insert(file_path, file);
-    // put_files(&files);
-    
     with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
         ffhs.insert(file_path.clone(), sha256(&file.content));
         set_root_hash(ffhs);
     });
     
-    with_mut(&FRONTCODE_FILES, |ffs| {
-        ffs.insert(file_path, file); 
+    with_mut(&CTS_DATA, |cts_data| {
+        cts_data.frontcode_files.insert(file_path, file); 
     });
 }
 
@@ -2425,12 +2502,12 @@ pub fn controller_clear_frontcode_files() {
     }
     
     
-    with_mut(&FRONTCODE_FILES, |ffs| {
-        *ffs = Files::new();
+    with_mut(&CTS_DATA, |cts_data| {
+        cts_data.frontcode_files = Files::new();
     });
 
     with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-        *ffhs = FilesHashes::default();
+        *ffhs = FilesHashes::new();
         set_root_hash(ffhs);
     });
 }
@@ -2453,36 +2530,43 @@ pub fn controller_get_file_hashes() -> Vec<(String, [u8; 32])> {
 
 
 
-#[query]
-pub fn http_request(quest: HttpRequest) -> HttpResponse {
+#[export_name = "canister_query http_request"]
+pub fn http_request() {
     if STOP_CALLS.with(|stop_calls| { stop_calls.get() }) { trap("Maintenance. try again soon.") }
+    
+    let (quest,): (HttpRequest,) = arg_data::<(HttpRequest,)>(); 
     
     let file_name: String = quest.url;
     
-    with(&FRONTCODE_FILES, |ffs| {
-        match ffs.get(&file_name) {
+    with(&CTS_DATA, |cts_data| {
+        match cts_data.frontcode_files.get(&file_name) {
             None => {
-                return HttpResponse {
-                    status_code: 404,
-                    headers: vec![],
-                    body: vec![],
-                    streaming_strategy: None
-                }
+                reply::<(HttpResponse,)>(
+                    (HttpResponse {
+                        status_code: 404,
+                        headers: vec![],
+                        body: &vec![],
+                        streaming_strategy: None
+                    },)
+                );        
             }, 
-            Some(file) => {                 
-                HttpResponse {
-                    status_code: 200,
-                    headers: vec![
-                        make_file_certificate_header(&file_name), 
-                        ("content-type".to_string(), file.content_type.clone()),
-                        ("content-encoding".to_string(), file.content_encoding.clone())
-                    ],
-                    body: file.content.to_vec(),
-                    streaming_strategy: None
-                }
+            Some(file) => {
+                reply::<(HttpResponse,)>(
+                    (HttpResponse {
+                        status_code: 200,
+                        headers: vec![
+                            make_file_certificate_header(&file_name), 
+                            ("content-type".to_string(), file.content_type.clone()),
+                            ("content-encoding".to_string(), file.content_encoding.clone())
+                        ],
+                        body: &file.content,//.to_vec(),
+                        streaming_strategy: None
+                    },)
+                );
             }
         }
-    })
+    });
+    return;
 }
 
 
