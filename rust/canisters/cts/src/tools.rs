@@ -2,12 +2,9 @@ use std::collections::HashMap;
 // use sha2::Digest;
 
 use crate::{
-    NEW_CANISTERS,
+    CTS_DATA,
     LATEST_KNOWN_CMC_RATE,
     MAX_USERS_MAP_CANISTERS,
-    USERS_MAP_CANISTERS,
-    CREATE_NEW_USERS_MAP_CANISTER_LOCK,
-    USERS_MAP_CANISTER_CODE,
 };
 //use candid::{CandidType,Deserialize};
 use cts_lib::{
@@ -37,6 +34,7 @@ use cts_lib::{
         }
     },
     consts::{
+        MiB,
         MANAGEMENT_CANISTER_ID,
         ICP_LEDGER_CREATE_CANISTER_MEMO,
         ICP_LEDGER_TOP_UP_CANISTER_MEMO,
@@ -120,7 +118,7 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
     icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
-            memo: ICP_FEE_MEMO,
+            memo: ICP_CTS_TAKE_FEE_MEMO,
             amount: icp,
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: Some(principal_icp_subaccount(user_id)),
@@ -130,14 +128,6 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
     ).await
 }
 
-
-
-pub fn user_cycles_balance_topup_memo_bytes(user: &Principal) -> [u8; 32] {
-    let mut memo_bytes = [0u8; 32];
-    memo_bytes[..2].copy_from_slice(USER_CYCLES_BALANCE_TOPUP_MEMO_START);
-    memo_bytes[2..].copy_from_slice(&principal_as_thirty_bytes(user));
-    memo_bytes
-}
 
 
 
