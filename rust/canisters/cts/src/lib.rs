@@ -448,7 +448,9 @@ pub fn canister_inspect_message() {
 // ----------------------------------------------------------------------------------------
 
 
-
+fn cycles_market_id() -> Principal {
+    with(&CTS_DATA, |cts_data| { cts_data.cycles_market_id })
+}
 
 
 
@@ -922,6 +924,7 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
                 wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module() as *const Vec<u8> })},
                 arg : &encode_one(&UserCanisterInit{ 
                     cts_id: id(), 
+                    cycles_market_id: cycles_market_id(),
                     user_id: user_id,
                     user_canister_storage_size_mib: NEW_USER_CONTRACT_STORAGE_SIZE_MiB,                         
                     user_canister_lifetime_termination_timestamp_seconds: time()/1_000_000_000 + NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS,
