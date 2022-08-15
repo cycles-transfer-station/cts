@@ -9,13 +9,13 @@ use cts_lib::{
             call::{
                 call,
                 call_raw128,
-                CallRawFuture,
                 CallResult,
                 arg_data,
+                arg_data_raw_size,
                 reply,
                 RejectionCode,
-                msg_cycles_accept128,
                 msg_cycles_available128,
+                msg_cycles_accept128,
                 msg_cycles_refunded128    
             },
             stable::{
@@ -47,17 +47,13 @@ use cts_lib::{
         CyclesTransfer,
         CyclesTransferMemo,
         cts::{
-            CyclesTransferrerUserTransferCyclesCallbackQuest,
-        },
-        user_canister::{
-            CyclesTransferPurchaseLogId
+
         },
         cycles_transferrer::{
-            CyclesTransferRefund,
-            ReTryCyclesTransferrerUserTransferCyclesCallback,
             CyclesTransferrerCanisterInit,
-            CTSUserTransferCyclesQuest,
-            CTSUserTransferCyclesError,
+            TransferCyclesQuest,
+            TransferCyclesError,
+            TransferCyclesCallbackQuest
         }
     },
     tools::{
@@ -75,18 +71,42 @@ use cts_lib::{
     },
     consts::{
         WASM_PAGE_SIZE_BYTES,
-        NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES
     }
 };
 use std::cell::{Cell, RefCell};
+use futures::task::Poll;
+
+
+type CyclesTransferRefund = Cycles;
+
+#[derive(CandidType, Deserialize)]
+pub struct TryTransferCyclesCallback { 
+    call_error_of_the_last_try: (RejectionCode, String)/*the call-error of the last try*/, 
+    transfer_cycles_callback_quest: TransferCyclesCallbackQuest, 
+    cycles_transfer_refund: CyclesTransferRefund,
+    try_number: u32
+}
+
+
+#[derive(CandidType, Deserialize)]
+struct CTCData {
+    cts_id: Principal,
+    ongoing_cycles_transfers_count: u64,
+    try_transfer_cycles_callbacks: Vec<TryTransferCyclesCallback>
+}
+impl CTCData {
+    fn new() -> Self {
+        Self {
+            cts_id: Principal::from_slice(&[]),
+            ongoing_cycles_transfers_count: 0,
+            try_transfer_cycles_callbacks: Vec::new()
+        }
+    }
+}
 
 
 
-
-
-
-
-
+pub const TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
 
 pub const MAX_ONGOING_CYCLES_TRANSFERS: u64 = 1000;
 
@@ -95,10 +115,9 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 thread_local! {
-    static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
-    static ONGOING_CYCLES_TRANSFERS_COUNT: Cell<u64> = Cell::new(0);
-    static RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS: RefCell<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>> = RefCell::new(Vec::new()); // (cycles_transferrer_user_transfer_cycles_call_error, CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)
-
+    
+    static CTC_DATA: RefCell<CTCData> = RefCell::new(CTCData::new()); 
+    
     // not save in a CTCData
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
@@ -108,37 +127,39 @@ thread_local! {
 
 #[init]
 fn init(cycles_transferrer_init: CyclesTransferrerCanisterInit) {
-    CTS_ID.with(|cts_id| { cts_id.set(cycles_transferrer_init.cts_id); });
+    with_mut(&CTC_DATA, |ctc_data| {
+        ctc_data.cts_id = cycles_transferrer_init.cts_id;
+    });
 }
 
-#[derive(CandidType, Deserialize)]
-struct CTCData {
-    cts_id: Principal,
-    ongoing_cycles_transfers_count: u64,
-    re_try_cycles_transferrer_user_transfer_cycles_callbacks: Vec<((u32, String), CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund)>
-}
 
 fn create_ctc_data_candid_bytes() -> Vec<u8> {
-    let mut ctc_data_candid_bytes: Vec<u8> = encode_one(
-        &CTCData{
-            cts_id: get(&CTS_ID),
-            ongoing_cycles_transfers_count: get(&ONGOING_CYCLES_TRANSFERS_COUNT),
-            re_try_cycles_transferrer_user_transfer_cycles_callbacks: with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cycles_transferrer_user_transfer_cycles_callbacks| {
-                (*re_try_cycles_transferrer_user_transfer_cycles_callbacks).clone()
-            })
-        }
-    ).unwrap();
+    let mut ctc_data_candid_bytes: Vec<u8> = with(&CTC_DATA, |ctc_data| { encode_one(ctc_data).unwrap() });
     ctc_data_candid_bytes.shrink_to_fit();
     ctc_data_candid_bytes
 }
 
 
 fn re_store_ctc_data_candid_bytes(ctc_data_candid_bytes: Vec<u8>) {
-    let ctc_data: CTCData = decode_one::<CTCData>(&ctc_data_candid_bytes).unwrap();
-    set(&CTS_ID, ctc_data.cts_id);
-    set(&ONGOING_CYCLES_TRANSFERS_COUNT, ctc_data.ongoing_cycles_transfers_count);
-    with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |re_try_cycles_transferrer_user_transfer_cycles_callbacks| {
-        *re_try_cycles_transferrer_user_transfer_cycles_callbacks = ctc_data.re_try_cycles_transferrer_user_transfer_cycles_callbacks;
+    let ctc_data: CTCData = match decode_one::<CTCData>(&ctc_data_candid_bytes) {
+        Ok(ctc_data) => ctc_data,
+        Err(_) => {
+            trap("error decode of the ctc_data");
+            /*
+            let old_ctc_data: OldCTCData = decode_one::<OldCTCData>(&ctc_data_candid_bytes).unwrap();
+            let ctc_data: CTCData = CTCData{
+                cts_id: old_ctc_data.cts_id,
+                ......
+            };
+            ctc_data
+            */
+        }
+    };
+    
+    std::mem::drop(ctc_data_candid_bytes);
+    
+    with_mut(&CTC_DATA, |ctcd| {
+        *ctcd = ctc_data;
     });
 }
 
@@ -148,11 +169,11 @@ fn pre_upgrade() {
     let ctc_upgrade_data_candid_bytes: Vec<u8> = create_ctc_data_candid_bytes();
     
     let current_stable_size_wasm_pages: u64 = stable64_size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES;
+    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
     
     let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the ctc_upgrade_data_candid_bytes*/ + ctc_upgrade_data_candid_bytes.len() as u64; 
     if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES) + 1).unwrap();
+        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
     }
     
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((ctc_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
@@ -177,7 +198,7 @@ fn post_upgrade() {
 // --------------------------------------------------
 
 fn cts_id() -> Principal {
-    CTS_ID.with(|cts_id| { cts_id.get() })
+    with(&CTC_DATA, |ctc_data| { ctc_data.cts_id })
 }
 
 
@@ -185,59 +206,60 @@ fn cts_id() -> Principal {
 // ---------------------------------------------------
 
 
-// (cts_q: CTSUserTransferCyclesQuest) -> Result<(), CTSUserTransferCyclesError> 
+// (q: TransferCyclesQuest) -> Result<(), TransferCyclesError> 
 #[update(manual_reply = true)]
-pub async fn cts_user_transfer_cycles() {
-    
-    if caller() != cts_id() {
-        trap("Caller must be the CTS.")
-    }
+pub async fn transfer_cycles() {
     
     if get(&STOP_CALLS) == true {
         trap("Maintenance. try later.")
     }
     
-    if ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| octs.get()) >= MAX_ONGOING_CYCLES_TRANSFERS {
-        //trap("Max Ongoing Cycles-Transfers in this cycles_transferrer");
-        reply::<(Result<(), CTSUserTransferCyclesError>,)>((Err(CTSUserTransferCyclesError::MaxOngoingCyclesTransfers(get(&ONGOING_CYCLES_TRANSFERS_COUNT))),));    
+    if arg_data_raw_size() > 150 {
+        trap("arg_data_raw_size too big");
+    }
+    
+    let (q,): (TransferCyclesQuest,) = arg_data::<(TransferCyclesQuest,)>();
+    
+    if msg_cycles_available128() < q.cycles + TRANSFER_CYCLES_FEE {
+        reply::<(Result<(), TransferCyclesError>,)>((Err(TransferCyclesError::MsgCyclesTooLow{ transfer_cycles_fee: TRANSFER_CYCLES_FEE }),));    
+        return;
+    } 
+    
+    if with(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count }) >= MAX_ONGOING_CYCLES_TRANSFERS {
+        reply::<(Result<(), TransferCyclesError>,)>((Err(TransferCyclesError::MaxOngoingCyclesTransfers),));    
         return;
     }
     
-    let (cts_q,): (CTSUserTransferCyclesQuest,) = arg_data::<(CTSUserTransferCyclesQuest,)>();
     
     let cycles_transfer_candid: Vec<u8> = match candid::utils::encode_one(
-        &CyclesTransfer{ memo: cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles_transfer_memo.clone() }
+        &CyclesTransfer{ memo: q.cycles_transfer_memo }
     ) {
         Ok(candid_bytes) => candid_bytes,    
         Err(candid_error) => {
-            reply::<(Result<(), CTSUserTransferCyclesError>,)>((Err(CTSUserTransferCyclesError::CyclesTransferQuestCandidCodeError(format!("{:?}", candid_error))),));    
-            return;
-        
-        },
+            reply::<(Result<(), TransferCyclesError>,)>((Err(TransferCyclesError::CyclesTransferQuestCandidCodeError(format!("{:?}", candid_error))),));    
+            return;        
+        }
     };
     
-    // make sure to cept the cts cycles for the call after any possibility of a reply(Err()) and return; make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the cts gets the cycles back 
+    // make sure to cept the cts cycles for the call after any possibility of a reply(Err()) and return; make sure errors after here before the cycles_transfer_call_future.await are trap so that the state rolls back and the caller gets the cycles back 
     // cept the cts cycles before the cycles_transfer call
-    let cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());                                                   // before calling reply or reject.
-    if cycles != cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles {
-        trap("check the cts call of this cycles_transferrer.")
-    }
+    msg_cycles_accept128(q.cycles + TRANSFER_CYCLES_FEE); // already checked that there is correct mount of the cycles        // before calling reply or reject.
     
-    ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| { octs.set(octs.get() + 1); }); // checked add?
+    with_mut(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count += 1; });
     
-    reply::<(Result<(), CTSUserTransferCyclesError>,)>((Ok(()),)); // test that at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
+    reply::<(Result<(), TransferCyclesError>,)>((Ok(()),)); // at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
     
     // call_raw because dont want to rely on the canister returning the correct candid 
-    let cycles_transfer_call_future: CallRawFuture = call_raw128(
-        cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.canister_id,
+    let mut cycles_transfer_call_future = call_raw128(
+        q.for_the_canister,
         "cycles_transfer",
         &cycles_transfer_candid,
-        cts_q.umc_user_transfer_cycles_quest.uc_user_transfer_cycles_quest.user_transfer_cycles_quest.cycles,
+        q.cycles,
     );
     
-    if cycles_transfer_call_future.call_perform_status_code != 0 {
-        // a trap will refund the already accepted cycles(from the cts-main) and discard the reply(to the cts-main) 
-        trap(&format!("cycles_transfer call_perform error: {:?}", RejectionCode::from(cycles_transfer_call_future.call_perform_status_code)));
+    if let Poll::Ready(call_result) = futures::poll!(&mut cycles_transfer_call_future) {
+        // a trap will refund the already accepted cycles and discard the reply 
+        trap(&format!("cycles_transfer call_perform error: {:?}", call_result.unwrap_err()));
     }
     
     let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;
@@ -256,50 +278,74 @@ pub async fn cts_user_transfer_cycles() {
     }
     
     
-    // we make a new call here because we already replied to the user_transfer_cycles before the cycles_transfer call.
-    do_cycles_transferrer_user_transfer_cycles_callback(
-        CyclesTransferrerUserTransferCyclesCallbackQuest{
-            cycles_transfer_call_error,
-            cts_user_transfer_cycles_quest: cts_q
+    // we make a new call here because we already replied to the transfer_cycles-caller before the cycles_transfer call.
+    do_transfer_cycles_callback(
+        TransferCyclesCallbackQuest{
+            user_cycles_transfer_id: q.user_cycles_transfer_id,
+            cycles_transfer_call_error
         },
-        cycles_transfer_refund
+        cycles_transfer_refund,
+        1
     ).await;
-    
     
 }
 
 
-async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_user_transfer_cycles_callback_quest: CyclesTransferrerUserTransferCyclesCallbackQuest, cycles_transfer_refund: CyclesTransferRefund) {
+async fn do_transfer_cycles_callback(transfer_cycles_callback_quest: TransferCyclesCallbackQuest, cycles_transfer_refund: CyclesTransferRefund, try_number: u32) {
+    
+    let transfer_cycles_callback_quest_cb_result = candid::utils::encode_one(&transfer_cycles_callback_quest); // before the move into the closure.
+    
+    let g = || {
+        with_mut(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count = ctc_data.ongoing_cycles_transfers_count.checked_sub(1).unwrap_or(0); });
+    };
+    
+    let log_try = |transfer_cycles_callback_call_error: (RejectionCode, String), try_n: u32| {
+        with_mut(&CTC_DATA, |ctc_data| {
+            ctc_data.try_transfer_cycles_callbacks.push(
+                TryTransferCyclesCallback { 
+                    call_error_of_the_last_try: transfer_cycles_callback_call_error, 
+                    transfer_cycles_callback_quest, 
+                    cycles_transfer_refund,
+                    try_number: try_n
+                }
+            );             
+        });
+    };
+    
+    let transfer_cycles_callback_quest_cb: Vec<u8> = match transfer_cycles_callback_quest_cb_result {
+        Ok(b) => b,
+        Err(candid_error) => {
+            log_try((RejectionCode::Unknown, format!("candid code TransferCyclesCallbackQuest error: {:?}", candid_error)), try_number);
+            return;
+        }
+    };
 
-    let cycles_transferrer_user_transfer_cycles_callback_call_future: CallRawFuture = call_raw128(
+    let mut transfer_cycles_callback_call_future = call_raw128(
         cts_id(),
-        "cycles_transferrer_user_transfer_cycles_callback",
-        &candid::utils::encode_one(&cycles_transferrer_user_transfer_cycles_callback_quest).unwrap(), // .unwrap ? test it before the ployment
+        "cycles_transferrer_transfer_cycles_callback",
+        &transfer_cycles_callback_quest_cb,
         cycles_transfer_refund
     );
     
-    if cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code != 0 {
-        // log and re-try in a heartbeat or similar
-        // in the re-try, make sure to give the cts back the user_transfer_cycles-refund 
-        with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-            rcs.push(((cycles_transferrer_user_transfer_cycles_callback_call_future.call_perform_status_code, "call_perform error".to_string()), cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund));
-        });
+    if let Poll::Ready(call_result) = futures::poll!(&mut transfer_cycles_callback_call_future) {
+        log_try(call_result.unwrap_err(), try_number);
         return;
     }
-
-    let cycles_transferrer_user_transfer_cycles_callback_call_result: CallResult<Vec<u8>> = cycles_transferrer_user_transfer_cycles_callback_call_future.await;  
     
-    match cycles_transferrer_user_transfer_cycles_callback_call_result {
+    match transfer_cycles_callback_call_future.await {
         Ok(_) => {
-            // for the cts of the cycles_transferrer_user_transfer_cycles_callback_call-cept is with the cept of the cycles of this call for the user for the re-fund   
-            ONGOING_CYCLES_TRANSFERS_COUNT.with(|octs| { octs.set(octs.get() - 1); }); // checked_sub? 
+            g();
         },
-        Err(cycles_transferrer_user_transfer_cycles_callback_call_error) => {
-            // cts no cept the cycles in a case of a call-error here
-            // log and re-try in a heartbeat or similar
-            with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-                rcs.push(((cycles_transferrer_user_transfer_cycles_callback_call_error.0 as u32, cycles_transferrer_user_transfer_cycles_callback_call_error.1), cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund)); 
-            });
+        Err(transfer_cycles_callback_call_error) => {
+            if msg_cycles_refunded128() != cycles_transfer_refund {
+                g();
+                return;
+            }
+            if try_number < 7 {
+                log_try(transfer_cycles_callback_call_error, try_number + 1);
+            } else {
+                g();
+            }
         }
     }
     
@@ -307,67 +353,66 @@ async fn do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_
 
 
 #[update(manual_reply = true)]
-pub async fn cts_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
+pub async fn cts_do_try_transfer_cycles_callbacks() {
     
     if caller() != cts_id() {
         trap("Caller must be the CTS.")
     }
    
     futures::future::join_all(
-        with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, 
-            |rcs| {
-                rcs.drain(..).map(
-                    |(_cycles_transferrer_user_transfer_cycles_callback_call_error, cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund): ReTryCyclesTransferrerUserTransferCyclesCallback| {
-                        do_cycles_transferrer_user_transfer_cycles_callback(cycles_transferrer_user_transfer_cycles_callback_quest, cycles_transfer_refund)
-                    }
-                ).collect::<Vec<_/*anonymous-future*/>>()
-            }
-        )
+        with_mut(&CTC_DATA, |ctc_data| {
+            ctc_data.try_transfer_cycles_callbacks.drain(..).map(
+                |try_transfer_cycles_callback: TryTransferCyclesCallback| {
+                    do_transfer_cycles_callback(
+                        try_transfer_cycles_callback.transfer_cycles_callback_quest, 
+                        try_transfer_cycles_callback.cycles_transfer_refund,
+                        try_transfer_cycles_callback.try_number
+                    )
+                }
+            ).collect::<Vec<_/*anonymous-future*/>>()
+        })
     ).await;
-   
-    /*   
-    for i in 0..with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| rcs.len()) { // futures::future::join?
-        
-        let possible_re_try_callback: Option<ReTryCyclesTransferrerUserTransferCyclesCallback> = with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| { rcs.pop() });
-        
-        if let Some(re_try_callback) = possible_re_try_callback {
-            do_cycles_transferrer_user_transfer_cycles_callback(re_try_callback.1, re_try_callback.2).await;
-        }
-        
-    }
-    */
     
-    with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-        reply::<(&Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs,));
+    with(&CTC_DATA, |ctc_data| {
+        reply::<(&Vec<TryTransferCyclesCallback>,)>((&(ctc_data.try_transfer_cycles_callbacks),));
     });
     
 }
 
 
 
-#[export_name = "canister_query cts_see_re_try_cycles_transferrer_user_transfer_cycles_callbacks"]
-pub fn cts_see_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
+#[export_name = "canister_query cts_see_try_transfer_cycles_callbacks"]
+pub fn cts_see_try_transfer_cycles_callbacks() {
     if caller() != cts_id() {
         trap("Caller must be the CTS.")
     }
     
-    with(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-        reply::<(&Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs,));
+    with(&CTC_DATA, |ctc_data| {
+        reply::<(&Vec<TryTransferCyclesCallback>,)>((&(ctc_data.try_transfer_cycles_callbacks),));
     });
 }
 
 
-#[export_name = "canister_update cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks"]
-pub fn cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
+#[export_name = "canister_update cts_drain_try_transfer_cycles_callbacks"]
+pub fn cts_drain_try_transfer_cycles_callbacks() {
     if caller() != cts_id() {
         trap("Caller must be the CTS.")
     }
-    with_mut(&RE_TRY_CYCLES_TRANSFERRER_USER_TRANSFER_CYCLES_CALLBACKS, |rcs| {
-        reply::<(Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>((rcs.drain(..).collect::<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>>(),));
+    with_mut(&CTC_DATA, |ctc_data| {
+        reply::<(Vec<TryTransferCyclesCallback>,)>((ctc_data.try_transfer_cycles_callbacks.drain(..).collect::<Vec<TryTransferCyclesCallback>>(),));
     });    
 }
 
 
+#[update]
+pub fn cts_put_try_transfer_cycles_callback(try_transfer_cycles_callback: TryTransferCyclesCallback) {
+    if caller() != cts_id() {
+        trap("Caller must be the CTS.")
+    }
+    with_mut(&CTC_DATA, |ctc_data| {
+        ctc_data.try_transfer_cycles_callbacks.push(try_transfer_cycles_callback);
+    });    
+}
 
 
 
@@ -388,7 +433,7 @@ pub fn cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks() {
 
 #[update]
 pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     set(&STOP_CALLS, stop_calls_flag);
@@ -396,7 +441,7 @@ pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
 
 #[query]
 pub fn cts_see_stop_calls_flag() -> bool {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     get(&STOP_CALLS)
@@ -408,7 +453,7 @@ pub fn cts_see_stop_calls_flag() -> bool {
 
 #[update]
 pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     with_mut(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
@@ -419,17 +464,16 @@ pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_byte
 
 
 
-// chunk_size = 1mib
 
 
 #[export_name = "canister_query cts_download_state_snapshot"]
 pub fn cts_download_state_snapshot() {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     let chunk_size: usize = 1024*1024;
     with(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
-        let (chunk_i,): (u32,) = arg_data::<(u32,)>(); // starts at 0
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
         reply::<(Option<&[u8]>,)>((state_snapshot_ctc_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
     })
 
@@ -439,7 +483,7 @@ pub fn cts_download_state_snapshot() {
 
 #[update]
 pub fn cts_clear_state_snapshot() {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     with_mut(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
@@ -449,7 +493,7 @@ pub fn cts_clear_state_snapshot() {
 
 #[update]
 pub fn cts_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     with_mut(&STATE_SNAPSHOT_CTC_DATA_CANDID_BYTES, |state_snapshot_ctc_data_candid_bytes| {
@@ -459,7 +503,7 @@ pub fn cts_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
 
 #[update]
 pub fn cts_re_store_ctc_data_out_of_the_state_snapshot() {
-    if caller() != get(&CTS_ID) {
+    if caller() != cts_id() {
         trap("Caller must be the cts for this method.")
     }
     re_store_ctc_data_candid_bytes(

@@ -141,6 +141,61 @@ pub mod canister_code {
 
 
 
+pub mod user_canister_cache {
+    use super::{UserId, UserCanisterId, time};
+    use std::collections::{HashMap};
+    
+    // private
+    #[derive(Clone, Copy)]
+    struct UserCacheData {
+        timestamp_nanos: u64,
+        opt_user_canister_id: Option<UserCanisterId>
+    }
+
+    // cacha for this. with a max users->user-canisters
+    // on a new user, put/update insert the new user into this cache
+    // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
+        
+    pub struct UserCanisterCache {
+        hashmap: HashMap<UserId, UserCacheData>,
+        max_size: usize
+    }
+    impl UserCanisterCache {
+        
+        pub fn new(max_size: usize) -> Self {
+            Self {
+                hashmap: HashMap::new(),
+                max_size
+            }
+        }
+        
+        pub fn put(&mut self, user_id: UserId, opt_user_canister_id: Option<UserCanisterId>) {
+            if self.hashmap.len() >= self.max_size {
+                self.hashmap.remove(
+                    &(self.hashmap.iter().min_by_key(
+                        |(user_id, user_cache_data)| {
+                            user_cache_data.timestamp_nanos
+                        }
+                    ).unwrap().0.clone())
+                );
+            }
+            self.hashmap.insert(user_id, UserCacheData{ opt_user_canister_id, timestamp_nanos: time() });
+        }
+        
+        pub fn check(&self, user_id: UserId) -> Option<Option<UserCanisterId>> {
+            match self.hashmap.get(&user_id) {
+                None => None,
+                Some(user_cache_data) => Some(user_cache_data.opt_user_canister_id)
+            }
+        }
+    }
+
+}
+
+
+
+
+
 pub mod management_canister {
     use super::*;
     
@@ -220,8 +275,6 @@ pub mod management_canister {
 pub mod cycles_transferrer {
     use super::*;
     
-    pub type CyclesTransferRefund = Cycles;
-    
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerCanisterInit {
         pub cts_id: Principal
@@ -237,7 +290,8 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]
     pub enum TransferCyclesError {
-        MaxOngoingCyclesTransfers(u64),
+        MsgCyclesTooLow{ transfer_cycles_fee: Cycles },
+        MaxOngoingCyclesTransfers,
         CyclesTransferQuestCandidCodeError(String)
     }
     
@@ -246,8 +300,6 @@ pub mod cycles_transferrer {
         pub user_cycles_transfer_id: u64,
         pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
     }
-    
-    //pub type ReTryCyclesTransferrerUserTransferCyclesCallback = ((u32, String)/*the call-error of the last try*/, cts::CyclesTransferrerUserTransferCyclesCallbackQuest, CyclesTransferRefund);
     
 }
 
@@ -319,6 +371,7 @@ pub mod user_canister {
     pub struct UserCanisterInit {
         pub user_id: UserId,
         pub cts_id: Principal,
+        pub cycles_market_id: Principal, 
         pub user_canister_storage_size_mib: u64,                         
         pub user_canister_lifetime_termination_timestamp_seconds: u64,
         pub cycles_transferrer_canisters: Vec<Principal>

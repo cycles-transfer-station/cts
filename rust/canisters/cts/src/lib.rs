@@ -62,6 +62,7 @@ use cts_lib::{
         UserCanisterId,
         UsersMapCanisterId,
         canister_code::CanisterCode,
+        user_canister_cache::UserCanisterCache,
         management_canister::{
             ManagementCanisterInstallCodeMode,
             ManagementCanisterInstallCodeQuest,
@@ -225,6 +226,7 @@ use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_ha
 #[derive(CandidType, Deserialize)]
 pub struct CTSData {
     controllers: Vec<Principal>,
+    cycles_market_id: Principal,
     user_canister_code: CanisterCode,
     users_map_canister_code: CanisterCode,
     cycles_transferrer_canister_code: CanisterCode,
@@ -243,6 +245,7 @@ impl CTSData {
     fn new() -> Self {
         Self {
             controllers: Vec::new(),
+            cycles_market_id: Principal::from_slice(&[]),
             user_canister_code: CanisterCode::new(Vec::new()),
             users_map_canister_code: CanisterCode::new(Vec::new()),
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
@@ -299,10 +302,10 @@ thread_local! {
     
     pub static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
-    // not save through upgrades
+    // not save through the upgrades
     pub static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::new()); // is with the save through the upgrades by the frontcode_files_hashes field on the CTSData
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
-    static     USER_CANISTER_CACHE: RefCell<UserCanisterCache> = RefCell::new(UserCanisterCache::new());
+    static     USER_CANISTER_CACHE: RefCell<UserCanisterCache> = RefCell::new(UserCanisterCache::new(1400));
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
     
@@ -315,12 +318,16 @@ thread_local! {
 
 #[derive(CandidType, Deserialize)]
 struct CTSInit {
-    controllers: Vec<Principal>
+    controllers: Vec<Principal>,
+    cycles_market_id: Principal
 } 
 
 #[init]
 fn init(cts_init: CTSInit) {
-    with_mut(&CTS_DATA, |cts_data| { cts_data.controllers = cts_init.controllers; });
+    with_mut(&CTS_DATA, |cts_data| { 
+        cts_data.controllers = cts_init.controllers; 
+        cts_data.cycles_market_id: cts_init.cycles_market_id
+    });
 } 
 
 
@@ -349,7 +356,7 @@ fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
         Err(_) => {
             trap("error decode of the CTSData");
             /*
-            let old_cts_data: OldCTSData = decode_one::<CTSData>(&cts_data_candid_bytes).unwrap();
+            let old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_data_candid_bytes).unwrap();
             let cts_data: CTSData = CTSData{
                 controllers: old_cts_data.controllers
                 ........
@@ -1164,62 +1171,6 @@ async fn new_user_(user_id: UserId, q: NewUserQuest) -> Result<NewUserSuccessDat
 
 
 
-
-
-mod user_canister_cache {
-    use super::{UserId, UserCanisterId, time};
-    use std::collections::{HashMap};
-    
-    // private
-    #[derive(Clone, Copy)]
-    struct FindUserSponseCacheData {
-        timestamp_nanos: u64,
-        opt_user_canister_id: Option<UserCanisterId>
-    }
-
-
-
-    // cacha for this. with a max users->user-canisters
-    // on a new user, put/update insert the new user into this cache
-    // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
-    
-    pub struct UserCanisterCache {
-        hashmap: HashMap<UserId, FindUserSponseCacheData>    
-    }
-    impl UserCanisterCache {
-        
-        pub const MAX_SIZE: usize = 1400;
-        
-        pub fn new() -> Self {
-            Self {
-                hashmap: HashMap::new()
-            }
-        }
-        
-        pub fn put(&mut self, user_id: UserId, opt_user_canister_id: Option<UserCanisterId>) {
-            if self.hashmap.len() >= Self::MAX_SIZE {
-                self.hashmap.remove(
-                    &(self.hashmap.iter().min_by_key(
-                        |(user_id, find_user_sponse_cache_data)| {
-                            find_user_sponse_cache_data.timestamp_nanos
-                        }
-                    ).unwrap().0.clone())
-                );
-            }
-            self.hashmap.insert(user_id, FindUserSponseCacheData{ opt_user_canister_id, timestamp_nanos: time() });
-        }
-        
-        pub fn check(&self, user_id: UserId) -> Option<Option<UserCanisterId>> {
-            match self.hashmap.get(&user_id) {
-                None => None,
-                Some(find_user_sponse_cache_data) => Some(find_user_sponse_cache_data.opt_user_canister_id)
-            }
-        }
-    }
-
-}
-
-use user_canister_cache::UserCanisterCache;
 
 
 #[derive(CandidType, Deserialize)]
