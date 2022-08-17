@@ -32,6 +32,9 @@ use cts_lib::{
 
 // on a cycles-payout, the cycles-market will try once to send the cycles with a cycles_transfer-method call and if it fails, the cycles-market will use the deposit_cycles management canister method and close the position.
 
+// make sure the positors and purchaser are secret and hidden. public-data is the position-id, the commodity, the minimum purchase, and the rate, (and the timestamp? no that makes it traceable)
+
+// when there is name-callbacks the canisters can check the memo's base on the caller
 
 type PositionId = u128;
 
@@ -42,7 +45,7 @@ struct CyclesPosition {
     positor: Principal,
     cycles: Cycles,
     minimum_purchase: Cycles
-    xdr_permyriad_per_icp_purchase_rate: XdrPerMyriadPerIcp,
+    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
     timestamp_nanos: u64,
 }
 
@@ -53,7 +56,7 @@ struct IcpPosition {
     positor: Principal,
     icp: IcpTokens,
     minimum_purchase: IcpTokens
-    xdr_permyriad_per_icp_purchase_rate: XdrPerMyriadPerIcp,
+    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
     timestamp_nanos: u64,
 }
 
@@ -68,24 +71,17 @@ struct PositionPurchase {
     purchaser: Principal,
     mount: Commodity,
     timestamp_nanos: u64,
-    cycles_payout: CyclesPayout,
+    cycles_payout_data: CyclesPayoutData,
     icp_payout: bool
 }
 
-struct VoidCyclesPosition {
-    position_id: PositionId,
-    positor: Principal,
-    cycles: Cycles,
-    cycles_payout: CyclesPayout
-    timestamp_nanos: u64
-}
-
-struct CyclesPayout {
+#[derive(Clone)]
+struct CyclesPayoutData {
     cycles_transferrer_transfer_cycles_call_success: bool,
     cycles_transferrer_transfer_cycles_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
     management_canister_posit_cycles_call_success: bool // this is use for when the payout-cycles-transfer-refund != 0, call the management_canister-deposit_cycles(payout-cycles-transfer-refund)
 } 
-impl CyclesPayout {
+impl CyclesPayoutData {
     fn new() -> Self {
         Self {
             cycles_transferrer_transfer_cycles_call_success: false,
@@ -95,7 +91,13 @@ impl CyclesPayout {
     }
 }
 
-
+struct VoidCyclesPosition {
+    position_id: PositionId,
+    positor: Principal,
+    cycles: Cycles,
+    cycles_payout_data: CyclesPayoutData
+    timestamp_nanos: u64
+}
 
 
 
@@ -153,6 +155,11 @@ const MAX_POSITIONS_PURCHASES: usize = ( POSITIONS_PURCHASES_MAX_STORAGE_SIZE_Mi
 const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 10; // / 5 * 0.5;
 const MAX_VOID_CYCLES_POSITIONS: usize = ( VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>() as u64 ) as usize;
 
+
+const DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE: usize = 500;
+
+
+const VOID_POSITION_CYCLES_TRANSFER_MEMO_START: &[u8; 5] = b"CM-VP";
 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
@@ -295,8 +302,57 @@ fn new_position_id() {
     })
 }
 
+async fn do_cycles_payout(for_the_canister: Principal, cycles: Cycles, cycles_transfer_memo: CyclesTransferMemo, cycles_payout_data: CyclesPayoutData) -> CyclesPayoutData {
+
+    
+}
 
 async fn do_void_cycles_positions() {
+    
+    if with(&CM_DATA, |cm_data| { cm_data.void_cycles_positions.len() == 0 { return; }
+    
+    let void_cycles_positions_chunk: Vec<VoidCyclesPosition> = Vec::new();
+    
+    with_mut(&CM_DATA, |cm_data| { 
+        void_cycles_positions_chunk = cm_data.void_cycles_positions.drain(..std::cmp::min(cm_data.void_cycles_positions.len(), DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE)).collect::<Vec<VoidCyclesPosition>>();
+    });
+
+    void_cycles_positions_chunk = {
+        void_cycles_positions_chunk.into_iter()
+            .filter(|vcp: &VoidCyclesPosition| { vcp.cycles_payout_data.is_complete() == false })
+            .collect::<Vec<VoidCyclesPosition>>()
+    };
+    
+    let rs: Vec<CyclesPayoutData> = futures::future::join_all(
+        void_cycles_positions_chunk.iter().map(
+            |vcp| {
+                do_cycles_payout(
+                    vcp.positor,
+                    vcp.cycles,
+                    CyclesTransferMemo::Blob([VOID_POSITION_CYCLES_TRANSFER_MEMO_START, vcp.position_id.to_be_bytes()].concat().to_vec()),
+                    vcp.cycles_payout_data.clone()
+                )   
+            }
+        ).collect::<Vec<_>>()
+    ).await;
+    
+    // mut for the append
+    let mut final_void_cycles_positions_chunk: Vec<VoidCyclesPosition> = {
+        void_cycles_positions_chunk.into_iter().zip(rs.into_iter())
+            .filter(|(vcp, cycles_payout_data): (VoidCyclesPosition, CyclesPayoutData)| {
+                cycles_payout_data.is_complete() == false // cause the ones that are complete we don't want to keep
+            })
+            .map(|(vcp, cycles_payout_data): (VoidCyclesPosition, CyclesPayoutData)| {
+                vcp.cycles_payout_data = cycles_payout_data;
+                vcp
+            })
+            .collect::<Vec<VoidCyclesPosition>>()
+    };
+    
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.void_cycles_positions.append(&mut final_void_cycles_positions_chunk);
+        cm_data.void_cycles_positions.sort_by_key(|vcp: &VoidCyclesPosition| { vcp.position_id });
+    });
     
 }
 
@@ -331,6 +387,8 @@ pub struct CreateCyclesPositionSuccess {
 
 #[update(manual_reply = true)]
 pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPositionQuest) { // -> Result<CreateCyclesPositionSuccess, CreateCyclesPositionError> {
+
+    let positor: Principal = caller();
 
     if q.minimum_purchase > q.cycles {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition),));    
@@ -393,7 +451,7 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
                         position_id:    cycles_position_lowest_xdr_permyriad_per_icp_rate.id,
                         positor:        cycles_position_lowest_xdr_permyriad_per_icp_rate.positor,
                         cycles:         cycles_position_lowest_xdr_permyriad_per_icp_rate.cycles,
-                        cycles_payout: CyclesPayout::new(),
+                        cycles_payout_data: CyclesPayoutData::new(),
                         timestamp_nanos: time()
                     }
                 );
@@ -425,16 +483,16 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
         cm_data.cycles_positions.push(
             CyclesPosition{
                 id: position_id,   
-                positor: caller(),
+                positor,
                 cycles: q.cycles,
                 minimum_purchase: q.minimum_purchase,
-                xdr_permyriad_per_icp_purchase_rate: q.xdr_permyriad_per_icp_purchase_rate,
+                xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
                 timestamp_nanos: time(),
             }
         );
     });
     
-    msg_cycles_accept128(msg_cycles_quirement);
+    if msg_cycles_accept128(msg_cycles_quirement) != msg_cycles_quirement { trap("check system guarentees") }
 
     reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Ok(
         CreateCyclesPositionSuccess{
