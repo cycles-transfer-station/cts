@@ -25,7 +25,7 @@ pub type CTSFuel = Cycles;
 pub type UserId = Principal;
 pub type UserCanisterId = Principal;
 pub type UsersMapCanisterId = Principal;
-
+pub type XdrPerMyriadPerIcp = u64;
 
 
 
@@ -173,7 +173,7 @@ pub mod user_canister_cache {
             if self.hashmap.len() >= self.max_size {
                 self.hashmap.remove(
                     &(self.hashmap.iter().min_by_key(
-                        |(user_id, user_cache_data)| {
+                        |(_user_id, user_cache_data)| {
                             user_cache_data.timestamp_nanos
                         }
                     ).unwrap().0.clone())

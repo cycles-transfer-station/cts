@@ -8,6 +8,9 @@ use crate::{
     },
     consts::{
         CYCLES_PER_XDR
+    },
+    types::{
+        XdrPerMyriadPerIcp
     }
 };
 
@@ -125,14 +128,14 @@ pub fn user_icp_id(cts_id: &Principal, user_id: &Principal) -> IcpId {
 
 
 
-pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: u64) -> u128 {
+pub fn icptokens_to_cycles(icpts: IcpTokens, xdr_permyriad_per_icp: XdrPerMyriadPerIcp) -> u128 {
     icpts.e8s() as u128 
     * xdr_permyriad_per_icp as u128 
     * CYCLES_PER_XDR 
     / (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
 }
 
-pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpTokens {
+pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: XdrPerMyriadPerIcp) -> IcpTokens {
     IcpTokens::from_e8s(
         ( cycles
         * (IcpTokens::SUBDIVIDABLE_BY as u128 * 10_000)
@@ -142,11 +145,18 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: u64) -> IcpToken
 }
 
 
+
+
 #[test]
 fn test_icp_cycles_transform() {
     let t: IcpTokens = IcpTokens::from_e8s(0123456789);
-    let xdr_permyriad_per_icp: u64 = 45628;
+    let xdr_permyriad_per_icp: u64 = 45627;
     assert_eq!(t, cycles_to_icptokens(icptokens_to_cycles(t, xdr_permyriad_per_icp), xdr_permyriad_per_icp));
+    
+    println!("{}", icptokens_to_cycles(t, xdr_permyriad_per_icp));
+    //println!("{}", cycles_to_icptokens(5000000000000, xdr_permyriad_per_icp));
+    
+
 }
 
 

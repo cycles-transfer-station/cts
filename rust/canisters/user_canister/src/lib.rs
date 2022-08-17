@@ -279,6 +279,11 @@ struct OldUserData {
 
 
 fn create_uc_data_candid_bytes() -> Vec<u8> {
+    with_mut(&UC_DATA, |uc_data| { 
+        uc_data.user_data.cycles_transfers_in.shrink_to_fit();
+        uc_data.user_data.cycles_transfers_out.shrink_to_fit(); 
+    });
+    
     let mut uc_data_candid_bytes: Vec<u8> = with(&UC_DATA, |uc_data| { encode_one(uc_data).unwrap() });
     uc_data_candid_bytes.shrink_to_fit();
     uc_data_candid_bytes
