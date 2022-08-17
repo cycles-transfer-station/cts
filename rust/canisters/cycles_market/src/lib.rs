@@ -103,6 +103,7 @@ impl CyclesPayout {
 struct CMData {
     cts_id: Principal,
     cycles_transferrers: Vec<Principal>,
+    position_id_counter: PositionId,
     cycles_positions: Vec<CyclesPosition>,
     icp_positions: Vec<IcpPosition>,
     positions_purchases: Vec<PositionPurchase>,
@@ -115,6 +116,7 @@ impl CMData {
         Self {
             cts_id: Principal::from_slice(&[]),
             cycles_transferrers: Vec::new(),
+            position_id_counter: 0,
             cycles_positions: Vec::new(),
             icp_positions: Vec::new(),
             positions_purchases: Vec::new(),
@@ -265,10 +267,12 @@ fn canister_inspect_message() {
     use cts_lib::ic_cdk::api::call::{method_name, accept_message};
     
     if [
-        "create_position",
+        "create_cycles_position",
+        "create_icp_position",
         "purchase_position",
+        "void_position",
     ].contains(&&method_name()[..]) {
-        trap("this method must be call by a canister with some cycles for the fee.");
+        trap("this method must be call by a canister.");
     
     }
     
@@ -283,8 +287,18 @@ fn cts_id() -> Principal {
     with(&CM_DATA, |cm_data| { cm_data.cts_id })
 }
 
+fn new_position_id() {
+    with_mut(&CM_DATA, |cm_data| {
+        let position_id: PositionId = cm_data.position_id_counter.clone();
+        cm_data.position_id_counter += 1;
+        position_id
+    })
+}
 
 
+async fn do_void_cycles_positions() {
+    
+}
 
 
 // -------------------------------------------------------------
@@ -315,77 +329,121 @@ pub struct CreateCyclesPositionSuccess {
     position_id: PositionId,
 }
 
-#[update]
-pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPositionQuest) -> Result<CreateCyclesPositionSuccess, CreateCyclesPositionError> {
+#[update(manual_reply = true)]
+pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPositionQuest) { // -> Result<CreateCyclesPositionSuccess, CreateCyclesPositionError> {
 
     if q.minimum_purchase > q.cycles {
-        return Err(CreateCyclesPositionError::MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition);    
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition),));    
+        do_void_cycles_positions().await;
+        return;
     }
 
     let msg_cycles_quirement: Cycles = q.cycles.checked_add(CREATE_POSITION_FEE).unwrap_or(Cycles::MAX); 
 
     if msg_cycles_available128() < msg_cycles_quirement {
-        return Err(CreateCyclesPositionError::MsgCyclesTooLow{ create_position_fee: CREATE_POSITION_FEE  });
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MsgCyclesTooLow{ create_position_fee: CREATE_POSITION_FEE  }),));
+        do_void_cycles_positions().await;
+        return;
     }
 
     if canister_balance128().checked_add(msg_cycles_quirement).is_none() {
-        return Err(CreateCyclesPositionError::CyclesMarketIsFull);
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::CyclesMarketIsFull),));
+        do_void_cycles_positions().await;
+        return;
     }
 
     
-    let opt_void_cycles_position: Option<VoidCyclesPosition> = with_mut(&CM_DATA, |cm_data| {
+    match with_mut(&CM_DATA, |cm_data| {
         if cm_data.cycles_positions.len() >= MAX_CYCLES_POSITIONS {
             if cm_data.void_cycles_positions.len() >= MAX_VOID_CYCLES_POSITIONS {
-                return Err(CreateCyclesPositionError::CyclesMarketIsFull);
+                reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::CyclesMarketIsFull),));
+                return Err(());
             }
             let cycles_position_highest_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp = { 
-                match cm_data.cycles_positions.iter().max_by_key(|cycles_position: &&CyclesPosition| { cycles_position.xdr_permyriad_per_icp_rate }) {   
-                    Some(cycles_position) => cycles_position.xdr_permyriad_per_rate,
-                    None => return Err(CreateCyclesPositionError::CyclesMarketIsFull),
-                }
+                cm_data.cycles_positions.iter()
+                    .max_by_key(|cycles_position: &&CyclesPosition| { cycles_position.xdr_permyriad_per_icp_rate })
+                    .unwrap()
+                    .xdr_permyriad_per_icp_rate
             };
             if q.xdr_permyriad_per_icp_rate > cycles_position_highest_xdr_permyriad_per_icp_rate && q.cycles >= MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP {
                 // bump
                 let cycles_position_lowest_xdr_permyriad_per_icp_rate_position_id: PositionId = {
                     cm_data.cycles_positions.iter()
-                       .min_by_key(|cycles_position: &&CyclesPosition| { cycles_position.xdr_permyriad_per_icp_rate })
-                       .unwrap().id // we know there is at least one cycles position cause we return if not.
+                        .min_by_key(|cycles_position: &&CyclesPosition| { cycles_position.xdr_permyriad_per_icp_rate })
+                        .unwrap()
+                        .id
                 };
                 let cycles_position_lowest_xdr_permyriad_per_icp_rate_cycles_positions_i: usize = {
-                    cm_data.cycles_positions.binary_search_by(
-                        |cycles_position| { 
-                            cycles_position.id.cmp(&cycles_position_lowest_xdr_permyriad_per_icp_rate_position_id) 
-                        }
+                    cm_data.cycles_positions.binary_search_by_key(
+                        &cycles_position_lowest_xdr_permyriad_per_icp_rate_position_id,
+                        |cycles_position| { cycles_position.id }
                     ).unwrap()
                 };
                 let cycles_position_lowest_xdr_permyriad_per_icp_rate: CyclesPosition = cm_data.cycles_positions.remove(cycles_position_lowest_xdr_permyriad_per_icp_rate_cycles_positions_i);
-                Ok(Some(VoidCyclesPosition{
-                    position_id:    cycles_position_lowest_xdr_permyriad_per_icp_rate.id,
-                    positor:        cycles_position_lowest_xdr_permyriad_per_icp_rate.positor,
-                    cycles:         cycles_position_lowest_xdr_permyriad_per_icp_rate.cycles,
-                    cycles_payout: CyclesPayout::new(),
-                    timestamp_nanos: time()
-                }));
+                if cycles_position_lowest_xdr_permyriad_per_icp_rate.id != cycles_position_lowest_xdr_permyriad_per_icp_rate_position_id { trap("outside the bounds of the contract.") }
+                let cycles_position_lowest_xdr_permyriad_per_icp_rate_void_cycles_positions_insertion_i = { 
+                    cm_data.void_cycles_positions.binary_search_by_key(
+                        &cycles_position_lowest_xdr_permyriad_per_icp_rate_position_id,
+                        |void_cycles_position| { void_cycles_position.position_id }
+                    ).unwrap_err()
+                };
+                cm_data.void_cycles_positions.insert(
+                    cycles_position_lowest_xdr_permyriad_per_icp_rate_void_cycles_positions_insertion_i,
+                    VoidCyclesPosition{
+                        position_id:    cycles_position_lowest_xdr_permyriad_per_icp_rate.id,
+                        positor:        cycles_position_lowest_xdr_permyriad_per_icp_rate.positor,
+                        cycles:         cycles_position_lowest_xdr_permyriad_per_icp_rate.cycles,
+                        cycles_payout: CyclesPayout::new(),
+                        timestamp_nanos: time()
+                    }
+                );
+                Ok(())
             } else {
-                return Err(CreateCyclesPositionError::CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: cycles_position_highest_xdr_permyriad_per_icp_rate + 1, minimum_cycles_position_for_a_bump: MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP });
+                reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: cycles_position_highest_xdr_permyriad_per_icp_rate + 1, minimum_cycles_position_for_a_bump: MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP }),));
+                return Err(());
             }
         } else {
-            Ok(None)
+            Ok(())
         }
-    })?;
-    
-    if q.cycles < MINIMUM_CYCLES_POSITION {
-        return Err(CreateCyclesPositionError::MinimumCyclesPosition(MINIMUM_CYCLES_POSITION));
+    }) {
+        Ok(()) => {},
+        Err(()) => {
+            do_void_cycles_positions().await;
+            return;
+        }
     }
     
+    if q.cycles < MINIMUM_CYCLES_POSITION {
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumCyclesPosition(MINIMUM_CYCLES_POSITION)),));
+        do_void_cycles_positions().await;
+        return;
+    }
     
+    let position_id: PositionId = new_position_id(); 
     
-
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.cycles_positions.push(
+            CyclesPosition{
+                id: position_id,   
+                positor: caller(),
+                cycles: q.cycles,
+                minimum_purchase: q.minimum_purchase,
+                xdr_permyriad_per_icp_purchase_rate: q.xdr_permyriad_per_icp_purchase_rate,
+                timestamp_nanos: time(),
+            }
+        );
+    });
     
+    msg_cycles_accept128(msg_cycles_quirement);
 
-
-
-
+    reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Ok(
+        CreateCyclesPositionSuccess{
+            position_id
+        }
+    ),));
+    
+    do_void_cycles_positions().await;
+    return;
 }
 
 
