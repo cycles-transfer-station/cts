@@ -138,7 +138,7 @@ struct CyclesTransferOut {
     cycles_refunded: Option<Cycles>,   // option cause this field is only filled in the callback and that might not come back because of the callee holding-back the callback cross-upgrades. // if/when a user deletes some CyclesTransferPurchaseLogs, let the user set a special flag to delete the still-not-come-back-user_transfer_cycles by default unset.
     cycles_transfer_memo: CyclesTransferMemo,                           // save max 32-bytes of the memo, of a Blob or of a Text
     timestamp_nanos: u64, // time sent
-    call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means the cycles_transfer-call replied. // save max 20-bytes of the string
+    opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means the cycles_transfer-call replied. // save max 20-bytes of the string
     fee_paid: u64 // cycles_transferrer_fee
 }
 
@@ -650,7 +650,7 @@ pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u64,
                 cycles_refunded: None,   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
                 cycles_transfer_memo: q.cycles_transfer_memo.clone(),
                 timestamp_nanos: time(), // time sent
-                call_error: None,
+                opt_cycles_transfer_call_error: None,
                 fee_paid: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE as u64
             }
         ));
@@ -719,7 +719,7 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
         uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_transfer_refund).unwrap_or(u128::MAX);
         if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = uc_data.user_data.cycles_transfers_out.iter_mut().rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 as u128 == q.user_cycles_transfer_id }) {
             (*cycles_transfer_out_log).1.cycles_refunded = Some(cycles_transfer_refund);
-            (*cycles_transfer_out_log).1.call_error = q.cycles_transfer_call_error;
+            (*cycles_transfer_out_log).1.opt_cycles_transfer_call_error = q.opt_cycles_transfer_call_error;
         }
     });
 

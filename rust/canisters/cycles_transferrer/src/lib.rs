@@ -266,14 +266,14 @@ pub async fn transfer_cycles() {
     
     let cycles_transfer_refund: Cycles = msg_cycles_refunded128(); // now that we are for the sure in a callback
 
-    let cycles_transfer_call_error: Option<(u32, String)>;
+    let opt_cycles_transfer_call_error: Option<(u32, String)>;
     
     match cycles_transfer_call_result {
         Ok(_) => {
-            cycles_transfer_call_error = None;
+            opt_cycles_transfer_call_error = None;
         },
         Err(call_error) => {
-            cycles_transfer_call_error = Some((call_error.0 as u32, call_error.1));
+            opt_cycles_transfer_call_error = Some((call_error.0 as u32, call_error.1));
         }
     }
     
@@ -282,7 +282,7 @@ pub async fn transfer_cycles() {
     do_transfer_cycles_callback(
         TransferCyclesCallbackQuest{
             user_cycles_transfer_id: q.user_cycles_transfer_id,
-            cycles_transfer_call_error
+            opt_cycles_transfer_call_error
         },
         cycles_transfer_refund,
         1
