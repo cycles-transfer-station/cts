@@ -787,19 +787,56 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
 
 
 
-#[update]
-pub async fn purchase_position() {}
+#[update(manual_reply = true)]
+pub async fn purchase_cycles_position() {
+
+}
+
+#[update(manual_reply = true)]
+pub async fn purchase_icp_position() {
+
+
+}
 
 
 
 
 
-
-#[update]
+#[update(manual_reply = true)]
 pub async fn void_position() {}
 
 
 
+
+// -------------------------------
+
+pub struct SeeCyclesPositionsQuest {
+    chunk_i: u64
+}
+
+#[query(manual_reply = true)]
+pub fn see_cycles_positions(q: SeeCyclesPositionsQuest) {
+    with(&CM_DATA, |cm_data| {
+        reply::<(Option<&[CyclesPosition]>,)>((
+            cm_data.cycles_positions.chunks(SEE_CYCLES_POSITIONS_CHUNK_SIZE).nth(q.chunk_i as usize)
+        ,));
+    });
+}
+
+
+
+pub struct SeeIcpPositionsQuest {
+    chunk_i: u64
+}
+
+#[query(manual_reply = true)]
+pub fn see_icp_positions(q: SeeIcpPositionsQuest) {
+    with(&CM_DATA, |cm_data| {
+        reply::<(Option<&[IcpPosition]>,)>((
+            cm_data.icp_positions.chunks(SEE_ICP_POSITIONS_CHUNK_SIZE).nth(q.chunk_i as usize)
+        ,));
+    });
+}
 
 
 
