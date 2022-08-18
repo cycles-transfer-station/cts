@@ -298,7 +298,7 @@ pub mod cycles_transferrer {
     #[derive(CandidType, Deserialize, Clone)]
     pub struct TransferCyclesCallbackQuest {
         pub user_cycles_transfer_id: u64,
-        pub cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+        pub opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
     }
     
 }
