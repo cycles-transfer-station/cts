@@ -678,7 +678,7 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
         next_cycles_transferrer_canister_round_robin().expect("0 known cycles transferrer canisters.")/*before the first await*/,
         "transfer_cycles",
         (cycles_transferrer::TransferCyclesQuest{
-            user_cycles_transfer_id: cycles_transfer_id,
+            user_cycles_transfer_id: cycles_transfer_id as u128,
             for_the_canister: q.for_the_canister,
             cycles: q.cycles,
             cycles_transfer_memo: q.cycles_transfer_memo
@@ -717,7 +717,7 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
 
     with_mut(&UC_DATA, |uc_data| {
         uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_transfer_refund).unwrap_or(u128::MAX);
-        if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = uc_data.user_data.cycles_transfers_out.iter_mut().rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 == q.user_cycles_transfer_id }) {
+        if let Some(cycles_transfer_out_log/*: &mut (u64,CyclesTransferOut)*/) = uc_data.user_data.cycles_transfers_out.iter_mut().rev().find(|cycles_transfer_out_log: &&mut (u64,CyclesTransferOut)| { (**cycles_transfer_out_log).0 as u128 == q.user_cycles_transfer_id }) {
             (*cycles_transfer_out_log).1.cycles_refunded = Some(cycles_transfer_refund);
             (*cycles_transfer_out_log).1.call_error = q.cycles_transfer_call_error;
         }

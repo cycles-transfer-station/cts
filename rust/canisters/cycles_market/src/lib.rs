@@ -49,8 +49,6 @@ struct CyclesPosition {
     timestamp_nanos: u64,
 }
 
-
-
 struct IcpPosition {
     id: PositionId,   
     positor: Principal,
@@ -59,7 +57,6 @@ struct IcpPosition {
     xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
     timestamp_nanos: u64,
 }
-
 
 enum Commodity {
     Cycles(Cycles),
@@ -88,6 +85,18 @@ impl CyclesPayoutData {
             cycles_transferrer_transfer_cycles_callback_complete: None,
             management_canister_posit_cycles_call_success: false
         }
+    }
+    fn is_waiting_for_the_cycles_transferrer_transfer_cycles_callback(&self) -> bool {
+        self.cycles_transferrer_transfer_cycles_call_success == true 
+        && self.cycles_transferrer_transfer_cycles_callback_complete.is_none()
+    }
+    fn is_complete(&self) -> bool {
+        if let Some((cycles_transfer_refund, _)) = self.cycles_transferrer_transfer_cycles_callback_complete {
+            if cycles_transfer_refund == 0 || self.management_canister_posit_cycles_call_success == true {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -131,6 +140,8 @@ impl CMData {
 
 pub const CREATE_POSITION_FEE: Cycles = 50_000_000_000;
 pub const PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
+
+pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
 
 pub const MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP: Cycles = 20_000_000_000_000;
 pub const MINIMUM_CYCLES_POSITION: Cycles = 5_000_000_000_000;
@@ -302,9 +313,45 @@ fn new_position_id() {
     })
 }
 
-async fn do_cycles_payout(for_the_canister: Principal, cycles: Cycles, cycles_transfer_memo: CyclesTransferMemo, cycles_payout_data: CyclesPayoutData) -> CyclesPayoutData {
-
+async fn do_cycles_payout(cycles_transferrer_transfer_cycles_quest: cycles_transferrer::TransferCyclesQuest, mut cycles_payout_data: CyclesPayoutData) -> CyclesPayoutData {
     
+    if cycles_payout_data.cycles_transferrer_transfer_cycles_call_success == false {
+        let cycles_for_the_cycles_transferrer_transfer_cycles_call: Cycles = cycles_transferrer_transfer_cycles_quest.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE;
+        match call_with_payment128::<(cycles_transferrer::TransferCyclesQuest,),(Result<(), cycles_transferrer::TransferCyclesError>,)>(
+            cycles_transferrer_round_robin(),
+            "transfer_cycles",
+            (cycles_transferrer_transfer_cycles_quest,),
+            cycles_for_the_cycles_transferrer_transfer_cycles_call
+        ).await {
+            Ok(_) => {
+                cycles_payout_data.cycles_transferrer_transfer_cycles_call_success = true;
+            }, 
+            Err(cycles_transferrer_transfer_cycles_error) => {}
+        }
+        return cycles_payout_data;
+    }
+    
+    if let Some((cycles_transfer_refund, _)) = cycles_payout_data.cycles_transferrer_transfer_cycles_callback_complete {
+        if cycles_transfer_refund != 0 {
+            if cycles_payout_data.management_canister_posit_cycles_call_success == false {
+                match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
+                    MANAGEMENT_CANISTER_ID,
+                    "deposit_cycles",
+                    (management_canister::CanisterIdRecord{
+                        canister_id: cycles_transferrer_transfer_cycles_quest.for_the_canister
+                    },),
+                    cycles_transfer_refund
+                ).await {
+                    Ok(_) => {
+                        cycles_payout_data.management_canister_posit_cycles_call_success = true;
+                    },
+                    Err(_) => {},
+                }            
+            }
+        }
+    }
+    
+    return cycles_payout_data;
 }
 
 async fn do_void_cycles_positions() {
@@ -314,22 +361,27 @@ async fn do_void_cycles_positions() {
     let void_cycles_positions_chunk: Vec<VoidCyclesPosition> = Vec::new();
     
     with_mut(&CM_DATA, |cm_data| { 
-        void_cycles_positions_chunk = cm_data.void_cycles_positions.drain(..std::cmp::min(cm_data.void_cycles_positions.len(), DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE)).collect::<Vec<VoidCyclesPosition>>();
+        let mut i = 0;
+        while i < cm_data.void_cycles_positions.len() && void_cycles_positions_chunk.len() < DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE {
+            if cm_data.void_cycles_positions[i].cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
+                // skip
+                i += 1;
+            } else {
+                void_cycles_positions_chunk.push(cm_data.void_cycles_positions.remove(i));                 
+            }
+        }
     });
-
-    void_cycles_positions_chunk = {
-        void_cycles_positions_chunk.into_iter()
-            .filter(|vcp: &VoidCyclesPosition| { vcp.cycles_payout_data.is_complete() == false })
-            .collect::<Vec<VoidCyclesPosition>>()
-    };
     
     let rs: Vec<CyclesPayoutData> = futures::future::join_all(
         void_cycles_positions_chunk.iter().map(
             |vcp| {
                 do_cycles_payout(
-                    vcp.positor,
-                    vcp.cycles,
-                    CyclesTransferMemo::Blob([VOID_POSITION_CYCLES_TRANSFER_MEMO_START, vcp.position_id.to_be_bytes()].concat().to_vec()),
+                    cycles_transferrer::TransferCyclesQuest{
+                        user_cycles_transfer_id: vcp.position_id,
+                        for_the_canister: vcp.positor,
+                        cycles: vcp.cycles,
+                        cycles_transfer_memo: CyclesTransferMemo::Blob([VOID_POSITION_CYCLES_TRANSFER_MEMO_START, vcp.position_id.to_be_bytes()].concat().to_vec()),
+                    },
                     vcp.cycles_payout_data.clone()
                 )   
             }
@@ -339,7 +391,7 @@ async fn do_void_cycles_positions() {
     // mut for the append
     let mut final_void_cycles_positions_chunk: Vec<VoidCyclesPosition> = {
         void_cycles_positions_chunk.into_iter().zip(rs.into_iter())
-            .filter(|(vcp, cycles_payout_data): (VoidCyclesPosition, CyclesPayoutData)| {
+            .filter(|(vcp, cycles_payout_data): &(VoidCyclesPosition, CyclesPayoutData)| {
                 cycles_payout_data.is_complete() == false // cause the ones that are complete we don't want to keep
             })
             .map(|(vcp, cycles_payout_data): (VoidCyclesPosition, CyclesPayoutData)| {
@@ -358,8 +410,6 @@ async fn do_void_cycles_positions() {
 
 
 // -------------------------------------------------------------
-
-
 
 
 

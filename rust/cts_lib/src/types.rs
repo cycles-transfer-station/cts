@@ -282,7 +282,7 @@ pub mod cycles_transferrer {
     
     #[derive(CandidType, Deserialize)]    
     pub struct TransferCyclesQuest{
-        pub user_cycles_transfer_id: u64,
+        pub user_cycles_transfer_id: u128,
         pub for_the_canister: Principal,
         pub cycles: Cycles,
         pub cycles_transfer_memo: CyclesTransferMemo
