@@ -65,6 +65,7 @@ enum Commodity {
 
 struct PositionPurchase {
     position_id: PositionId,
+    purchase_id: PurchaseId,
     purchaser: Principal,
     mount: Commodity,
     timestamp_nanos: u64,
@@ -593,8 +594,13 @@ pub async fn void_position() {}
 
 // -------------------------------------------------------------
 
-
-pub fn cycles_transferrer_transfer_cycles_callback(cycles_transferrer::TransferCyclesCallbackQuest) -> () {
+#[update(manual_reply = true)]
+pub async fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::TransferCyclesCallbackQuest) -> () {
+    if with(&CM_DATA, |cm_data| { cm_data.cycles_transferrers.contains(&caller()) }) == false {
+        trap("caller must be one of the CTS-cycles-transferrer-canisters for this method.");
+    }
+    
+    
     
 } 
 

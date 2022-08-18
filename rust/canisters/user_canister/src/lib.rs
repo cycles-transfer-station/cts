@@ -594,7 +594,7 @@ pub enum UserTransferCyclesError {
 }
 
 #[update]
-pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, UserTransferCyclesError> {
+pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u64, UserTransferCyclesError> {
 
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
@@ -620,18 +620,18 @@ pub async fn user_transfer_cycles(q: UserTransferCyclesQuest) -> Result<u64, Use
     
     // check memo size
     match q.cycles_transfer_memo {
-        CyclesTransferMemo::Blob(ref b) => {
+        CyclesTransferMemo::Blob(ref mut b) => {
             if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
                 return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u64}); 
             }
-            //b.shrink_to_fit();
+            b.shrink_to_fit();
             if b.capacity() > b.len() { trap("check this out"); }
         },
-        CyclesTransferMemo::Text(ref s) => {
+        CyclesTransferMemo::Text(ref mut s) => {
             if s.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
                 return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u64}); 
             }
-            //s.shrink_to_fit();
+            s.shrink_to_fit();
             if s.capacity() > s.len() { trap("check this out"); }
         },
         CyclesTransferMemo::Nat(_n) => {} 
