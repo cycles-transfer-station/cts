@@ -1089,14 +1089,59 @@ pub struct VoidPositionQuest {
 }
 
 pub enum VoidPositionError {
+    CyclesMarketIsBusy,
     PositionNotFound,
     WrongCaller,
-    
-    
 }
 
+pub type VoidPositionResult = Result<(), VoidPositionError>;
+
+
 #[update(manual_reply = true)]
-pub async fn void_position() {}
+pub async fn void_position(q: VoidPositionQuest) {
+    match with_mut(&CM_DATA, |cm_data| {
+        if let Ok(cycles_position_i) = cm_data.cycles_positions.binary_search_by_key(&q.position_id, |cycles_position| { cycles_position.id }) {
+            if cm_data.cycles_positions[cycles_position_i].positor != caller() {
+                return Err(VoidPositionError::WrongCaller);
+            }
+            if cm_data.void_cycles_positions.len() >= MAX_VOID_CYCLES_POSITIONS {
+                return Err(VoidPositionError::CyclesMarketIsBusy);
+            }
+            let cycles_position_for_the_void: CyclesPosition = cm_data.cycles_positions.remove(cycles_position_i);
+            let cycles_position_for_the_void_void_cycles_positions_insertion_i: usize = cm_data.void_cycles_positions.binary_search_by_key(&cycles_position_for_the_void.id, |vcp| { vcp.id }).unwrap_err();
+            cm_data.void_cycles_positions.insert(
+                cycles_position_for_the_void_void_cycles_positions_insertion_i,
+                VoidCyclesPosition{
+                    position_id:    cycles_position_for_the_void.id,
+                    positor:        cycles_position_for_the_void.positor,
+                    cycles:         cycles_position_for_the_void.cycles,
+                    lock:           false,
+                    cycles_payout_data: CyclesPayoutData::new(),
+                    timestamp_nanos: time()                
+                }
+            );
+            Ok(())
+        } else if let Ok(icp_position_i) = cm_data.icp_positions.binary_search_by_key(&q.position_id, |icp_position| { icp_position.id }) {
+            if cm_data.icp_positions[icp_position_i].positor != caller() {
+                return Err(VoidPositionError::WrongCaller);
+            }
+            cm_data.icp_positions.remove(icp_position_i);
+            Ok(())
+        } else {
+            return Err(VoidPositionError::PositionNotFound);
+        }
+    }) {
+        Ok(()) => {
+            reply::<(VoidCyclesPositionResult,)>((Ok(()),));
+        },
+        Err(void_cycles_position_error) => {
+            reply::<VoidCyclesPositionResult,>((Err(void_cycles_position_error),));
+        }
+    }
+    
+    do_payouts().await;
+    return;    
+}
 
 
 // ----------------
