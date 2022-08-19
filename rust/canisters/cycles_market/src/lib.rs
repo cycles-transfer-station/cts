@@ -183,10 +183,13 @@ const MAX_CYCLES_POSITIONS: usize = ( CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * Mi
 const ICP_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
 const MAX_ICP_POSITIONS: usize = ( ICP_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPosition>() as u64 ) as usize;
 
-const POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 2;
-const MAX_POSITIONS_PURCHASES: usize = ( POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<PositionPurchase>() as u64 ) as usize;
+const ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_ICP_POSITIONS_PURCHASES: usize = ( ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPositionPurchase>() as u64 ) as usize;
 
-const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 10; // / 5 * 0.5;
+const CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_CYCLES_POSITIONS_PURCHASES: usize = ( CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPositionPurchase>() as u64 ) as usize;
+
+const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
 const MAX_VOID_CYCLES_POSITIONS: usize = ( VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>() as u64 ) as usize;
 
 
@@ -898,6 +901,12 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
         if usable_user_icp_balance < cycles_to_icptokens(q.cycles, cycles_position_ref.xdr_permyriad_per_icp_rate) + ICP_LEDGER_TRANSFER_DEFAULT_FEE {
             return Err(PurchaseCyclesPositionError::UserIcpBalanceTooLow{ user_icp_balance: usable_user_icp_balance });
         }
+        
+        if cycles_position_ref.cycles - q.cycles < cycles_position_ref.minimum_purchase 
+        && cycles_position_ref.cycles - q.cycles != 0
+        && cm_data.void_cycles_positions.len() >= MAX_VOID_CYCLES_POSITIONS {
+            return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy);
+        }
                 
         let cycles_position_purchase_id: PurchaseId = {
             let id: PurchaseId = cm_data.id_counter.clone();
@@ -1074,6 +1083,17 @@ pub async fn purchase_icp_position() {
 
 // --------------------------
 
+
+pub struct VoidPositionQuest {
+    position_id: PositionId
+}
+
+pub enum VoidPositionError {
+    PositionNotFound,
+    WrongCaller,
+    
+    
+}
 
 #[update(manual_reply = true)]
 pub async fn void_position() {}
