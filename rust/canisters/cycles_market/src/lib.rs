@@ -11,6 +11,7 @@ use cts_lib::{
     },
     ic_cdk::{
         api::{
+            id as cycles_market_canister_id,
             call,
             trap,
             
@@ -89,20 +90,20 @@ struct IcpPositionPurchase {
 
 #[derive(Clone)]
 struct CyclesPayoutData {
-    cycles_transferrer_transfer_cycles_call_success: bool,
+    cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u64>,
     cycles_transferrer_transfer_cycles_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
     management_canister_posit_cycles_call_success: bool // this is use for when the payout-cycles-transfer-refund != 0, call the management_canister-deposit_cycles(payout-cycles-transfer-refund)
 } 
 impl CyclesPayoutData {
     fn new() -> Self {
         Self {
-            cycles_transferrer_transfer_cycles_call_success: false,
+            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: None,
             cycles_transferrer_transfer_cycles_callback_complete: None,
             management_canister_posit_cycles_call_success: false
         }
     }
     fn is_waiting_for_the_cycles_transferrer_transfer_cycles_callback(&self) -> bool {
-        self.cycles_transferrer_transfer_cycles_call_success == true 
+        self.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.is_some() 
         && self.cycles_transferrer_transfer_cycles_callback_complete.is_none()
     }
     fn is_complete(&self) -> bool {
@@ -130,7 +131,7 @@ struct VoidCyclesPosition {
 struct CMData {
     cts_id: Principal,
     cycles_transferrers: Vec<Principal>,
-    position_id_counter: PositionId,
+    id_counter: u128,
     mid_call_user_icp_balance_locks: HashSet<Principal>,
     cycles_positions: Vec<CyclesPosition>,
     icp_positions: Vec<IcpPosition>,
@@ -145,7 +146,7 @@ impl CMData {
         Self {
             cts_id: Principal::from_slice(&[]),
             cycles_transferrers: Vec::new(),
-            position_id_counter: 0,
+            id_counter: 0,
             mid_call_user_icp_balance_locks: HashSet::new(),
             cycles_positions: Vec::new(),
             icp_positions: Vec::new(),
@@ -162,6 +163,8 @@ pub const CREATE_POSITION_FEE: Cycles = 50_000_000_000;
 pub const PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
 
 pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
+
+pub const MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK: u64 = 1_000_000_000*60*60*10;
 
 pub const MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP: Cycles = 20_000_000_000_000;
 pub const MINIMUM_CYCLES_POSITION: Cycles = 5_000_000_000_000;
@@ -308,8 +311,12 @@ fn canister_inspect_message() {
     if [
         "create_cycles_position",
         "create_icp_position",
-        "purchase_position",
+        "purchase_cycles_position",
+        "purchase_icp_position",
         "void_position",
+        "see_icp_lock",
+        "transfer_icp_balance",
+        "cycles_transferrer_transfer_cycles_callback",
     ].contains(&&method_name()[..]) {
         trap("this method must be call by a canister.");
     
@@ -326,11 +333,11 @@ fn cts_id() -> Principal {
     with(&CM_DATA, |cm_data| { cm_data.cts_id })
 }
 
-fn new_position_id() {
+fn new_id() {
     with_mut(&CM_DATA, |cm_data| {
-        let position_id: PositionId = cm_data.position_id_counter.clone();
-        cm_data.position_id_counter += 1;
-        position_id
+        let id: u128 = cm_data.id_counter.clone();
+        cm_data.id_counter += 1;
+        id
     })
 }
 
@@ -338,14 +345,34 @@ fn new_position_id() {
 async fn check_user_cycles_market_icp_ledger_balance(user_id: &Principal) -> CallResult<IcpTokens> {
     icp_account_balance(
         MAINNET_LEDGER_CANISTER_ID,
-        IcpAccountBalanceArgs { account: user_icp_id(&id(), user_id) }    
+        IcpAccountBalanceArgs { account: user_icp_id(&cycles_market_canister_id(), user_id) }    
     ).await
 }
 
 
+fn check_user_icp_balance_in_the_lock(user_id: &Principal) -> IcpTokens {
+    with(&CM_DATA, |cm_data| {
+        cm_data.icp_positions.iter()
+            .filter(|icp_position: &&IcpPosition| { icp_position.positor == *user_id })
+            .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_icp_position: &IcpPosition| {
+                cummulator + user_icp_position.icp + ( user_icp_position.icp / user_icp_position.minumum_purchase * ICP_LEDGER_TRANSFER_DEFAULT_FEE ) 
+            })
+        +
+        cm_data.cycles_positions_purchases.iter()
+            .filter(|cycles_position_purchase: &&CyclesPositionPurchase| {
+                cycles_position_purchase.purchaser == *user_id && cycles_position_purchase.icp_payout == false 
+            })
+            .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_cycles_position_purchase_with_unpaid_icp: &CyclesPositionPurchase| {
+                cummulator + cycles_to_icptokens(user_cycles_position_purchase_with_unpaid_icp.mount, user_cycles_position_purchase_with_unpaid_icp.cycles_position_xdr_permyriad_per_icp_rate) + ICP_LEDGER_TRANSFER_DEFAULT_FEE
+            })
+    })
+}
+
+
+
 async fn do_cycles_payout(cycles_transferrer_transfer_cycles_quest: cycles_transferrer::TransferCyclesQuest, mut cycles_payout_data: CyclesPayoutData) -> CyclesPayoutData {
     
-    if cycles_payout_data.cycles_transferrer_transfer_cycles_call_success == false {
+    if cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.is_none() {
         let cycles_for_the_cycles_transferrer_transfer_cycles_call: Cycles = cycles_transferrer_transfer_cycles_quest.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE;
         match call_with_payment128::<(cycles_transferrer::TransferCyclesQuest,),(Result<(), cycles_transferrer::TransferCyclesError>,)>(
             cycles_transferrer_round_robin(),
@@ -354,7 +381,7 @@ async fn do_cycles_payout(cycles_transferrer_transfer_cycles_quest: cycles_trans
             cycles_for_the_cycles_transferrer_transfer_cycles_call
         ).await {
             Ok(_) => {
-                cycles_payout_data.cycles_transferrer_transfer_cycles_call_success = true;
+                cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
             }, 
             Err(cycles_transferrer_transfer_cycles_error) => {}
         }
@@ -390,12 +417,18 @@ async fn do_void_cycles_positions() {
     
     let void_cycles_positions_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
     
-    with_mut(&CM_DATA, |cm_data| { 
+    with_mut(&CM_DATA, |cm_data| {
         let mut i = 0;
         while i < cm_data.void_cycles_positions.len() && void_cycles_positions_chunk.len() < DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE {
             let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
-            if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback()
-            || vcp.lock == true { 
+            if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
+                if time().saturating_sub(vcp.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK {
+                    std::mem::drop(vcp);
+                    cm_data.void_cycles_positions.remove(i);
+                    continue;
+                }
+                // skip
+            } else if vcp.lock == true { 
                 // skip
             } else {
                 vcp.lock = true;
@@ -433,10 +466,10 @@ async fn do_void_cycles_positions() {
                 }  
             };
             if cycles_payout_data.is_complete() {
-                cm_data.void_cycles_positions.remove(i);
+                cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
             } else {
-                cm_data.void_cycles_positions[i].lock = false;
-                cm_data.void_cycles_positions[i].cycles_payout_data = cycles_payout_data;
+                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].lock = false;
+                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].cycles_payout_data = cycles_payout_data;
             }
         }
     });
@@ -563,12 +596,12 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
         return;
     }
     
-    let position_id: PositionId = new_position_id(); 
+    let id: PositionId = new_id(); 
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.cycles_positions.push(
             CyclesPosition{
-                id: position_id,   
+                id,   
                 positor,
                 cycles: q.cycles,
                 minimum_purchase: q.minimum_purchase,
@@ -582,7 +615,7 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
 
     reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Ok(
         CreateCyclesPositionSuccess{
-            position_id
+            position_id: id
         }
     ),));
     
@@ -608,7 +641,7 @@ pub struct CreateIcpPositionError {
     CyclesMarketIsFull,
     CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionCall,
     CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
-    UsableUserIcpBalanceTooLow{ usable_user_icp_balance: IcpTokens },
+    UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
     CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
     MinimumIcpPosition(IcpTokens),
 }
@@ -681,29 +714,13 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
         }
     }
     
-    let user_icp_balance_in_the_lock: IcpTokens = {
-        with(&CM_DATA, |cm_data| {
-            cm_data.icp_positions.iter()
-                .filter(|icp_position: &&IcpPosition| { icp_position.positor == positor })
-                .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, positor_icp_position: &IcpPosition| {
-                    cummulator + positor_icp_position.icp + ( positor_icp_position.icp / positor_icp_position.minumum_purchase * ICP_LEDGER_TRANSFER_DEFAULT_FEE ) 
-                })
-            +
-            cm_data.cycles_positions_purchases.iter()
-                .filter(|cycles_position_purchase: &&CyclesPositionPurchase| {
-                    cycles_position_purchase.purchaser == positor && cycles_position_purchase.icp_payout == false 
-                })
-                .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, positor_cycles_position_purchase_with_unpaid_icp: &CyclesPositionPurchase| {
-                    cummulator + cycles_to_icptokens(positor_cycles_position_purchase_with_unpaid_icp.mount, positor_cycles_position_purchase_with_unpaid_icp.cycles_position_xdr_permyriad_per_icp_rate) + ICP_LEDGER_TRANSFER_DEFAULT_FEE
-                }) 
-        })
-    };
+    let user_icp_balance_in_the_lock: IcpTokens = check_user_icp_balance_in_the_lock(&positor);
     
-    let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().checked_sub(user_icp_balance_in_the_lock.e8s()).unwrap_or(0));
+    let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
     if usable_user_icp_balance < q.icp + ( q.icp / q.minimum_purchase * ICP_LEDGER_TRANSFER_DEFAULT_FEE ) {
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&positor); });
-        reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::UsableUserIcpBalanceTooLow{ usable_user_icp_balance }),));
+        reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::UserIcpBalanceTooLow{ user_icp_balance: usable_user_icp_balance }),));
         do_payouts().await;
         return;            
         
@@ -754,12 +771,12 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
     }
     
     
-    let position_id: PositionId = new_position_id(); 
+    let id: PositionId = new_id(); 
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.icp_positions.push(
             IcpPosition{
-                id: position_id,   
+                id,   
                 positor,
                 icp: q.icp,
                 minimum_purchase: q.minimum_purchase,
@@ -775,7 +792,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
     
     reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Ok(
         CreateIcpPositionSuccess{
-            position_id
+            position_id: id
         }
     ),));
     do_payouts().await;
@@ -785,6 +802,8 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
 
 // ------------------
 
+
+pub struct
 
 
 #[update(manual_reply = true)]
@@ -805,6 +824,37 @@ pub async fn purchase_icp_position() {
 #[update(manual_reply = true)]
 pub async fn void_position() {}
 
+
+// ----------------
+
+#[query]
+pub fn see_icp_lock() -> IcpTokens {
+    check_user_icp_balance_in_the_lock(&caller())
+} 
+
+
+pub struct TransferIcpBalanceQuest {
+    
+}
+
+pub enum TransferIcpBalanceError {
+    MsgCyclesTooLow{ transfer_icp_balance_fee: Cycles },
+    UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+    IcpTransferError(IcpTransferError)
+}
+
+pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceError>
+
+#[update(manual_reply = true)]
+pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
+    
+    if msg_cycles_available128() < TRANSFER_ICP_BALANCE_FEE {
+        reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::MsgCyclesTooLow{ transfer_icp_balance_fee: TRANSFER_ICP_BALANCE_FEE }),));
+        do_payouts().await;
+        return;
+    }
+
+}
 
 
 
