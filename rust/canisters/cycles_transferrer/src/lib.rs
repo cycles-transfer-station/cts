@@ -44,13 +44,13 @@ use cts_lib::{
     },
     types::{
         Cycles,
-        CyclesTransfer,
         CyclesTransferMemo,
         cts::{
 
         },
         cycles_transferrer::{
             CyclesTransferrerCanisterInit,
+            CyclesTransfer,
             TransferCyclesQuest,
             TransferCyclesError,
             TransferCyclesCallbackQuest
@@ -232,7 +232,10 @@ pub async fn transfer_cycles() {
     
     
     let cycles_transfer_candid: Vec<u8> = match candid::utils::encode_one(
-        &CyclesTransfer{ memo: q.cycles_transfer_memo }
+        &CyclesTransfer{ 
+            memo: q.cycles_transfer_memo,
+            original_caller: Some(caller())
+        }
     ) {
         Ok(candid_bytes) => candid_bytes,    
         Err(candid_error) => {
@@ -524,7 +527,40 @@ pub fn cts_re_store_ctc_data_out_of_the_state_snapshot() {
 
 
 
+#[derive(CandidType, Deserialize)]
+pub struct CTSCallCanisterQuest {
+    callee: Principal,
+    method_name: String,
+    arg_raw: Vec<u8>,
+    cycles: Cycles
+}
 
+#[update(manual_reply = true)]
+pub async fn cts_call_canister() {
+    if caller() != cts_id() {
+        trap("caller must be the CTS");
+    }
+    
+    let (q,): (CTSCallCanisterQuest,) = arg_data::<(CTSCallCanisterQuest,)>(); 
+    
+    match call_raw128(
+        q.callee,
+        &q.method_name,
+        &q.arg_raw,
+        q.cycles   
+    ).await {
+        Ok(raw_sponse) => {
+            reply::<(Result<Vec<u8>, (u32, String)>,)>((Ok(raw_sponse),));
+        }, 
+        Err(call_error) => {
+            reply::<(Result<Vec<u8>, (u32, String)>,)>((Err((call_error.0 as u32, call_error.1)),));
+        }
+    }
+}
+
+
+
+// ---------------------------------------------------------------------------------
 
 
 

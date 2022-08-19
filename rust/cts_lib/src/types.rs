@@ -273,11 +273,17 @@ pub mod management_canister {
 
 
 pub mod cycles_transferrer {
-    use super::*;
+    use super::{Principal, CyclesTransferMemo, Cycles};
     
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerCanisterInit {
         pub cts_id: Principal
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransfer {
+        pub memo: CyclesTransferMemo,
+        pub original_caller: Option<Principal>
     }
     
     #[derive(CandidType, Deserialize)]    

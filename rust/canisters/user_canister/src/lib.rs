@@ -518,8 +518,8 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
         trap("Canister memory is full, cannot create a log of the cycles-transfer.");
     }
 
-    if arg_data_raw_size() > 100 {
-        trap("arg_data_raw_size can be max 100 bytes");
+    if arg_data_raw_size() > 150 {
+        trap("arg_data_raw_size can be max 150 bytes");
     }
 
     if msg_cycles_available128() < CYCLES_TRANSFER_IN_MINIMUM_CYCLES {
@@ -528,16 +528,24 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
         
     let cycles_cept: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
-    let (ct,): (CyclesTransfer,) = arg_data::<(CyclesTransfer,)>();
+    let (ct_memo, by_the_canister): (CyclesTransferMemo, Principal) = {
+        if with(&UC_DATA, |uc_data| { uc_data.cycles_transferrer_canisters.contains(&caller()) }) { 
+            let (ct,): (cycles_transferrer::CyclesTransfer,) = arg_data::<(cycles_transferrer::CyclesTransfer,)>();
+            (ct.memo, ct.original_caller.unwrap_or(caller()))
+        } else {
+            let (ct,): (CyclesTransfer,) = arg_data::<(CyclesTransfer,)>();
+            (ct.memo, caller())    
+        }
+    };
     
     with_mut(&UC_DATA, |uc_data| {
         uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_cept).unwrap_or(Cycles::MAX);
         uc_data.user_data.cycles_transfers_in.push((
             new_cycles_transfer_id(),
             CyclesTransferIn{
-                by_the_canister: caller(),
+                by_the_canister,
                 cycles: cycles_cept,
-                cycles_transfer_memo: truncate_cycles_transfer_memo(ct.memo),
+                cycles_transfer_memo: truncate_cycles_transfer_memo(ct_memo),
                 timestamp_nanos: time()
             }
         ));
