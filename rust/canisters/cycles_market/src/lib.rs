@@ -651,7 +651,7 @@ pub struct CreateIcpPositionError {
     MinimumPurchaseMustBeEqualOrLessThanTheIcpPosition,
     MsgCyclesTooLow{ create_position_fee: Cycles },
     CyclesMarketIsFull,
-    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionCall,
+    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
     CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
     UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
     CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
@@ -703,7 +703,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
             return Err(());
         }
         if cm_data.mid_call_user_icp_balance_locks.contains(&positor) {
-            reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionCall),));
+            reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall),));
             return Err(());
         }
         cm_data.mid_call_user_icp_balance_locks.insert(positor);
@@ -821,7 +821,7 @@ pub struct PurchaseCyclesPositionQuest {
 pub enum PurchaseCyclesPositionError {
     MsgCyclesTooLow{ purchase_position_fee: Cycles },
     CyclesMarketIsBusy,
-    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionCall,
+    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
     CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
     UserIcpBalanceTooLow{ user_icp_balance: IcpTokens }
     CyclesPositionNotFound,
@@ -851,7 +851,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
             return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy);
         }
         if cm_data.mid_call_user_icp_balance_locks.contains(&purchaser) {
-            return Err(PurchaseCyclesPositionError::CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionCall);
+            return Err(PurchaseCyclesPositionError::CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall);
         }
         cm_data.mid_call_user_icp_balance_locks.insert(purchaser);
         Ok(())
@@ -1089,9 +1089,9 @@ pub struct VoidPositionQuest {
 }
 
 pub enum VoidPositionError {
+    WrongCaller,
     CyclesMarketIsBusy,
     PositionNotFound,
-    WrongCaller,
 }
 
 pub type VoidPositionResult = Result<(), VoidPositionError>;
@@ -1149,16 +1149,25 @@ pub async fn void_position(q: VoidPositionQuest) {
 #[query]
 pub fn see_icp_lock() -> IcpTokens {
     check_user_icp_balance_in_the_lock(&caller())
-} 
+}
+
+
+// ----------------
 
 
 pub struct TransferIcpBalanceQuest {
-    
+    icp: IcpTokens,
+    icp_fee: Option<IcpTokens>,
+    to: IcpId
 }
 
 pub enum TransferIcpBalanceError {
     MsgCyclesTooLow{ transfer_icp_balance_fee: Cycles },
+    CyclesMarketIsBusy,
+    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
+    CheckUserCyclesMarketIcpLedgerBalanceCallError((u32, String)),
     UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+    IcpTransferCallError((u32, String)),
     IcpTransferError(IcpTransferError)
 }
 
@@ -1167,12 +1176,88 @@ pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceErr
 #[update(manual_reply = true)]
 pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
     
+    let user_id: Principal = caller();
+    
     if msg_cycles_available128() < TRANSFER_ICP_BALANCE_FEE {
         reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::MsgCyclesTooLow{ transfer_icp_balance_fee: TRANSFER_ICP_BALANCE_FEE }),));
         do_payouts().await;
         return;
     }
 
+    match with_mut(&CM_DATA, |cm_data| {
+        if cm_data.mid_call_user_icp_balance_locks.len() >= MAX_MID_CALL_USER_ICP_BALANCE_LOCKS {
+            return Err(TransferIcpBalanceError::CyclesMarketIsBusy);
+        }
+        if cm_data.mid_call_user_icp_balance_locks.contains(&user_id) {
+            return Err(TransferIcpBalanceError::CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall);
+        }
+        cm_data.mid_call_user_icp_balance_locks.insert(user_id);
+        Ok(())
+    }) {
+        Ok(()) => {},
+        Err(transfer_icp_balance_error) => {
+            reply::<(TransferIcpBalanceResult,)>((Err(transfer_icp_balance_error),));
+            do_payouts().await;
+            return;
+        }
+    }
+    
+    // check icp balance and make sure to unlock the user on returns after here 
+    let user_icp_ledger_balance: IcpTokens = match check_user_cycles_market_icp_ledger_balance(&user_id).await {
+        Ok(icp_ledger_balance) => icp_ledger_balance,
+        Err(call_error) => {
+            with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&user_id); });
+            reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::CheckUserCyclesMarketIcpLedgerBalanceCallError((call_error.0 as u32, call_error.1))),));
+            do_payouts().await;
+            return;            
+        }
+    }
+    
+    let user_icp_balance_in_the_lock: IcpTokens = check_user_icp_balance_in_the_lock(&user_id);
+    
+    let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
+    
+    if usable_user_icp_balance < q.icp + q.icp_fee.unwrap_or(ICP_LEDGER_TRANSFER_DEFAULT_FEE) {
+        with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&user_id); });
+        reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::UserIcpBalanceTooLow{ user_icp_balance: usable_user_icp_balance }),));
+        do_payouts().await;
+        return;          
+    }
+
+    match icp_transfer(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpTransferArgs {
+            memo: TRANSFER_ICP_BALANCE_MEMO,
+            amount: q.icp,
+            fee: q.icp_fee.unwrap_or(ICP_LEDGER_TRANSFER_DEFAULT_FEE),
+            from_subaccount: Some(principal_icp_subaccount(&user_id)),
+            to,
+            created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+        }   
+    ).await {
+        Ok(icp_transfer_result) => match icp_transfer_result {
+            Ok(icp_transfer_block_height) => {
+                msg_cycles_accept128(TRANSFER_ICP_BALANCE_FEE);
+                reply::<(TransferIcpBalanceResult,)>((Ok(icp_transfer_block_height),));
+            },
+            Err(icp_transfer_error) => {
+                match icp_transfer_error {
+                    IcpTransferError::BadFee{ .. } => {
+                        msg_cycles_accept128(TRANSFER_ICP_BALANCE_FEE);
+                    },
+                    _ => {}
+                }
+                reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::IcpTransferError(icp_transfer_error)),));
+            }
+        },
+        Err(icp_transfer_call_error) => {
+            reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::IcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1))),));
+        }
+    }
+
+    with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&user_id); });
+    do_payouts().await;
+    return;
 }
 
 
