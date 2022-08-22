@@ -47,6 +47,10 @@ Canister controller3_user_canister = Canister(Principal('sqotk-taaaa-aaaak-qaroa
 //2ch7a-wqaaa-aaaai-qnh3q-cai
 //2fgzu-3iaaa-aaaai-qnh3a-cai
 
+Canister test_canister_1 = Canister(Principal('woddh-aqaaa-aaaal-aazqq-cai'));
+Canister test_canister_2 = Canister(Principal('2ch7a-wqaaa-aaaai-qnh3q-cai'));
+
+
 
 Uint8List get_user_subaccount_bytes() {
     Uint8List user_subaccount_bytes = Uint8List.fromList([...utf8.encode('UT'), controller3.principal.bytes.length, ...controller3.principal.bytes ]);
@@ -356,6 +360,7 @@ Future<void> main(List<String> arguments) async {
         }
         */
         
+        /*
         for (String t in [
             'Ok',
             'Err',
@@ -405,13 +410,14 @@ Future<void> main(List<String> arguments) async {
         ]) {
             print(candid_text_hash(t));
         }
+        */
 
-        print(sha256.convert(File('../rust/target/wasm32-unknown-unknown/release/users_map_canister-o.wasm').readAsBytesSync()).bytes);
-
+        //print(sha256.convert(File('../rust/target/wasm32-unknown-unknown/release/users_map_canister-o.wasm').readAsBytesSync()).bytes);
+        
 
         //print(await cts_main.controllers());
 
-
+        print(await test_canister_2.controllers());
 
 
 
@@ -455,7 +461,7 @@ Future<void> create_canister(double create_icp) async {
 }
 
 Future<void> canister_status() async {
-    print(await common.check_canister_status(controller, canister3.principal));
+    print(await common.check_canister_status(controller, test_canister_1.principal));
 
 }
 
@@ -1109,6 +1115,50 @@ Future<void> controller_see_metrics() async {
 
 
 Future<void> set_test_canisters_code(String mode) async {
+    /*
+    Uint8List sponse = await canister.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': common.management.principal.candid,
+                'method_name': Text('update_settings'),
+                'arg_raw': Blob(c_forwards([
+                    Record.oftheMap({ 
+                        'canister_id': test_canister_1.principal.candid,//Principal('woddh-aqaaa-aaaal-aazqq-cai'/*'woddh-aqaaa-aaaal-aazqq-cai', 2ch7a-wqaaa-aaaai-qnh3q-cai*/).candid,
+                        'settings': Record.oftheMap({
+                            'controllers': Vector.oftheList([controller.principal.candid, canister.principal.candid])
+                        })
+                    
+                    }),
+                ])),
+                'cycles': Nat(0)
+            })
+        ])
+    );
+    sponse = await canister.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': common.management.principal.candid,
+                'method_name': Text('update_settings'),
+                'arg_raw': Blob(c_forwards([
+                    Record.oftheMap({ 
+                        'canister_id': test_canister_2.principal.candid,//Principal('woddh-aqaaa-aaaal-aazqq-cai'/*'woddh-aqaaa-aaaal-aazqq-cai', 2ch7a-wqaaa-aaaai-qnh3q-cai*/).candid,
+                        'settings': Record.oftheMap({
+                            'controllers': Vector.oftheList([controller.principal.candid, canister.principal.candid])
+                        })
+                    
+                    }),
+                ])),
+                'cycles': Nat(0)
+            })
+        ])
+    );
+    */
     Uint8List install_code_arg = c_forwards([
 
     ]);
@@ -1118,8 +1168,8 @@ Future<void> set_test_canisters_code(String mode) async {
     
     await common.put_code_on_the_canister(
         controller,
-        canister.principal,
-        File('../gitpos/rust/target/wasm32-unknown-unknown/release/testcanister1-o.wasm').readAsBytesSync(),
+        test_canister_1.principal,
+        File('../../testcanister1/target/wasm32-unknown-unknown/release/testcanister1-o.wasm').readAsBytesSync(),
         mode,
         ['install', 'reinstall'].contains(mode) ? install_code_arg : upgrade_code_arg
     );
@@ -1133,21 +1183,20 @@ Future<void> set_test_canisters_code(String mode) async {
     
     await common.put_code_on_the_canister(
         controller,
-        canister2.principal,
-        File('../gitpos/rust/target/wasm32-unknown-unknown/release/testcanister2-o.wasm').readAsBytesSync(),
+        test_canister_2.principal,
+        File('../../testcanister2/target/wasm32-unknown-unknown/release/testcanister2-o.wasm').readAsBytesSync(),
         mode,
         ['install', 'reinstall'].contains(mode) ? install_code_arg : upgrade_code_arg
     );
 } 
 
 Future<void> run_cycles_transfer_test_canisters() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await test_canister_1.call(
         calltype: CallType.call,
-        method_name: 'test_manual_reply',
+        method_name: 'test_cycles_cept_then_trap',
         caller: controller,
         put_bytes: c_forwards([
-            canister2.principal.candid,
-            Nat(5)
+            test_canister_2.principal.candid
         ])
     );
     print(sponse);
