@@ -21,6 +21,7 @@ use crate::{
 
 
 pub type Cycles = u128;
+pub type CyclesTransferRefund = Cycles;
 pub type CTSFuel = Cycles;
 pub type UserId = Principal;
 pub type UserCanisterId = Principal;
