@@ -642,32 +642,159 @@ async fn do_payouts() {
     });
    
    
-   
-   
-   
-   
+    let (vcps_ids, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_cycles_payout-future*/>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
+    let (cpps_cycles_payouts_ids, cpps_do_cycles_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = cycles_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
+    let (cpps_icp_payouts_ids, cpps_icp_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*icp_transfer-future*/>) = cycles_positions_purchases_icp_payouts_chunk.into_iter().unzip();
+    let (ipps_cycles_payouts_ids, ipps_do_cycles_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = icp_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
+    let (ipps_icp_payouts_ids, ipps_icp_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*icp_transfer-future*/>) = icp_positions_purchases_icp_payouts_chunk.into_iter().unzip();
 
-    let (vcps_ids, do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*anonymous-future of the do_cycles_payout*/>) = void_cycles_positions_chunk.into_iter().unzip();
-    
-    let rs: Vec<CyclesPayoutData> = futures::future::join_all(do_cycles_payouts_futures).await;
-    
-    let final_void_cycles_positions_chunk: Vec<(VoidCyclesPositionId, CyclesPayoutData)> = vcp_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(VoidCyclesPositionId, CyclesPayoutData)>>();
+    let (
+        vcps_do_cycles_payouts_rs,
+        cpps_do_cycles_payouts_rs,
+        cpps_icp_payouts_rs,
+        ipps_do_cycles_payouts_rs,
+        ipps_icp_payouts_rs
+    ): (
+        Vec<Result<DoCyclesPayoutSponse, CandidError>>,
+        Vec<Result<DoCyclesPayoutSponse, CandidError>>,
+        Vec<CallResult<IcpTransferResult>>,
+        Vec<Result<DoCyclesPayoutSponse, CandidError>>,
+        Vec<CallResult<IcpTransferResult>>,
+    ) = futures::future::join5(
+        futures::future::join_all(vcps_do_cycles_payouts_futures),
+        futures::future::join_all(cpps_do_cycles_payouts_futures),
+        futures::future::join_all(cpps_icp_payouts_futures),
+        futures::future::join_all(ipps_do_cycles_payouts_futures),
+        futures::future::join_all(ipps_icp_payouts_futures),
+    ).await;
     
     with_mut(&CM_DATA, |cm_data| {
-        for (vcp_id, cycles_payout_data) in final_void_cycles_positions_chunk.into_iter() {
+        for (vcp_id, do_cycles_payout_result) in vcps_ids.into_iter().zip(vcps_do_cycles_payouts_rs.into_iter()) {      
             let vcp_void_cycles_positions_i: usize = {
                 match cm_data.void_cycles_positions.binary_search_by_key(&vcp_id, |vcp| { vcp.position_id }) {
                     Ok(i) => i,
                     Err(_) => continue;
                 }  
             };
-            if cycles_payout_data.is_complete() {
+            let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[vcp_void_cycles_positions_i];
+            vcp.cycles_payout_lock = false;
+            if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
+                match do_cycles_payout_sponse {
+                    DoCyclesPayoutSponse::CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(opt_timestamp_ns) => {
+                        vcp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = opt_timestamp_ns;                            
+                    },
+                    DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success) => {
+                        vcp.cycles_payout_data.management_canister_posit_cycles_call_success = management_canister_posit_cycles_call_success;
+                    },
+                    DoCyclesPayoutSponse::NothingToDo => {}
+                }
+            }
+            if vcp.cycles_payout_data.is_complete() {
+                std::mem::drop(vcp);
                 cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
-            } else {
-                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].cycles_payout_lock = false;
-                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].cycles_payout_data = cycles_payout_data;
             }
         }
+        for (cpp_id, do_cycles_payout_result) in cpps_cycles_payouts_ids.into_iter().zip(cpps_do_cycles_payouts_rs.into_iter()) {
+            let cpp_cycles_positions_purchases_i: usize = {
+                match cm_data.cycles_positions_purchases.binary_search_by_key(&cpp_id, |cpp| { cpp.id }) {
+                    Ok(i) => i,
+                    Err(_) => continue;
+                }
+            };
+            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[cpp_cycles_positions_purchases_i];
+            cpp.cycles_payout_lock = false;
+            if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
+                match do_cycles_payout_sponse {
+                    DoCyclesPayoutSponse::CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(opt_timestamp_ns) => {
+                        cpp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = opt_timestamp_ns;                            
+                    },
+                    DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success) => {
+                        cpp.cycles_payout_data.management_canister_posit_cycles_call_success = management_canister_posit_cycles_call_success;
+                    },
+                    DoCyclesPayoutSponse::NothingToDo => {}
+                }
+            }
+            if cpp.cycles_payout_data.is_complete() 
+            && cpp.icp_payout == true {
+                std::mem::drop(cpp);
+                cm_data.cycles_positions_purchases.remove(cpp_cycles_positions_purchases_i);
+            }
+        }
+        for (cpp_id, icp_transfer_call_result) in cpps_icp_payouts_ids.into_iter().zip(cpps_icp_payouts_rs.into_iter()) {
+            let cpp_cycles_positions_purchases_i: usize = {
+                match cm_data.cycles_positions_purchases.binary_search_by_key(&cpp_id, |cpp| { cpp.id }) {
+                    Ok(i) => i,
+                    Err(_) => continue;
+                } 
+            };
+            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[cpp_cycles_positions_purchases_i];
+            cpp.icp_payout_lock = false;
+            match icp_transfer_call_result {
+                Ok(icp_transfer_result) => match icp_transfer_result {
+                    Ok(block_height) => {
+                        cpp.icp_payout = true;
+                    }, 
+                    Err(_) => {} 
+                },
+                Err(_icp_transfer_call_error) => {}
+            }
+            if cpp.icp_payout == true
+            && cpp.cycles_payout_data.is_complete() {
+                std::mem::drop(cpp);
+                cm_data.cycles_positions_purchases.remove(cpp_cycles_positions_purchases_i);
+            }
+        }
+        for (ipp_id, do_cycles_payout_result) in ipps_cycles_payouts_ids.into_iter().zip(ipps_do_cycles_payouts_rs.into_iter()) {
+            let ipp_icp_positions_purchases_i: usize = {
+                match cm_data.icp_positions_purchases.binary_search_by_key(&ipp_id, |ipp| { ipp.id }) {
+                    Ok(i) => i,
+                    Err(_) => continue;
+                }
+            };
+            let ipp: &mut IcpPositionPurchase = &mut cm_data.icp_positions_purchases[ipp_icp_positions_purchases_i];
+            ipp.cycles_payout_lock = false;
+            if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
+                match do_cycles_payout_sponse {
+                    DoCyclesPayoutSponse::CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(opt_timestamp_ns) => {
+                        ipp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = opt_timestamp_ns;                            
+                    },
+                    DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success) => {
+                        ipp.cycles_payout_data.management_canister_posit_cycles_call_success = management_canister_posit_cycles_call_success;
+                    },
+                    DoCyclesPayoutSponse::NothingToDo => {}
+                }
+            }
+            if ipp.cycles_payout_data.is_complete() 
+            && ipp.icp_payout == true {
+                std::mem::drop(ipp);
+                cm_data.icp_positions_purchases.remove(ipp_icp_positions_purchases_i);
+            }
+        }
+        for (ipp_id, icp_transfer_call_result) in ipps_icp_payouts_ids.into_iter().zip(ipps_icp_payouts_rs.into_iter()) {
+            let ipp_icp_positions_purchases_i: usize = {
+                match cm_data.icp_positions_purchases.binary_search_by_key(&ipp_id, |ipp| { ipp.id }) {
+                    Ok(i) => i,
+                    Err(_) => continue;
+                }
+            };
+            let ipp: &mut IcpPositionPurchase = &mut cm_data.icp_positions_purchases[ipp_icp_positions_purchases_i];
+            ipp.icp_payout_lock = false;
+            match icp_transfer_call_result {
+                Ok(icp_transfer_result) => match icp_transfer_result {
+                    Ok(block_height) => {
+                        ipp.icp_payout = true;
+                    }, 
+                    Err(_) => {} 
+                },
+                Err(_icp_transfer_call_error) => {}
+            }
+            if ipp.icp_payout == true
+            && ipp.cycles_payout_data.is_complete() {
+                std::mem::drop(ipp);
+                cm_data.icp_positions_purchases.remove(ipp_icp_positions_purchases_i);
+            }
+        }
+        
     });
     
 }
