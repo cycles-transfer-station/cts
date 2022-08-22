@@ -12,15 +12,19 @@ use cts_lib::{
     ic_cdk::{
         api::{
             id as cycles_market_canister_id,
-            call,
             trap,
+            call::{
+                call,
+                call_raw128    
+            }
             
         },
         export::{
             Principal,
             candid::{
                 self, 
-                utils::{encode_one, decode_one}
+                utils::{encode_one, decode_one},
+                error::Error as CandidError,
             }
         }
     },
@@ -66,7 +70,8 @@ struct CyclesPositionPurchase {
     purchaser: Principal,
     cycles: Cycles,
     timestamp_nanos: u64,
-    lock: bool, // lock for the payouts
+    cycles_payout_lock: bool,
+    icp_payout_lock: bool,
     cycles_payout_data: CyclesPayoutData,
     icp_payout: bool
 }
@@ -79,7 +84,8 @@ struct IcpPositionPurchase {
     purchaser: Principal,
     icp: IcpTokens,
     timestamp_nanos: u64,
-    lock: bool, // lock for the payouts
+    cycles_payout_lock: bool,
+    icp_payout_lock: bool,
     cycles_payout_data: CyclesPayoutData,
     icp_payout: bool
 }
@@ -118,7 +124,7 @@ struct VoidCyclesPosition {
     position_id: PositionId,
     positor: Principal,
     cycles: Cycles,
-    lock: bool,  // lock for the payout
+    cycles_payout_lock: bool,  // lock for the payout
     cycles_payout_data: CyclesPayoutData,
     timestamp_nanos: u64
 }
@@ -336,12 +342,10 @@ fn cts_id() -> Principal {
     with(&CM_DATA, |cm_data| { cm_data.cts_id })
 }
 
-fn new_id() {
-    with_mut(&CM_DATA, |cm_data| {
-        let id: u128 = cm_data.id_counter.clone();
-        cm_data.id_counter += 1;
-        id
-    })
+fn new_id(cm_data: &mut CMData) {
+    let id: u128 = cm_data.id_counter.clone();
+    cm_data.id_counter += 1;
+    id
 }
 
 
@@ -353,84 +357,144 @@ async fn check_user_cycles_market_icp_ledger_balance(user_id: &Principal) -> Cal
 }
 
 
-fn check_user_icp_balance_in_the_lock(user_id: &Principal) -> IcpTokens {
-    with(&CM_DATA, |cm_data| {
-        cm_data.icp_positions.iter()
-            .filter(|icp_position: &&IcpPosition| { icp_position.positor == *user_id })
-            .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_icp_position: &IcpPosition| {
-                cummulator + user_icp_position.icp + ( user_icp_position.icp / user_icp_position.minumum_purchase * ICP_LEDGER_TRANSFER_DEFAULT_FEE ) 
-            })
-        +
-        cm_data.cycles_positions_purchases.iter()
-            .filter(|cycles_position_purchase: &&CyclesPositionPurchase| {
-                cycles_position_purchase.purchaser == *user_id && cycles_position_purchase.icp_payout_status == false 
-            })
-            .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_cycles_position_purchase_with_unpaid_icp: &CyclesPositionPurchase| {
-                cummulator + cycles_to_icptokens(user_cycles_position_purchase_with_unpaid_icp.cycles, user_cycles_position_purchase_with_unpaid_icp.cycles_position_xdr_permyriad_per_icp_rate) + ICP_LEDGER_TRANSFER_DEFAULT_FEE
-            })
-        +
-        cm_data.icp_positions_purchases.iter()
-            .filter(|icp_position_purchase: &&IcpPositionPurchase| {
-                icp_position_purchase.icp_position_positor == *user_id && icp_position_purchase.icp_payout_status == false 
-            })
-            .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, icp_position_purchase_with_the_user_as_the_positor_with_unpaid_icp: &IcpPositionPurchase| {
-                cummulator + icp_position_purchase_with_the_user_as_the_positor_with_unpaid_icp.icp + ICP_LEDGER_TRANSFER_DEFAULT_FEE
-            })
-    })
+fn check_user_icp_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -> IcpTokens {
+    cm_data.icp_positions.iter()
+        .filter(|icp_position: &&IcpPosition| { icp_position.positor == *user_id })
+        .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_icp_position: &IcpPosition| {
+            cummulator + user_icp_position.icp + ( user_icp_position.icp / user_icp_position.minumum_purchase * ICP_LEDGER_TRANSFER_DEFAULT_FEE ) 
+        })
+    +
+    cm_data.cycles_positions_purchases.iter()
+        .filter(|cycles_position_purchase: &&CyclesPositionPurchase| {
+            cycles_position_purchase.purchaser == *user_id && cycles_position_purchase.icp_payout_status == false 
+        })
+        .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, user_cycles_position_purchase_with_unpaid_icp: &CyclesPositionPurchase| {
+            cummulator + cycles_to_icptokens(user_cycles_position_purchase_with_unpaid_icp.cycles, user_cycles_position_purchase_with_unpaid_icp.cycles_position_xdr_permyriad_per_icp_rate) + ICP_LEDGER_TRANSFER_DEFAULT_FEE
+        })
+    +
+    cm_data.icp_positions_purchases.iter()
+        .filter(|icp_position_purchase: &&IcpPositionPurchase| {
+            icp_position_purchase.icp_position_positor == *user_id && icp_position_purchase.icp_payout_status == false 
+        })
+        .fold(IcpTokens::from_e8s(0), |cummulator: IcpTokens, icp_position_purchase_with_the_user_as_the_positor_with_unpaid_icp: &IcpPositionPurchase| {
+            cummulator + icp_position_purchase_with_the_user_as_the_positor_with_unpaid_icp.icp + ICP_LEDGER_TRANSFER_DEFAULT_FEE
+        })
 }
 
 
+pub enum DoCyclesPayoutType {
+    VoidCyclesPosition,
+    CyclesPositionPurchase,
+    IcpPositionPurchase
+}
+pub struct DoCyclesPayoutQuest {
+    user_cycles_transfer_id: u128,
+    for_the_canister: Principal,
+    cycles: Cycles,
+    do_cycles_payout_type: DoCyclesPayoutType,
+    cycles_payout_data: CyclesPayoutData
+}
+// use this enum in the stead of returning the CyclesPayoutData cause we want to make sure the cycles_payout_data is not re-place by this output cause the cycles_transferrer-transfer_cycles_callback can come back before this output is put back on the purchase/vcp. so we use this struct so that only the fields get re-place. 
+pub enum DoCyclesPayoutSponse {
+    CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(Option<u64>),
+    ManagementCanisterPositCyclesCallSuccess(bool),
+    NothingToDo
+}
 
-async fn do_cycles_payout(cycles_transferrer_transfer_cycles_quest: cycles_transferrer::TransferCyclesQuest, mut cycles_payout_data: CyclesPayoutData) -> CyclesPayoutData {
+async fn do_cycles_payout(q: DoCyclesPayoutQuest) -> Result<DoCyclesPayoutSponse, CandidError> {
     
-    if cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.is_none() {
-        let cycles_for_the_cycles_transferrer_transfer_cycles_call: Cycles = cycles_transferrer_transfer_cycles_quest.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE;
-        match call_with_payment128::<(cycles_transferrer::TransferCyclesQuest,),(Result<(), cycles_transferrer::TransferCyclesError>,)>(
+    if q.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.is_none() {
+        let cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u64>;
+        let cycles_transfer_memo_start: &[u8] = match q.do_cycles_payout_type {
+            DoCyclesPayoutType::VoidCyclesPosition => &VOID_POSITION_CYCLES_TRANSFER_MEMO_START,
+            DoCyclesPayoutType::CyclesPositionPurchase => &CYCLES_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START,
+            DoCyclesPayoutType::IcpPositionPurchase => &ICP_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START,
+        };
+        let cycles_transferrer_transfer_cycles_quest: cycles_transferrer::TransferCyclesQuest = cycles_transferrer::TransferCyclesQuest{
+            user_cycles_transfer_id: q.user_cycles_transfer_id,
+            for_the_canister: q.for_the_canister;
+            cycles: q.cycles,
+            cycles_transfer_memo: CyclesTransferMemo::Blob([cycles_transfer_memo_start, q.user_cycles_transfer_id.to_be_bytes()].concat().to_vec())        
+        }; 
+        let call_future = call_raw128( //::<(cycles_transferrer::TransferCyclesQuest,),(Result<(), cycles_transferrer::TransferCyclesError>,)>(
             cycles_transferrer_round_robin(),
             "transfer_cycles",
-            (cycles_transferrer_transfer_cycles_quest,),
-            cycles_for_the_cycles_transferrer_transfer_cycles_call
-        ).await {
-            Ok(_) => {
-                cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
-            }, 
-            Err(cycles_transferrer_transfer_cycles_error) => {}
-        }
-        return cycles_payout_data;
-    }
-    
-    if let Some((cycles_transfer_refund, _)) = cycles_payout_data.cycles_transferrer_transfer_cycles_callback_complete {
-        if cycles_transfer_refund != 0 {
-            if cycles_payout_data.management_canister_posit_cycles_call_success == false {
-                match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
-                    MANAGEMENT_CANISTER_ID,
-                    "deposit_cycles",
-                    (management_canister::CanisterIdRecord{
-                        canister_id: cycles_transferrer_transfer_cycles_quest.for_the_canister
-                    },),
-                    cycles_transfer_refund
-                ).await {
-                    Ok(_) => {
-                        cycles_payout_data.management_canister_posit_cycles_call_success = true;
+            encode_one(cycles_transferrer_transfer_cycles_quest)?,
+            q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE
+        );
+        if let Poll::ready(_call_result_with_an_error) = futures::poll!(&mut call_future) {
+            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
+        } else {
+            match call_future.await {
+                Ok(sponse_bytes) => match decode_one::<Result<(), cycles_transferrer::TransferCyclesError>>(sponse_bytes) {
+                    Ok(cycles_transferrer_transfer_cycles_result) => match cycles_transferrer_transfer_cycles_result {
+                        Ok(()) => {
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
+                        },
+                        Err(_cycles_transferrer_transfer_cycles_error) => {
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
+                        }
                     },
-                    Err(_) => {},
-                }            
+                    Err(candid_decode_error) => {
+                        if msg_cycles_refunded128() >= q.cycles {
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
+                        } else {
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
+                        }    
+                    }
+                },
+                Err(_cycles_transferrer_transfer_cycles_call_error) => {
+                    cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
+                }
             }
         }
+        return Ok(DoCyclesPayoutSponse::CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(cycles_transferrer_transfer_cycles_call_success_timestamp_nanos));
     }
     
-    return cycles_payout_data;
+    if let Some((cycles_transfer_refund, _)) = q.cycles_payout_data.cycles_transferrer_transfer_cycles_callback_complete {
+        if cycles_transfer_refund != 0 
+        && q.cycles_payout_data.management_canister_posit_cycles_call_success == false {
+            let management_canister_posit_cycles_call_success: bool;
+            match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
+                MANAGEMENT_CANISTER_ID,
+                "deposit_cycles",
+                (management_canister::CanisterIdRecord{
+                    canister_id: q.for_the_canister
+                },),
+                cycles_transfer_refund
+            ).await {
+                Ok(_) => {
+                    management_canister_posit_cycles_call_success = true;
+                },
+                Err(_) => {
+                    management_canister_posit_cycles_call_success = false;
+                }
+            }
+            return Ok(DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success));
+        }
+    }    
+    
+    return Ok(DoCyclesPayoutSponse::NothingToDo);
 }
 
-async fn do_void_cycles_positions() {
+
+async fn do_payouts() {
     
-    if with(&CM_DATA, |cm_data| { cm_data.void_cycles_positions.len() == 0 { return; }
+    if with(&CM_DATA, |cm_data| { 
+        cm_data.void_cycles_positions.len() == 0
+        && cm_data.cycles_positions_purchases.len() == 0
+        && cm_data.icp_positions_purchases.len() == 0
+    }) { return; }
     
-    let void_cycles_positions_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
-    
+    let void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
+    let cycles_positions_purchases_cycles_payouts_chunk: Vec<(CyclesPositionPurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
+    let cycles_positions_purchases_icp_payouts_chunk: Vec<(CyclesPositionPurchaseId, _/*anonymous-future of the icp_transfer-function*/)> = Vec::new();
+    let icp_positions_purchases_cycles_payouts_chunk: Vec<(IcpPositionPurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
+    let icp_positions_purchases_icp_payouts_chunk: Vec<(IcpPositionPurchaseId, _/*anonymous-future of the icp_transfer-function*/)> = Vec::new();
+
     with_mut(&CM_DATA, |cm_data| {
-        let mut i = 0;
-        while i < cm_data.void_cycles_positions.len() && void_cycles_positions_chunk.len() < DO_VOID_CYCLES_POSITIONS_CHUNK_SIZE {
+        let mut i: usize = 0;
+        while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
             let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
             if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
                 if time().saturating_sub(vcp.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK {
@@ -439,29 +503,150 @@ async fn do_void_cycles_positions() {
                     continue;
                 }
                 // skip
-            } else if vcp.lock == true { 
+            } else if vcp.cycles_payout_lock == true { 
                 // skip
             } else {
-                vcp.lock = true;
-                void_cycles_positions_chunk.push(
+                vcp.cycles_payout_lock = true;
+                void_cycles_positions_cycles_payouts_chunk.push(
                     (
                         vcp.position_id,
                         do_cycles_payout(
-                            cycles_transferrer::TransferCyclesQuest{
+                            DoCyclesPayoutQuest{
                                 user_cycles_transfer_id: vcp.position_id,
                                 for_the_canister: vcp.positor,
                                 cycles: vcp.cycles,
-                                cycles_transfer_memo: CyclesTransferMemo::Blob([VOID_POSITION_CYCLES_TRANSFER_MEMO_START, vcp.position_id.to_be_bytes()].concat().to_vec()),
-                            },
-                            vcp.cycles_payout_data.clone()
-                        )                     
+                                do_cycles_payout_type: DoCyclesPayoutType::VoidCyclesPosition,
+                                cycles_payout_data: vcp.cycles_payout_data.clone()
+                            }
+                        )                 
                     )  
                 );                 
             }
             i += 1;
         }
+        
+        let mut i: usize = 0;
+        while i < cm_data.cycles_positions_purchases.len() {
+            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[i];                    
+            if cpp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
+                if time().saturating_sub(cpp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK
+                && cpp.icp_payout == true {                             
+                    std::mem::drop(cpp);
+                    cm_data.cycles_positions_purchases.remove(i);
+                    continue;
+                }
+                // skip
+            } else {
+                if cpp.cycles_payout_data.is_complete() == false 
+                && cpp.cycles_payout_lock == false
+                && cycles_positions_purchases_cycles_payouts_chunk.len() < DO_CYCLES_POSITIONS_PURCHASES_CYCLES_PAYOUTS_CHUNK_SIZE {
+                    cpp.cycles_payout_lock = true;    
+                    cycles_positions_purchases_cycles_payouts_chunk.push(
+                        (
+                            cpp.id,
+                            do_cycles_payout(
+                                DoCyclesPayoutQuest::{
+                                    user_cycles_transfer_id: cpp.id,
+                                    for_the_canister: cpp.purchaser,
+                                    cycles: cpp.cycles,
+                                    do_cycles_payout_type: DoCyclesPayoutType::CyclesPositionPurchase,
+                                    cycles_payout_data: cpp.cycles_payout_data.clone()
+                                }  
+                            )
+                        )
+                    );
+                }
+                if cpp.icp_payout == false
+                && cpp.icp_payout_lock == false                            
+                && cycles_positions_purchases_icp_payouts_chunks.len() < DO_CYCLES_POSITIONS_PURCHASES_ICP_PAYOUTS_CHUNK_SIZE {
+                    cpp.icp_payout_lock = true;
+                    cycles_positions_purchases_icp_payouts_chunks.push(
+                        (     
+                            cpp.id,
+                            icp_transfer(
+                                MAINNET_LEDGER_CANISTER_ID,
+                                IcpTransferArgs{
+                                    memo: CYCLES_POSITION_PURCHASE_ICP_TRANSFER_MEMO,
+                                    amount: cycles_to_icptokens(cpp.cycles, cpp.cycles_position_xdr_permyriad_per_icp_rate),
+                                    fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                                    from_subaccount: Some(principal_icp_subaccount(&cpp.purchaser)),
+                                    to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&cpp.cycles_position_positor)),
+                                    created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+                                }
+                            )
+                        )
+                    );
+                }
+            
+            }
+            i += 1;
+        }
+        
+        let mut i: usize = 0;
+        while i < cm_data.icp_positions_purchases.len() {
+            let ipp: &mut IcpPositionPurchase = &mut cm_data.icp_positions_purchases[i];                    
+            if ipp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
+                if time().saturating_sub(ipp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK
+                && ipp.icp_payout == true {                             
+                    std::mem::drop(ipp);
+                    cm_data.icp_positions_purchases.remove(i);
+                    continue;
+                }
+                // skip
+            } else {
+                if ipp.cycles_payout_data.is_complete() == false 
+                && ipp.cycles_payout_lock == false
+                && icp_positions_purchases_cycles_payouts_chunk.len() < DO_ICP_POSITIONS_PURCHASES_CYCLES_PAYOUTS_CHUNK_SIZE {
+                    ipp.cycles_payout_lock = true;
+                    icp_positions_purchases_cycles_payouts_chunk.push(
+                        (
+                            ipp.id,
+                            do_cycles_payout(
+                                DoCyclesPayoutQuest::{
+                                    user_cycles_transfer_id: ipp.id,
+                                    for_the_canister: ipp.icp_position_positor,
+                                    cycles: icptokens_to_cycles(ipp.icp, ipp.icp_position_xdr_permyriad_per_icp_rate),
+                                    do_cycles_payout_type: DoCyclesPayoutType::IcpPositionPurchase,
+                                    cycles_payout_data: ipp.cycles_payout_data.clone()
+                                }  
+                            )
+                        )
+                    );
+                }
+                if ipp.icp_payout == false
+                && ipp.icp_payout_lock == false                            
+                && icp_positions_purchases_icp_payouts_chunks.len() < DO_ICP_POSITIONS_PURCHASES_ICP_PAYOUTS_CHUNK_SIZE {
+                    ipp.icp_payout_lock = true;
+                    icp_positions_purchases_icp_payouts_chunks.push(
+                        (     
+                            ipp.id,
+                            icp_transfer(
+                                MAINNET_LEDGER_CANISTER_ID,
+                                IcpTransferArgs{
+                                    memo: ICP_POSITION_PURCHASE_ICP_TRANSFER_MEMO,
+                                    amount: ipp.icp,
+                                    fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                                    from_subaccount: Some(principal_icp_subaccount(&ipp.icp_position_positor)),
+                                    to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&ipp.purchaser)),
+                                    created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+                                }
+                            )
+                        )
+                    );
+                }
+            
+            }
+            i += 1;
+        }
+        
     });
-    
+   
+   
+   
+   
+   
+   
+
     let (vcps_ids, do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*anonymous-future of the do_cycles_payout*/>) = void_cycles_positions_chunk.into_iter().unzip();
     
     let rs: Vec<CyclesPayoutData> = futures::future::join_all(do_cycles_payouts_futures).await;
@@ -479,7 +664,7 @@ async fn do_void_cycles_positions() {
             if cycles_payout_data.is_complete() {
                 cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
             } else {
-                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].lock = false;
+                cm_data.void_cycles_positions[vcp_void_cycles_positions_i].cycles_payout_lock = false;
                 cm_data.void_cycles_positions[vcp_void_cycles_positions_i].cycles_payout_data = cycles_payout_data;
             }
         }
@@ -521,13 +706,13 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
 
     if q.minimum_purchase > q.cycles {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition),));    
-        do_void_cycles_positions().await;
+        do_payouts().await;
         return;
     }
 
     if q.minimum_purchase < MINIMUM_CYCLES_POSITION {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumCyclesPosition(MINIMUM_CYCLES_POSITION)),));
-        do_void_cycles_positions().await;
+        do_payouts().await;
         return;
     }
 
@@ -536,13 +721,13 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
 
     if msg_cycles_available128() < msg_cycles_quirement {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MsgCyclesTooLow{ create_position_fee: CREATE_POSITION_FEE  }),));
-        do_void_cycles_positions().await;
+        do_payouts().await;
         return;
     }
 
     if canister_balance128().checked_add(msg_cycles_quirement).is_none() {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::CyclesMarketIsFull),));
-        do_void_cycles_positions().await;
+        do_payouts().await;
         return;
     }
 
@@ -603,14 +788,14 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
     }) {
         Ok(()) => {},
         Err(()) => {
-            do_void_cycles_positions().await;
+            do_payouts().await;
             return;
         }
     }
         
-    let id: PositionId = new_id(); 
     
-    with_mut(&CM_DATA, |cm_data| {
+    let position_id: PositionId = with_mut(&CM_DATA, |cm_data| {
+        let id: PositionId = new_id(cm_data); 
         cm_data.cycles_positions.push(
             CyclesPosition{
                 id,   
@@ -621,17 +806,18 @@ pub async fn create_cycles_position(create_cycles_position_quest: CreateCyclesPo
                 timestamp_nanos: time(),
             }
         );
+        id
     });
     
     msg_cycles_accept128(msg_cycles_quirement);
 
     reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Ok(
         CreateCyclesPositionSuccess{
-            position_id: id
+            position_id
         }
     ),));
     
-    do_void_cycles_positions().await;
+    do_payouts().await;
     return;
 }
 
@@ -727,7 +913,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
         }
     }
     
-    let user_icp_balance_in_the_lock: IcpTokens = check_user_icp_balance_in_the_lock(&positor);
+    let user_icp_balance_in_the_lock: IcpTokens = with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &positor) });
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
@@ -781,9 +967,9 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
     }
     
     
-    let id: PositionId = new_id(); 
     
-    with_mut(&CM_DATA, |cm_data| {
+    let position_id: PositionId = with_mut(&CM_DATA, |cm_data| {
+        let id: PositionId = new_id(cm_data); 
         cm_data.icp_positions.push(
             IcpPosition{
                 id,   
@@ -794,6 +980,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
                 timestamp_nanos: time(),
             }
         );
+        id
     });
     
     msg_cycles_accept128(msg_cycles_quirement);
@@ -802,7 +989,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
     
     reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Ok(
         CreateIcpPositionSuccess{
-            position_id: id
+            position_id
         }
     ),));
     do_payouts().await;
@@ -875,7 +1062,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
         }
     }
     
-    let user_icp_balance_in_the_lock: IcpTokens = check_user_icp_balance_in_the_lock(&purchaser);
+    let user_icp_balance_in_the_lock: IcpTokens = with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &purchaser) });
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
 
@@ -908,11 +1095,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
             return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy);
         }
                 
-        let cycles_position_purchase_id: PurchaseId = {
-            let id: PurchaseId = cm_data.id_counter.clone();
-            cm_data.id_counter += 1;
-            id
-        }; 
+        let cycles_position_purchase_id: PurchaseId = new_id(cm_data);
         cm_data.cycles_positions_purchases.push(
             CyclesPositionPurchase {
                 cycles_position_id: cycles_position_ref.id,
@@ -1032,11 +1215,7 @@ pub async fn purchase_icp_position() {
         }
         msg_cycles_accept128(msg_cycles_quirement);
         
-        let icp_position_purchase_id: PurchaseId = {
-            let id: PurchaseId = cm_data.id_counter;
-            cm_data.id_counter += 1;
-            id
-        };        
+        let icp_position_purchase_id: PurchaseId = new_id(cm_data);
         
         cm_data.icp_positions_purchases.push(
             IcpPositionPurchase{
@@ -1148,7 +1327,7 @@ pub async fn void_position(q: VoidPositionQuest) {
 
 #[query]
 pub fn see_icp_lock() -> IcpTokens {
-    check_user_icp_balance_in_the_lock(&caller())
+    with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &caller()) });
 }
 
 
@@ -1213,7 +1392,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
         }
     }
     
-    let user_icp_balance_in_the_lock: IcpTokens = check_user_icp_balance_in_the_lock(&user_id);
+    let user_icp_balance_in_the_lock: IcpTokens = with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &caller()) });
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
@@ -1313,15 +1492,29 @@ pub async fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::
                     .cycles_payout_data
                     .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
             }
-        } else if let Ok() = cm_data.positions_purchases.binary_search_by_key /*FIGURE*/ {
-        
-        }
-        
-        
+        } else if let Ok(cycles_position_purchase_cycles_positions_purchases_i) = cm_data.cycles_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |cycles_position_purchase| { cycles_position_purchase.id }) {
+            if cycles_transfer_refund == 0
+            && cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i].icp_payout == true {
+                cm_data.cycles_positions_purchases.remove(cycles_position_purchase_cycles_positions_purchases_i);
+            } else {
+                cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i]
+                    .cycles_payout_data
+                    .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
+            }
+        } else if let Ok(icp_position_purchase_icp_positions_purchases_i) = cm_data.icp_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |icp_position_purchase| { icp_position_purchase.id }) {
+            if cycles_transfer_refund == 0
+            && cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i].icp_payout == true {
+                cm_data.icp_positions_purchases.remove(icp_position_purchase_icp_positions_purchases_i);
+            } else {
+                cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i]
+                    .cycles_payout_data
+                    .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
+            }
+        }        
     });
     
     reply::<()>(());
-    do_void_cycles_positions().await;
+    do_payouts().await;
     return;
     
 } 

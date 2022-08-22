@@ -1,3 +1,5 @@
+// either take the cycles and make the call or don't take any cycles and don't make the call. don't take cycles and not make a call.
+
 use cts_lib::{
     ic_cdk::{
         self,
@@ -250,8 +252,6 @@ pub async fn transfer_cycles() {
     
     with_mut(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count += 1; });
     
-    reply::<(Result<(), TransferCyclesError>,)>((Ok(()),)); // at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
-    
     // call_raw because dont want to rely on the canister returning the correct candid 
     let mut cycles_transfer_call_future = call_raw128(
         q.for_the_canister,
@@ -261,9 +261,11 @@ pub async fn transfer_cycles() {
     );
     
     if let Poll::Ready(call_result) = futures::poll!(&mut cycles_transfer_call_future) {
-        // a trap will refund the already accepted cycles and discard the reply 
+        // a trap will refund the already accepted cycles
         trap(&format!("cycles_transfer call_perform error: {:?}", call_result.unwrap_err()));
     }
+    
+    reply::<(Result<(), TransferCyclesError>,)>((Ok(()),)); // at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
     
     let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;
     
