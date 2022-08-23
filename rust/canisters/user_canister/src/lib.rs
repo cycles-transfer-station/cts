@@ -143,12 +143,53 @@ struct CyclesTransferOut {
 }
 
 
+struct CMCyclesPosition{
+    id: cycles_market::PositionId,   
+    cycles: Cycles,
+    minimum_purchase: Cycles,
+    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    create_position_fee: u64,
+    timestamp_nanos: u64,
+}
+
+struct CMIcpPosition{
+    id: cycles_market::PositionId,   
+    icp: IcpTokens,
+    minimum_purchase: IcpTokens,
+    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    create_position_fee: u64,
+    timestamp_nanos: u64,
+}
+
+struct CMCyclesPositionPurchase{
+    cycles_position_id: cycles_market::PositionId,
+    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    id: cycles_market::PurchaseId,
+    cycles: Cycles,
+    purchase_position_fee: u64,
+    timestamp_nanos: u64,
+}
+
+struct CMIcpPositionPurchase{
+    icp_position_id: cycles_market::PositionId,
+    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    id: cycles_market::PurchaseId,
+    icp: IcpTokens,
+    purchase_position_fee: u64,
+    timestamp_nanos: u64,
+}
+
+
 
 #[derive(CandidType, Deserialize, Clone)]
 struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<(u64,CyclesTransferIn)>,
     cycles_transfers_out: Vec<(u64,CyclesTransferOut)>,
+    cm_cycles_positions: Vec<CMCyclesPosition>,
+    cm_icp_positions: Vec<CMIcpPosition>,
+    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
+    cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
 }
 
 impl UserData {
@@ -194,6 +235,10 @@ impl UCData {
 
 
 pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
+
+pub const CYCLES_MARKET_CREATE_POSITION_FEE: Cycles = 50_000_000_000;
+pub const CYCLES_MARKET_PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
+
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
@@ -282,6 +327,10 @@ fn create_uc_data_candid_bytes() -> Vec<u8> {
     with_mut(&UC_DATA, |uc_data| { 
         uc_data.user_data.cycles_transfers_in.shrink_to_fit();
         uc_data.user_data.cycles_transfers_out.shrink_to_fit(); 
+        uc_data.user_data.cm_cycles_positions.shrink_to_fit();
+        uc_data.user_data.cm_icp_positions.shrink_to_fit();
+        uc_data.user_data.cm_cycles_positions_purchases.shrink_to_fit();
+        uc_data.user_data.cm_icp_positions_purchases.shrink_to_fit();
     });
     
     let mut uc_data_candid_bytes: Vec<u8> = with(&UC_DATA, |uc_data| { encode_one(uc_data).unwrap() });
@@ -392,12 +441,10 @@ fn user_cycles_balance() -> Cycles {
     with(&UC_DATA, |uc_data| { uc_data.user_data.cycles_balance })
 }
 
-fn new_cycles_transfer_id() -> u64 {
-    with_mut(&UC_DATA, |uc_data| { 
-        let id: u64 = uc_data.cycles_transfers_id_counter.clone();
-        uc_data.cycles_transfers_id_counter += 1;
-        id
-    })
+fn new_cycles_transfer_id(id_counter: &mut u64) -> u64 {
+    let id: u64 = id_counter.clone();
+    *id_counter += 1;
+    id
 }
 
 // round-robin on the cycles-transferrer-canisters
@@ -433,6 +480,14 @@ fn calculate_current_storage_usage() -> u64 {
             uc_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<(u64,CyclesTransferIn)>() + 32/*for the cycles-transfer-memo-heap-size*/ )
             + 
             uc_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<(u64,CyclesTransferOut)>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
+            +
+            uc_data.user_data.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
+            +
+            uc_data.user_data.cm_icp_positions.len() * std::mem::size_of::<CMIcpPosition>()
+            +
+            uc_data.user_data.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
+            +
+            uc_data.user_data.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
         })
     ) as u64
 }
@@ -541,7 +596,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
     with_mut(&UC_DATA, |uc_data| {
         uc_data.user_data.cycles_balance = uc_data.user_data.cycles_balance.checked_add(cycles_cept).unwrap_or(Cycles::MAX);
         uc_data.user_data.cycles_transfers_in.push((
-            new_cycles_transfer_id(),
+            new_cycles_transfer_id(&mut uc_data.cycles_transfers_id_counter),
             CyclesTransferIn{
                 by_the_canister,
                 cycles: cycles_cept,
@@ -644,10 +699,9 @@ pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u64,
         },
         CyclesTransferMemo::Nat(_n) => {} 
     }
-
-    let cycles_transfer_id: u64 = new_cycles_transfer_id(); 
-     
-    with_mut(&UC_DATA, |uc_data| {
+ 
+    let cycles_transfer_id: u64 = with_mut(&UC_DATA, |uc_data| {
+        let cycles_transfer_id: u64 = new_cycles_transfer_id(&mut uc_data.cycles_transfers_id_counter);        
         // take the user-cycles before the transfer, and refund in the callback 
         uc_data.user_data.cycles_balance -= q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE;
         uc_data.user_data.cycles_transfers_out.push((
@@ -662,6 +716,7 @@ pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u64,
                 fee_paid: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE as u64
             }
         ));
+        cycles_transfer_id
     });
     
     let q_cycles: Cycles = q.cycles; // copy cause want the value to stay on the stack for the closure to run with it. after the q is move into the candid params
@@ -759,13 +814,288 @@ pub fn user_download_cycles_transfers_out() {
 }
 
 
-// ---------------------------------------------------
-
-
-
 
 
 // ---------------------------------------------------
+// cycles-market methods
+
+
+
+
+pub enum UserCMCreateCyclesPositionError {
+    UserCanisterCTSFuelTooLow,
+    UserCanisterMemoryIsFull,
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
+    CyclesMarketCreateCyclesPositionCallError((u32, String)),
+    CyclesMarketCreateCyclesPositionError(cycles_market::CreateCyclesPositionError)
+}
+
+
+#[update]
+pub fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMCreateCyclesPositionError::UserCanisterCTSFuelTooLow);
+    }
+    
+    if calculate_free_storage() < std::mem::size_of::<CMCyclesPosition>() as u64 {
+        return Err(UserCMCreateCyclesPositionError::UserCanisterMemoryIsFull);
+    }
+   
+    if user_cycles_balance() < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    }
+
+    match call_with_payment128::<(cycles_market::CreateCyclesPositionQuest,), (Result<cycles_market::CreateCyclesPositionSuccess, cycles_market::CreateCyclesPositionError>,)>(
+        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        "create_cycles_position",
+        (q.clone(),),
+        q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE
+    ).await {
+        Ok(cm_create_cycles_position_result) => match cm_create_cycles_position_result {
+            Ok(cm_create_cycles_position_success) => {
+                with_mut(&CM_DATA, |cm_data| {
+                    cm_data.user_data.cm_cycles_positions.push(
+                        CMCyclesPosition{
+                            id: cm_create_cycles_position_success.position_id,   
+                            cycles: q.cycles,
+                            minimum_purchase: q.minimum_purchase,
+                            xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
+                            create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
+                            timestamp_nanos: time(),
+                        }
+                    );
+                });
+                Ok(cm_create_cycles_position_success)
+            },
+            Err(cm_create_cycles_position_error) => {
+                return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionError(cm_create_cycles_position_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+
+}
+
+
+
+// ------------
+
+
+
+pub enum UserCMCreateIcpPositionError {
+    UserCanisterCTSFuelTooLow,
+    UserCanisterMemoryIsFull,
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
+    CyclesMarketCreateIcpPositionCallError((u32, String)),
+    CyclesMarketCreateIcpPositionError(cycles_market::CreateIcpPositionError)
+}
+
+
+#[update]
+pub fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMCreateIcpPositionError::UserCanisterCTSFuelTooLow);
+    }
+    
+    if calculate_free_storage() < std::mem::size_of::<CMIcpPosition>() as u64 {
+        return Err(UserCMCreateIcpPositionError::UserCanisterMemoryIsFull);
+    }
+   
+    if user_cycles_balance() < CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    }
+
+    match call_with_payment128::<(cycles_market::CreateIcpPositionQuest,), (Result<cycles_market::CreateIcpPositionSuccess, cycles_market::CreateIcpPositionError>,)>(
+        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        "create_icp_position",
+        (q.clone(),),
+        CYCLES_MARKET_CREATE_POSITION_FEE
+    ).await {
+        Ok(cm_create_icp_position_result) => match cm_create_icp_position_result {
+            Ok(cm_create_icp_position_success) => {
+                with_mut(&CM_DATA, |cm_data| {
+                    cm_data.user_data.cm_icp_positions.push(
+                        CMIcpPosition{
+                            id: cm_create_icp_position_success.position_id,   
+                            icp: q.icp,
+                            minimum_purchase: q.minimum_purchase,
+                            xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
+                            create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
+                            timestamp_nanos: time(),
+                        }
+                    );
+                });
+                Ok(cm_create_icp_position_success)
+            },
+            Err(cm_create_icp_position_error) => {
+                return Err(UserCMCreateIcpPositionError::CyclesMarketCreateIcpPositionError(cm_create_icp_position_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMCreateIcpPositionError::CyclesMarketCreateIcpPositionCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+
+}
+
+
+
+// --------------
+
+pub struct UserCMPurchaseCyclesPositionQuest {
+    cycles_market_purchase_cycles_position_quest: cycles_market::PurchaseCyclesPositionQuest,
+    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcpRate // for the user_canister-log
+}
+
+pub enum UserCMPurchaseCyclesPositionError {
+    UserCanisterCTSFuelTooLow,
+    UserCanisterMemoryIsFull,
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
+    CyclesMarketPurchaseCyclesPositionCallError((u32, String)),
+    CyclesMarketPurchaseCyclesPositionError(cycles_market::PurchaseCyclesPositionError)
+}
+
+
+#[update]
+pub fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMPurchaseCyclesPositionError::UserCanisterCTSFuelTooLow);
+    }
+    
+    if calculate_free_storage() < std::mem::size_of::<CMCyclesPositionPurchase>() as u64 {
+        return Err(UserCMPurchaseCyclesPositionError::UserCanisterMemoryIsFull);
+    }
+    
+    if user_cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE {
+        return Err(UserCMPurchaseCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    }
+
+    match call_with_payment128::<(cycles_market::PurchaseCyclesPositionQuest,), (Result<cycles_market::PurchaseCyclesPositionSuccess, cycles_market::PurchaseCyclesPositionError>,)>(
+        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        "purchase_cycles_position",
+        (q.cycles_market_purchase_cycles_position_quest.clone(),),
+        CYCLES_MARKET_PURCHASE_POSITION_FEE
+    ).await {
+        Ok(cm_purchase_cycles_position_result) => match cm_purchase_cycles_position_result {
+            Ok(cm_purchase_cycles_position_success) => {
+                with_mut(&CM_DATA, |cm_data| {
+                    cm_data.user_data.cm_cycles_positions_purchases.push(
+                        CMCyclesPositionPurchase{
+                            cycles_position_id: q.cycles_market_purchase_cycles_position_quest.cycles_position_id,
+                            cycles_position_xdr_permyriad_per_icp_rate: q.cycles_position_xdr_permyriad_per_icp_rate,
+                            id: cm_purchase_cycles_position_success.purchase_id,
+                            cycles: q.cycles_market_purchase_cycles_position_quest.cycles,
+                            purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
+                            timestamp_nanos: time(),
+                        }
+                    );
+                });
+                Ok(cm_purchase_cycles_position_success)
+            },
+            Err(cm_purchase_cycles_position_error) => {
+                return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionError(cm_purchase_cycles_position_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+
+}
+
+
+// ---------------
+
+
+pub struct UserCMPurchaseIcpPositionQuest {
+    cycles_market_purchase_icp_position_quest: cycles_market::PurchaseIcpPositionQuest,
+    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcpRate // for the user_canister-log
+}
+
+pub enum UserCMPurchaseIcpPositionError {
+    UserCanisterCTSFuelTooLow,
+    UserCanisterMemoryIsFull,
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
+    CyclesMarketPurchaseIcpPositionCallError((u32, String)),
+    CyclesMarketPurchaseIcpPositionError(cycles_market::PurchaseIcpPositionError)
+}
+
+
+#[update]
+pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMPurchaseIcpPositionError::UserCanisterCTSFuelTooLow);
+    }
+    
+    if calculate_free_storage() < std::mem::size_of::<CMIcpPositionPurchase>() as u64 {
+        return Err(UserCMPurchaseIcpPositionError::UserCanisterMemoryIsFull);
+    }
+    
+    if user_cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate) {
+        return Err(UserCMPurchaseIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    }
+
+    match call_with_payment128::<(cycles_market::PurchaseIcpPositionQuest,), (Result<cycles_market::PurchaseIcpPositionSuccess, cycles_market::PurchaseIcpPositionError>,)>(
+        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        "purchase_icp_position",
+        (q.cycles_market_purchase_icp_position_quest.clone(),),
+        CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate)
+    ).await {
+        Ok(cm_purchase_icp_position_result) => match cm_purchase_icp_position_result {
+            Ok(cm_purchase_icp_position_success) => {
+                with_mut(&CM_DATA, |cm_data| {
+                    cm_data.user_data.cm_icp_positions_purchases.push(
+                        CMIcpPositionPurchase{
+                            icp_position_id: q.cycles_market_purchase_icp_position_quest.icp_position_id,
+                            icp_position_xdr_permyriad_per_icp_rate: q.icp_position_xdr_permyriad_per_icp_rate,
+                            id: cm_purchase_icp_position_success.purchase_id,
+                            icp: q.cycles_market_purchase_icp_position_quest.icp,
+                            purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
+                            timestamp_nanos: time(),
+                        }
+                    );
+                });
+                Ok(cm_purchase_icp_position_success)
+            },
+            Err(cm_purchase_icp_position_error) => {
+                return Err(UserCMPurchaseIcpPositionError::CyclesMarketPurchaseIcpPositionError(cm_purchase_icp_position_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMPurchaseIcpPositionError::CyclesMarketPurchaseIcpPositionCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+
+}
+
+
+// ---------------------
+
+
+
+
+
+
+
+// ----------------------------------------------------------
 
 
 /*
