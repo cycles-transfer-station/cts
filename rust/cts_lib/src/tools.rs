@@ -13,6 +13,8 @@ use crate::{
         XdrPerMyriadPerIcp
     }
 };
+use std::thread::LocalKey;
+use std::cell::Cell;
 
 
 
@@ -162,6 +164,35 @@ fn test_icp_cycles_transform() {
 
 
 
+
+
+
+
+
+
+
+
+
+// round-robin on the cycles-transferrer-canisters
+pub fn round_robin<T: Copy>(ctcs: &Vec<T>, round_robin_counter: &'static LocalKey<Cell<usize>>) -> Option<T> {
+    match ctcs.len() {
+        0 => None,
+        1 => Some(ctcs[0]),
+        l => {
+            round_robin_counter.with(|ctcs_rrc| { 
+                let c_i: usize = ctcs_rrc.get();                    
+                if c_i <= l-1 {
+                    let ctc: T = ctcs[c_i];
+                    if c_i == l-1 { ctcs_rrc.set(0); } else { ctcs_rrc.set(c_i + 1); }
+                    Some(ctc)
+                } else {
+                    ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match                         
+                    Some(ctcs[0])
+                } 
+            })
+        }
+    }
+}
 
 
 
