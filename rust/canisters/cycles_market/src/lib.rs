@@ -1759,23 +1759,14 @@ pub async fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::
                     .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
             }
         } else if let Ok(cycles_position_purchase_cycles_positions_purchases_i) = cm_data.cycles_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |cycles_position_purchase| { cycles_position_purchase.id }) {
-            if cycles_transfer_refund == 0
-            && cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i].icp_payout == true {
-                cm_data.cycles_positions_purchases.remove(cycles_position_purchase_cycles_positions_purchases_i);
-            } else {
-                cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i]
-                    .cycles_payout_data
-                    .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
-            }
+            cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i]
+                .cycles_payout_data
+                .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
+            
         } else if let Ok(icp_position_purchase_icp_positions_purchases_i) = cm_data.icp_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |icp_position_purchase| { icp_position_purchase.id }) {
-            if cycles_transfer_refund == 0
-            && cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i].icp_payout == true {
-                cm_data.icp_positions_purchases.remove(icp_position_purchase_icp_positions_purchases_i);
-            } else {
-                cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i]
-                    .cycles_payout_data
-                    .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
-            }
+            cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i]
+                .cycles_payout_data
+                .cycles_transferrer_transfer_cycles_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
         }        
     });
     
@@ -1785,10 +1776,15 @@ pub async fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::
     
 } 
 
+// ---------------------------------
 
 
-
-
+#[update(manual_reply = true)]
+pub async fn trigger_payouts() {
+    reply::<()>(());
+    do_payouts().await;
+    return;
+}
 
 
 
