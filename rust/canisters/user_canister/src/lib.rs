@@ -552,13 +552,6 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
 
 
 
-// for the now, check the ctsfuel balance on the 
-//  user_transfer_cycles,
-//  cycles_transfer,
-//  download-cts-out,
-//  download-cts-in 
-//methods 
-
 
 
 
@@ -654,6 +647,37 @@ pub fn user_download_cycles_transfers_in() {
 
 
 
+#[update(manual_reply = true)]
+pub fn user_delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u64>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        for delete_cycles_transfer_in_id in delete_cycles_transfers_in_ids.into_iter() {
+            match uc_data.user_data.cycles_transfers_in.binary_search_by_key(&delete_cycles_transfer_in_id, |cycles_transfer_in_log| { cycles_transfer_in_log.0 }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cycles_transfers_in[i].1.timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cycles_transfer_in id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_in_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cycles_transfers_in.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cycles_transfer_in id: {} not found.", delete_cycles_transfer_in_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
 
 
 
@@ -830,6 +854,43 @@ pub fn user_download_cycles_transfers_out() {
         reply::<(Option<&[(u64,CyclesTransferOut)]>,)>((uc_data.user_data.cycles_transfers_out.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
+
+
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u64>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        for delete_cycles_transfer_out_id in delete_cycles_transfers_out_ids.into_iter() {
+            match uc_data.user_data.cycles_transfers_out.binary_search_by_key(&delete_cycles_transfer_out_id, |cycles_transfer_out_log| { cycles_transfer_out_log.0 }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cycles_transfers_out[i].1.timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cycles_transfer_out id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cycles_transfers_out.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cycles_transfer_out id: {} not found.", delete_cycles_transfer_out_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
+
 
 
 
@@ -1341,6 +1402,190 @@ pub fn user_download_cm_icp_transfers_out() {
         let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
         reply::<(Option<&[CMIcpTransferOut]>,)>((uc_data.user_data.cm_icp_transfers_out.chunks(USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
     });
+}
+
+
+
+// -----------------------------
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cm_cycles_positions.sort_by_key(|cm_cycles_position| { cm_cycles_position.id });
+        for delete_cm_cycles_position_id in delete_cm_cycles_positions_ids.into_iter() {
+            match uc_data.user_data.cm_cycles_positions.binary_search_by_key(&delete_cm_cycles_position_id, |cm_cycles_position| { cm_cycles_position.id }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cm_cycles_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_cycles_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cm_cycles_positions.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cm_cycles_position id: {} not found.", delete_cm_cycles_position_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
+
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cm_icp_positions.sort_by_key(|cm_icp_position| { cm_icp_position.id });
+        for delete_cm_icp_position_id in delete_cm_icp_positions_ids.into_iter() {
+            match uc_data.user_data.cm_icp_positions.binary_search_by_key(&delete_cm_icp_position_id, |cm_icp_position| { cm_icp_position.id }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cm_icp_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cm_icp_positions.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cm_icp_position id: {} not found.", delete_cm_icp_position_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
+
+
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases_ids: Vec<u128>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cm_cycles_positions_purchases.sort_by_key(|cm_cycles_position_purchase| { cm_cycles_position_purchase.id });
+        for delete_cm_cycles_position_purchase_id in delete_cm_cycles_positions_purchases_ids.into_iter() {
+            match uc_data.user_data.cm_cycles_positions_purchases.binary_search_by_key(&delete_cm_cycles_position_purchase_id, |cm_cycles_position_purchase| { cm_cycles_position_purchase.id }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cm_cycles_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_cycles_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cm_cycles_positions_purchases.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cm_cycles_position_purchase id: {} not found.", delete_cm_cycles_position_purchase_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
+
+
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: Vec<u128>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cm_icp_positions_purchases.sort_by_key(|cm_icp_position_purchase| { cm_icp_position_purchase.id });
+        for delete_cm_icp_position_purchase_id in delete_cm_icp_positions_purchases_ids.into_iter() {
+            match uc_data.user_data.cm_icp_positions_purchases.binary_search_by_key(&delete_cm_icp_position_purchase_id, |cm_icp_position_purchase| { cm_icp_position_purchase.id }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cm_icp_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cm_icp_positions_purchases.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cm_icp_position_purchase id: {} not found.", delete_cm_icp_position_purchase_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
+}
+
+
+
+#[update(manual_reply = true)]
+pub fn user_delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u64>) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with_mut(&UC_DATA, |uc_data| {
+        uc_data.user_data.cm_icp_transfers_out.sort_by_key(|cm_icp_transfer_out| { cm_icp_transfer_out.block_height });
+        for delete_cm_icp_transfer_out_id in delete_cm_icp_transfers_out_ids.into_iter() {
+            match uc_data.user_data.cm_icp_transfers_out.binary_search_by_key(&delete_cm_icp_transfer_out_id, |cm_icp_transfer_out| { cm_icp_transfer_out.block_height }) {
+                Ok(i) => {
+                    if time().saturating_sub(uc_data.user_data.cm_icp_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_transfer_out block_height: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    }
+                    uc_data.user_data.cm_icp_transfers_out.remove(i);
+                },
+                Err(_) => {
+                    trap(&format!("cm_icp_transfer_out block_height: {} not found.", delete_cm_icp_transfer_out_id))
+                }
+            }
+        }
+    });
+    
+    reply::<()>(());
 }
 
 
