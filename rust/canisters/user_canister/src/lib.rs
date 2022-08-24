@@ -179,6 +179,15 @@ struct CMIcpPositionPurchase{
     timestamp_nanos: u64,
 }
 
+struct CMIcpTransferOut{
+    icp: IcpTokens,
+    icp_fee: Option<IcpTokens>,
+    to: IcpId,
+    block_height: IcpBlockHeight,
+    timestamp_nanos: u64,
+    transfer_icp_balance_fee: u64
+}
+
 
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -190,6 +199,7 @@ struct UserData {
     cm_icp_positions: Vec<CMIcpPosition>,
     cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
     cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
+    cm_icp_transfers_out: Vec<CMIcpTransferOut>
 }
 
 impl UserData {
@@ -198,6 +208,11 @@ impl UserData {
             cycles_balance: 0u128,
             cycles_transfers_in: Vec::new(),
             cycles_transfers_out: Vec::new(),
+            cm_cycles_positions: Vec::new(),
+            cm_icp_positions: Vec::new(),
+            cm_cycles_positions_purchases: Vec::new(),
+            cm_icp_positions_purchases: Vec::new(),    
+            cm_icp_transfers_out: Vec::new(),
         }
     }
 }
@@ -238,7 +253,7 @@ pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
 
 pub const CYCLES_MARKET_CREATE_POSITION_FEE: Cycles = 50_000_000_000;
 pub const CYCLES_MARKET_PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
-
+pub const CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE: Cycles = 50_000_000_000;
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
@@ -331,6 +346,7 @@ fn create_uc_data_candid_bytes() -> Vec<u8> {
         uc_data.user_data.cm_icp_positions.shrink_to_fit();
         uc_data.user_data.cm_cycles_positions_purchases.shrink_to_fit();
         uc_data.user_data.cm_icp_positions_purchases.shrink_to_fit();
+        uc_data.user_data.cm_icp_transfers_out.shrink_to_fit();
     });
     
     let mut uc_data_candid_bytes: Vec<u8> = with(&UC_DATA, |uc_data| { encode_one(uc_data).unwrap() });
@@ -488,6 +504,8 @@ fn calculate_current_storage_usage() -> u64 {
             uc_data.user_data.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
             +
             uc_data.user_data.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
+            +
+            uc_data.user_data.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
         })
     ) as u64
 }
@@ -850,15 +868,15 @@ pub fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesP
     }
 
     match call_with_payment128::<(cycles_market::CreateCyclesPositionQuest,), (Result<cycles_market::CreateCyclesPositionSuccess, cycles_market::CreateCyclesPositionError>,)>(
-        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "create_cycles_position",
         (q.clone(),),
         q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE
     ).await {
         Ok(cm_create_cycles_position_result) => match cm_create_cycles_position_result {
             Ok(cm_create_cycles_position_success) => {
-                with_mut(&CM_DATA, |cm_data| {
-                    cm_data.user_data.cm_cycles_positions.push(
+                with_mut(&UC_DATA, |uc_data| {
+                    uc_data.user_data.cm_cycles_positions.push(
                         CMCyclesPosition{
                             id: cm_create_cycles_position_success.position_id,   
                             cycles: q.cycles,
@@ -916,15 +934,15 @@ pub fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositio
     }
 
     match call_with_payment128::<(cycles_market::CreateIcpPositionQuest,), (Result<cycles_market::CreateIcpPositionSuccess, cycles_market::CreateIcpPositionError>,)>(
-        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "create_icp_position",
         (q.clone(),),
         CYCLES_MARKET_CREATE_POSITION_FEE
     ).await {
         Ok(cm_create_icp_position_result) => match cm_create_icp_position_result {
             Ok(cm_create_icp_position_success) => {
-                with_mut(&CM_DATA, |cm_data| {
-                    cm_data.user_data.cm_icp_positions.push(
+                with_mut(&UC_DATA, |uc_data| {
+                    uc_data.user_data.cm_icp_positions.push(
                         CMIcpPosition{
                             id: cm_create_icp_position_success.position_id,   
                             icp: q.icp,
@@ -985,15 +1003,15 @@ pub fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositi
     }
 
     match call_with_payment128::<(cycles_market::PurchaseCyclesPositionQuest,), (Result<cycles_market::PurchaseCyclesPositionSuccess, cycles_market::PurchaseCyclesPositionError>,)>(
-        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "purchase_cycles_position",
         (q.cycles_market_purchase_cycles_position_quest.clone(),),
         CYCLES_MARKET_PURCHASE_POSITION_FEE
     ).await {
         Ok(cm_purchase_cycles_position_result) => match cm_purchase_cycles_position_result {
             Ok(cm_purchase_cycles_position_success) => {
-                with_mut(&CM_DATA, |cm_data| {
-                    cm_data.user_data.cm_cycles_positions_purchases.push(
+                with_mut(&UC_DATA, |uc_data| {
+                    uc_data.user_data.cm_cycles_positions_purchases.push(
                         CMCyclesPositionPurchase{
                             cycles_position_id: q.cycles_market_purchase_cycles_position_quest.cycles_position_id,
                             cycles_position_xdr_permyriad_per_icp_rate: q.cycles_position_xdr_permyriad_per_icp_rate,
@@ -1054,15 +1072,15 @@ pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQues
     }
 
     match call_with_payment128::<(cycles_market::PurchaseIcpPositionQuest,), (Result<cycles_market::PurchaseIcpPositionSuccess, cycles_market::PurchaseIcpPositionError>,)>(
-        with(&CM_DATA, |cm_data| { cm_data.cycles_market_id }),
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "purchase_icp_position",
         (q.cycles_market_purchase_icp_position_quest.clone(),),
         CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate)
     ).await {
         Ok(cm_purchase_icp_position_result) => match cm_purchase_icp_position_result {
             Ok(cm_purchase_icp_position_success) => {
-                with_mut(&CM_DATA, |cm_data| {
-                    cm_data.user_data.cm_icp_positions_purchases.push(
+                with_mut(&UC_DATA, |uc_data| {
+                    uc_data.user_data.cm_icp_positions_purchases.push(
                         CMIcpPositionPurchase{
                             icp_position_id: q.cycles_market_purchase_icp_position_quest.icp_position_id,
                             icp_position_xdr_permyriad_per_icp_rate: q.icp_position_xdr_permyriad_per_icp_rate,
@@ -1089,6 +1107,241 @@ pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQues
 
 // ---------------------
 
+pub enum UserCMVoidPositionError {
+    UserCanisterCTSFuelTooLow,
+    CyclesMarketVoidPositionCallError((u32, String)),
+    CyclesMarketVoidPositionError(cycles_market::VoidPositionError)
+}
+
+
+#[update]
+pub fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMVoidPositionError::UserCanisterCTSFuelTooLow);
+    }
+    
+    match call::<(cycles_market::VoidPositionQuest,), (Result<(), cycles_market::VoidPositionError>,)>(
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
+        "void_position",
+        (q,)
+    ).await {
+        Ok(cm_void_position_result) => match cm_void_position_result {
+            Ok(()) => Ok(()),
+            Err(cm_void_position_error) => {
+                return Err(UserCMVoidPositionError::CyclesMarketVoidPositionError(cm_void_position_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMVoidPositionError::CyclesMarketVoidPositionCallError((call_error.0 as u32, call_error.1)));
+        }
+    
+    }
+    
+}
+
+
+// -------
+
+
+pub enum UserCMSeeIcpLockError {
+    UserCanisterCTSFuelTooLow,
+    CyclesMarketSeeIcpLockCallError((u32, String)),
+}
+
+#[update]
+pub fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMSeeIcpLockError::UserCanisterCTSFuelTooLow);
+    }
+    
+    match call::<(), (IcpTokens,)>(
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
+        "see_icp_lock",
+        ()
+    ).await {
+        Ok(icp_tokens) => Ok(icp_tokens),
+        Err(call_error) => {
+            return Err(UserCMSeeIcpLockError::CyclesMarketSeeIcpLockCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+} 
+
+
+// -------
+
+
+pub enum UserCMTransferIcpBalanceError {
+    UserCanisterCTSFuelTooLow,
+    UserCanisterMemoryIsFull,
+    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_transfer_icp_balance_fee: Cycles },
+    CyclesMarketTransferIcpBalanceCallError((u32, String)),
+    CyclesMarketTransferIcpBalanceError(cycles_market::TransferIcpBalanceError)
+}
+
+#[update]
+pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) -> Result<IcpBlockHeight, UserCMTransferIcpBalanceError> {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 30_000_000_000 {
+        return Err(UserCMTransferIcpBalanceError::UserCanisterCTSFuelTooLow);
+    }
+
+    if calculate_free_storage() < std::mem::size_of::<CMIcpTransferOut>() as u64 {
+        return Err(UserCMTransferIcpBalanceError::UserCanisterMemoryIsFull);
+    }
+
+    if user_cycles_balance() < CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE {
+        return Err(UserCMTransferIcpBalanceError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
+    }
+
+    match call_with_payment128::<(cycles_market::TransferIcpBalanceQuest,), (Result<IcpBlockHeight, cycles_market::TransferIcpBalanceError>,)>(
+        with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
+        "transfer_icp_balance",
+        (q.clone(),),
+        CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE
+    ).await {
+        Ok(cm_transfer_icp_balance_result) => match cm_transfer_icp_balance_result {
+            Ok(block_height) => {
+                with_mut(&UC_DATA, |uc_data| {
+                    uc_data.user_data.icp_transfers_out.push(
+                        CMIcpTransferOut{
+                            icp: q.icp,
+                            icp_fee: q.icp_fee,
+                            to: q.to,
+                            block_height,
+                            timestamp_nanos: time(),
+                            transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE as u64
+                        }
+                    );
+                });
+                Ok(block_height)
+            },
+            Err(cm_transfer_icp_balance_error) => {
+                return Err(UserCMTransferIcpBalanceError::CyclesMarketTransferIcpBalanceError(cm_transfer_icp_balance_error));
+            }
+        },
+        Err(call_error) => {
+            return Err(UserCMTransferIcpBalanceError::CyclesMarketTransferIcpBalanceCallError((call_error.0 as u32, call_error.1));
+        }
+    }
+
+}
+
+
+
+
+
+
+
+#[query(manual_reply = true)]
+pub fn user_download_cm_cycles_positions() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&UC_DATA, |uc_data| {
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        reply::<(Option<&[CMCyclesPosition]>,)>((uc_data.user_data.cm_cycles_positions.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn user_download_cm_icp_positions() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&UC_DATA, |uc_data| {
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        reply::<(Option<&[CMIcpPosition]>,)>((uc_data.user_data.cm_icp_positions.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn user_download_cm_cycles_positions_purchases() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&UC_DATA, |uc_data| {
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        reply::<(Option<&[CMCyclesPositionPurchase]>,)>((uc_data.user_data.cm_cycles_positions_purchases.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn user_download_cm_icp_positions_purchases() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&UC_DATA, |uc_data| {
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        reply::<(Option<&[CMIcpPositionPurchase]>,)>((uc_data.user_data.cm_icp_positions_purchases.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn user_download_cm_icp_transfers_out() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&UC_DATA, |uc_data| {
+        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        reply::<(Option<&[CMIcpTransferOut]>,)>((uc_data.user_data.cm_icp_transfers_out.chunks(USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
 
 
 
