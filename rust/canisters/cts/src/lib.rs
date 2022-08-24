@@ -15,9 +15,9 @@
 use std::{
     cell::{Cell, RefCell, RefMut}, 
     collections::{HashMap, HashSet},
-    future::Future,
-    
+    future::Future,  
 };
+use futures::task::Poll;
 
 use cts_lib::{
     types::{
