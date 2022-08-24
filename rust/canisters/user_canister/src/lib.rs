@@ -262,6 +262,16 @@ const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 const USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE: usize = 500usize;
 const USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE: usize = 500usize;
 
+const USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE: usize = 500;
+
+
+
+const DELETE_LOG_MINIMUM_WAIT_NANOS: u64 = 1_000_000_000*60*60*24*45;
+
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 const USER_CANISTER_BACKUP_CYCLES: Cycles = 1_400_000_000_000; 
@@ -1300,7 +1310,7 @@ pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferI
 
 
 
-
+// ----------
 
 
 
@@ -1628,12 +1638,22 @@ pub struct UserUCMetrics {
     storage_usage: u64,
     user_download_cycles_transfers_in_chunk_size: u64,
     user_download_cycles_transfers_out_chunk_size: u64
+    cm_cycles_positions_len: u64,
+    cm_icp_positions_len: u64,
+    cm_cycles_positions_purchases_len: u64,
+    cm_icp_positions_purchases_len: u64,
+    cm_icp_transfers_out_len: u64,
+    user_download_cm_cycles_positions_chunk_size: u64,
+    user_download_cm_icp_positions_chunk_size: u64,
+    user_download_cm_cycles_positions_purchases_chunk_size: u64,
+    user_download_cm_icp_positions_purchases_chunk_size: u64,
+    user_download_cm_icp_transfers_out_chunk_size: u64,
 }
 
 
 #[query]
 pub fn user_see_metrics() -> UserUCMetrics {
-    if caller() != user_id() {
+    if caller() != user_id() && caller() != cts_id() {
         trap("Caller must be the user for this method.");
     }
     
@@ -1651,7 +1671,17 @@ pub fn user_see_metrics() -> UserUCMetrics {
             cycles_transfers_out_len: uc_data.user_data.cycles_transfers_out.len() as u64,
             storage_usage: calculate_current_storage_usage(),
             user_download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u64,
-            user_download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u64
+            user_download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u64,
+            cm_cycles_positions_len: uc_data.user_data.cm_cycles_positions.len() as u64,
+            cm_icp_positions_len: uc_data.user_data.cm_icp_positions.len() as u64,
+            cm_cycles_positions_purchases_len: uc_data.user_data.cm_cycles_positions_purchases.len() as u64,
+            cm_icp_positions_purchases_len: uc_data.user_data.cm_icp_positions_purchases.len() as u64,
+            cm_icp_transfers_out_len: uc_data.user_data.cm_icp_transfers_out.len() as u64,
+            user_download_cm_cycles_positions_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE as u64,
+            user_download_cm_icp_positions_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE as u64,
+            user_download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u64,
+            user_download_cm_icp_positions_purchases_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE as u64,
+            user_download_cm_icp_transfers_out_chunk_size: USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE as u64,
         }
     })
 }
