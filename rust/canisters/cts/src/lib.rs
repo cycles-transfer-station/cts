@@ -1,42 +1,9 @@
-
-// lock each user from making other calls on each async call that awaits, like the collect_balance call, lock the user at the begining and unlock the user at the end. or better can take the funds within the first [exe]cution and if want can give back
-// will callbacks (the code after an await) get dropped if the subnet is under heavy load?
-// when calling canisters that i dont know if they can possible give-back unexpected candid, use call_raw and dont panic on the candid-decode, return an error.
-// dont want to implement From<(RejectionCode, String)> for the return errors in the calls async that call other canisters because if the function makes more than one call then the ? with the from can give-back a wrong error type 
-// always check user lock before any awaits (or maybe after the first await if not fective?). 
-// in the cycles-market, let a seller set a minimum-purchase-quantity. which can be the full-mount that is up for the sale or less 
-// always unlock the user af-ter the last await-call()
-// does dereferencing a borrow give the ownership? try on a non-copy type. when using it for an 'expression' then yes. error[E0507]: cannot move out of `*cycles_transfer_purchase_log` which is behind a mutable reference
-// sending cycles to a canister is the same risk as sending icp to a canister. 
-// put a max_fee on a cycles-transfer-purchase & on a cycles-bank-purchase?
-// 5xdr first-time-user-fee, valid for one year. with 100mbs of storage for the year and standard-call-rate-limits. after the year, if the user doesn't pay for more space, the user-storage gets deleted and the user cycles balance and icp balance stays for another 3 years.
-// 0.1 GiB / 102.4 Mib / 107374182.4 bytes user-storage for the 1 year for the 5xdr. 
-
-// I think using the cycles_transferrer canister is a good way to do it.
-
-// choice for users to download a signed data canister-signature of past trassactions. 
-// choice for users to delete past transactions to re-claim storage-space  
-// if a user requested cycles-transfer call takes-more than half an hour to come back, the user is not refunded any cycles the callee does'nt take
-
-// user does the main operations through the user_canister.
-// the user-lock is on the user-canister
-
-// each method is a contract
-
-
-// icp transfers , 0.10-xdr / 14-cents flat fee
-
-
-// tegrate with the icscan.io
-
+// icp transfers , 0.05-xdr / 7-cents flat fee
 
 // 10 years save the user's-cycles-balance and icp-balance if the user-canister finishes.  
 
 // convert icp for the cycles as a service and send to a canister with the cycles_transfer-specification . for the users with a cts-user-contract.
 // when taking icp as a payment for a service, take the icp fee first , then do the service
-
-
-// the CTS can take (only) the CTS-governance-token for the payments for the cts-user-contracts. and burn them.
 
 // MANAGE-MEMBERSHIP page in the frontcode
 
@@ -1235,9 +1202,11 @@ pub struct UserBurnIcpMintCyclesData {
     lock: bool,
     user_burn_icp_mint_cycles_quest: UserBurnIcpMintCyclesQuest, 
     user_canister_id: UserCanisterId,
+    user_burn_icp_mint_cycles_fee: Cycles,
     cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
     cmc_cycles: Option<Cycles>,
-    call_user_canister: bool
+    call_user_canister_cycles_transfer_refund: Option<Cycles>,
+    call_management_canister_posit_cycles: bool
 }
 
 
@@ -1264,7 +1233,9 @@ pub enum UserBurnIcpMintCyclesError {
 #[derive(CandidType, Deserialize)]
 pub enum UserBurnIcpMintCyclesMidCallError {
     LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-    CallUserCanisterCallError((u32, String)),
+    CallUserCanisterCyclesTransferCandidEncodeError(String),
+    CallUserCanisterCallPerformError((u32, String)),
+    ManagementCanisterPositCyclesCallError((u32, String))
 }
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
@@ -1361,9 +1332,11 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, q: UserBurnIcpMintCyclesQue
                             lock: true,
                             user_burn_icp_mint_cycles_quest: q, 
                             user_canister_id,
+                            user_burn_icp_mint_cycles_fee: USER_BURN_ICP_MINT_CYCLES_FEE,
                             cmc_icp_transfer_block_height: None,
                             cmc_cycles: None,
-                            call_user_canister: false
+                            call_user_canister_cycles_transfer_refund: None,
+                            call_management_canister_posit_cycles: false
                         };
                         cts_data.users_burn_icp_mint_cycles.insert(user_id, user_burn_icp_mint_cycles_data.clone());
                         Ok(user_burn_icp_mint_cycles_data)
@@ -1401,18 +1374,58 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, q: UserBurnIcpMintCyclesQue
         }
     }
     
-    let user_burn_icp_mint_cycles_fee: Cycles = USER_BURN_ICP_MINT_CYCLES_FEE;
-    let cycles_for_the_user_canister: Cycles = user_burn_icp_mint_cycles_data.cmc_cycles.unwrap().checked_sub(USER_BURN_ICP_MINT_CYCLES_FEE).unwrap_or(user_burn_icp_mint_cycles_data.cmc_cycles.unwrap());
-    if user_burn_icp_mint_cycles_data.call_user_canister == false {
-        match call_with_payment128::<(CyclesTransfer,), ()>(
+    let cycles_for_the_user_canister: Cycles = user_burn_icp_mint_cycles_data.cmc_cycles.unwrap().checked_sub(user_burn_icp_mint_cycles_data.user_burn_icp_mint_cycles_fee).unwrap_or(user_burn_icp_mint_cycles_data.cmc_cycles.unwrap());
+    if user_burn_icp_mint_cycles_data.call_user_canister_cycles_transfer_refund.is_none() {
+        let mut cycles_transfer_call_future = call_raw128(
             user_burn_icp_mint_cycles_data.user_canister_id,
             "cycles_transfer",
-            (CyclesTransfer{
+            &match encode_one(CyclesTransfer{
                 memo: CyclesTransferMemo::Blob(b"CTS-BURN-ICP-MINT-CYCLES".to_vec())
-            },),
+            }) { 
+                Ok(b)=>b, 
+                Err(candid_error)=>{
+                    user_burn_icp_mint_cycles_data.lock = false;
+                    with_mut(&CTS_DATA, |cts_data| {
+                        match cts_data.users_burn_icp_mint_cycles.get_mut(&user_id) {
+                            Some(data) => { *data = user_burn_icp_mint_cycles_data; },
+                            None => {}
+                        }
+                    });
+                    return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallUserCanisterCyclesTransferCandidEncodeError(format!("{}", candid_error))));          
+                } 
+            },
             cycles_for_the_user_canister
+        );
+        
+        if let Poll::Ready(call_result_with_an_error) = futures::poll!(&mut cycles_transfer_call_future) {
+            let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
+            user_burn_icp_mint_cycles_data.lock = false;
+            with_mut(&CTS_DATA, |cts_data| {
+                match cts_data.users_burn_icp_mint_cycles.get_mut(&user_id) {
+                    Some(data) => { *data = user_burn_icp_mint_cycles_data; },
+                    None => {}
+                }
+            });
+            return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallUserCanisterCallPerformError((call_error.0 as u32, call_error.1))));    
+        }
+        
+        cycles_transfer_call_future.await; 
+        user_burn_icp_mint_cycles_data.call_user_canister_cycles_transfer_refund = Some(msg_cycles_refunded128());
+    }
+    
+    if user_burn_icp_mint_cycles_data.call_user_canister_cycles_transfer_refund.unwrap() != 0 
+    && user_burn_icp_mint_cycles_data.call_management_canister_posit_cycles == false {
+        match call_with_payment128::<(CanisterIdRecord,), ()>(
+            MANAGEMENT_CANISTER_ID,
+            "deposit_cycles",
+            (CanisterIdRecord{
+                canister_id: user_burn_icp_mint_cycles_data.user_canister_id 
+            },),
+            user_burn_icp_mint_cycles_data.call_user_canister_cycles_transfer_refund.unwrap()
         ).await {
-            Ok(()) => { user_burn_icp_mint_cycles_data.call_user_canister = true; },
+            Ok(_) => {
+                user_burn_icp_mint_cycles_data.call_management_canister_posit_cycles = true;
+            },
             Err(call_error) => {
                 user_burn_icp_mint_cycles_data.lock = false;
                 with_mut(&CTS_DATA, |cts_data| {
@@ -1421,19 +1434,26 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, q: UserBurnIcpMintCyclesQue
                         None => {}
                     }
                 });
-                return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallUserCanisterCallError((call_error.0 as u32, call_error.1))));
+                return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::ManagementCanisterPositCyclesCallError((call_error.0 as u32, call_error.1))));    
             }
         }
+    
     }
     
     with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
     Ok(UserBurnIcpMintCyclesSuccess{
         mint_cycles_for_the_user: cycles_for_the_user_canister,
-        cts_fee_taken: user_burn_icp_mint_cycles_fee 
+        cts_fee_taken: match user_burn_icp_mint_cycles_data.cmc_cycles.unwrap().checked_sub(user_burn_icp_mint_cycles_data.user_burn_icp_mint_cycles_fee) {
+            Some(_) => user_burn_icp_mint_cycles_data.user_burn_icp_mint_cycles_fee,
+            None => 0
+        }
     })
     
 }
 
+
+
+// ---------------------------------------
 
 
 
