@@ -1502,11 +1502,11 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, mut user_burn_icp_mint_cycl
 // ---------------------------------------
 
 #[derive(CandidType, Deserialize, Clone)]
-struct UserTransferIcpData{
+pub struct UserTransferIcpData{
     start_time_nanos: u64,
     lock: bool,
     user_transfer_icp_quest: UserTransferIcpQuest, 
-    cts_transfer_icp_fee: Option<IcpTokens>, // with the clude of the icp-ledger_transfer-fee for the cts-take-fee-transfer. 0.05 xdr base on the current rate
+    cts_transfer_icp_fee: Option<IcpTokens>, //:0.05-xdr with the base on the current-rate.
     icp_transfer_block_height: Option<IcpBlockHeight>,
     cts_fee_taken: bool,
 }
@@ -2301,7 +2301,7 @@ pub fn controller_see_new_users() {
 
 // put new user data
 #[update]
-pub fn put_new_user_data(new_user_id: UserId, put_data: NewUserData, override_lock: bool) {
+pub fn controller_put_new_user_data(new_user_id: UserId, put_data: NewUserData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2320,7 +2320,7 @@ pub fn put_new_user_data(new_user_id: UserId, put_data: NewUserData, override_lo
 }
 // remove new user
 #[update]
-pub fn remove_new_user(new_user_id: UserId, override_lock: bool) {
+pub fn controller_remove_new_user(new_user_id: UserId, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2339,7 +2339,7 @@ pub fn remove_new_user(new_user_id: UserId, override_lock: bool) {
 
 // complete new users
 #[update]
-pub async fn complete_new_users(opt_complete_new_users_ids: Option<Vec<UserId>>,) -> Vec<(UserId, Result<NewUserSuccess, CompleteNewUserError>)> {
+pub async fn controller_complete_new_users(opt_complete_new_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<NewUserSuccess, CompleteNewUserError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2348,7 +2348,14 @@ pub async fn complete_new_users(opt_complete_new_users_ids: Option<Vec<UserId>>,
         Some(complete_new_users_ids) => complete_new_users_ids,
         None => {
             with(&CTS_DATA, |cts_data| { 
-                cts_data.new_users.keys().map(|new_user_id_ref: &UserId| { (*new_user_id_ref).clone() }).collect::<Vec<UserId>>() 
+                cts_data.new_users.iter()
+                .filter(|&(_user_id, new_user_data): &(&UserId, &NewUserData)| {
+                    new_user_data.lock == false
+                })
+                .map(|(user_id, _new_user_data): (&UserId, &NewUserData)| {
+                    user_id.clone()
+                })
+                .collect::<Vec<UserId>>() 
             })
         }
     };
@@ -2382,7 +2389,7 @@ pub fn controller_see_users_burn_icp_mint_cycles() {
 }
 
 #[update]
-pub fn put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: UserBurnIcpMintCyclesData, override_lock: bool) {
+pub fn controller_put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: UserBurnIcpMintCyclesData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2401,7 +2408,7 @@ pub fn put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: UserBurnIcp
 }
 
 #[update]
-pub fn remove_user_burn_icp_mint_cycles(user_id: UserId, override_lock: bool) {
+pub fn controller_remove_user_burn_icp_mint_cycles(user_id: UserId, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2420,7 +2427,7 @@ pub fn remove_user_burn_icp_mint_cycles(user_id: UserId, override_lock: bool) {
 
 
 #[update]
-pub async fn complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<UserId>>,) -> Vec<(UserId, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)> {
+pub async fn controller_complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2429,7 +2436,14 @@ pub async fn complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<
         Some(complete_users_ids) => complete_users_ids,
         None => {
             with(&CTS_DATA, |cts_data| { 
-                cts_data.users_burn_icp_mint_cycles.keys().map(|user_id| { user_id.clone() }).collect::<Vec<UserId>>()
+                cts_data.users_burn_icp_mint_cycles.iter()
+                .filter(|&(_user_id, user_burn_icp_mint_cycles_data): &(&UserId, &UserBurnIcpMintCyclesData)| {
+                    user_burn_icp_mint_cycles_data.lock == false
+                })
+                .map(|(user_id, _user_burn_icp_mint_cycles_data): (&UserId, &UserBurnIcpMintCyclesData)| {
+                    user_id.clone()
+                })
+                .collect::<Vec<UserId>>()
             })
         }
     };
@@ -2445,6 +2459,94 @@ pub async fn complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<
     complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(UserId, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)>>()
 
 }
+
+
+
+// ------ UsersTransferIcp-METHODS -----------------
+
+
+#[export_name = "canister_query controller_see_users_transfer_icp"]
+pub fn controller_see_users_transfer_icp() {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    with(&CTS_DATA, |cts_data| {
+        ic_cdk::api::call::reply::<(Vec<(&UserId, &UserTransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&UserId, &UserTransferIcpData)>>(),));
+    });
+}
+
+#[update]
+pub fn controller_put_user_transfer_icp_data(user_id: UserId, put_data: UserTransferIcpData, override_lock: bool) {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        if let Some(user_transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
+            if user_transfer_icp_data.lock == true {
+                if override_lock == false {
+                    trap("user is with the lock == true in the users_transfer_icp. set the override_lock flag if want override.")
+                }
+            }
+        }
+        cts_data.users_transfer_icp.insert(user_id, put_data);
+    });
+
+}
+
+#[update]
+pub fn controller_remove_user_transfer_icp(user_id: UserId, override_lock: bool) {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        if let Some(user_transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
+            if user_transfer_icp_data.lock == true {
+                if override_lock == false {
+                    trap("user is with the lock == true in the users_transfer_icp. set the override_lock flag if want override.")
+                }
+            }
+        }
+        cts_data.users_transfer_icp.remove(&user_id);
+    });
+}
+
+
+#[update]
+pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<IcpBlockHeight, CompleteUserTransferIcpError>)> {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+
+    let complete_users_ids: Vec<UserId> = match opt_complete_users_ids {
+        Some(complete_users_ids) => complete_users_ids,
+        None => {
+            with(&CTS_DATA, |cts_data| { 
+                cts_data.users_transfer_icp.iter()
+                .filter(|&(_user_id, user_transfer_icp_data): &(&UserId, &UserTransferIcpData)| {
+                    user_transfer_icp_data.lock == false
+                })
+                .map(|(user_id, _user_transfer_icp_data): (&UserId, &UserTransferIcpData)| {
+                    user_id.clone()
+                })
+                .collect::<Vec<UserId>>()
+            })
+        }
+    };
+    
+    let rs: Vec<Result<IcpBlockHeight, CompleteUserTransferIcpError>> = futures::future::join_all(
+        complete_users_ids.iter().map(
+            |complete_user_id: &UserId| {
+                complete_user_transfer_icp_(complete_user_id.clone())
+            }
+        ).collect::<Vec<_>>()
+    ).await;
+    
+    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(UserId, Result<IcpBlockHeight, CompleteUserTransferIcpError>)>>()
+
+}
+
 
 
 
