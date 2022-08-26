@@ -9,7 +9,7 @@ use cts_lib::{
             canister_balance128,
             performance_counter,
             call::{
-                call,
+                call_with_payment128,
                 call_raw128,
                 CallResult,
                 arg_data,
@@ -56,6 +56,9 @@ use cts_lib::{
             TransferCyclesQuest,
             TransferCyclesError,
             TransferCyclesCallbackQuest
+        },
+        management_canister::{
+            CanisterIdRecord
         }
     },
     tools::{
@@ -73,6 +76,7 @@ use cts_lib::{
     },
     consts::{
         WASM_PAGE_SIZE_BYTES,
+        MANAGEMENT_CANISTER_ID,
     }
 };
 use std::cell::{Cell, RefCell};
@@ -83,10 +87,11 @@ type CyclesTransferRefund = Cycles;
 
 #[derive(CandidType, Deserialize)]
 pub struct TryTransferCyclesCallback { 
-    call_error_of_the_last_try: (RejectionCode, String)/*the call-error of the last try*/, 
+    original_caller_canister_id: Principal,
     transfer_cycles_callback_quest: TransferCyclesCallbackQuest, 
     cycles_transfer_refund: CyclesTransferRefund,
-    try_number: u32
+    try_number: u32,
+    call_error_of_the_last_try: (RejectionCode, String)/*the call-error of the last try*/
 }
 
 
@@ -212,6 +217,8 @@ fn cts_id() -> Principal {
 #[update(manual_reply = true)]
 pub async fn transfer_cycles() {
     
+    let original_caller_canister_id: Principal = caller();
+    
     if get(&STOP_CALLS) == true {
         trap("Maintenance. try later.")
     }
@@ -236,7 +243,7 @@ pub async fn transfer_cycles() {
     let cycles_transfer_candid: Vec<u8> = match candid::utils::encode_one(
         &CyclesTransfer{ 
             memo: q.cycles_transfer_memo,
-            original_caller: Some(caller())
+            original_caller: Some(original_caller_canister_id)
         }
     ) {
         Ok(candid_bytes) => candid_bytes,    
@@ -285,6 +292,7 @@ pub async fn transfer_cycles() {
     
     // we make a new call here because we already replied to the transfer_cycles-caller before the cycles_transfer call.
     do_transfer_cycles_callback(
+        original_caller_canister_id,
         TransferCyclesCallbackQuest{
             user_cycles_transfer_id: q.user_cycles_transfer_id,
             opt_cycles_transfer_call_error
@@ -296,7 +304,7 @@ pub async fn transfer_cycles() {
 }
 
 
-async fn do_transfer_cycles_callback(transfer_cycles_callback_quest: TransferCyclesCallbackQuest, cycles_transfer_refund: CyclesTransferRefund, try_number: u32) {
+async fn do_transfer_cycles_callback(original_caller_canister_id: Principal, transfer_cycles_callback_quest: TransferCyclesCallbackQuest, cycles_transfer_refund: CyclesTransferRefund, try_number: u32) {
     
     let transfer_cycles_callback_quest_cb_result = candid::utils::encode_one(&transfer_cycles_callback_quest); // before the move into the closure.
     
@@ -308,48 +316,65 @@ async fn do_transfer_cycles_callback(transfer_cycles_callback_quest: TransferCyc
         with_mut(&CTC_DATA, |ctc_data| {
             ctc_data.try_transfer_cycles_callbacks.push(
                 TryTransferCyclesCallback { 
-                    call_error_of_the_last_try: transfer_cycles_callback_call_error, 
+                    original_caller_canister_id,
                     transfer_cycles_callback_quest, 
                     cycles_transfer_refund,
-                    try_number: try_n
+                    try_number: try_n,
+                    call_error_of_the_last_try: transfer_cycles_callback_call_error,
                 }
             );             
         });
     };
     
-    let transfer_cycles_callback_quest_cb: Vec<u8> = match transfer_cycles_callback_quest_cb_result {
-        Ok(b) => b,
-        Err(candid_error) => {
-            log_try((RejectionCode::Unknown, format!("candid code TransferCyclesCallbackQuest error: {:?}", candid_error)), try_number);
-            return;
-        }
-    };
-
-    let mut transfer_cycles_callback_call_future = call_raw128(
-        cts_id(),
-        "cycles_transferrer_transfer_cycles_callback",
-        &transfer_cycles_callback_quest_cb,
-        cycles_transfer_refund
-    );
+    if try_number < 7 {
     
-    if let Poll::Ready(call_result) = futures::poll!(&mut transfer_cycles_callback_call_future) {
-        log_try(call_result.unwrap_err(), try_number);
-        return;
-    }
-    
-    match transfer_cycles_callback_call_future.await {
-        Ok(_) => {
-            g();
-        },
-        Err(transfer_cycles_callback_call_error) => {
-            if msg_cycles_refunded128() != cycles_transfer_refund {
-                g();
+        let transfer_cycles_callback_quest_cb: Vec<u8> = match transfer_cycles_callback_quest_cb_result {
+            Ok(b) => b,
+            Err(candid_error) => {
+                log_try((RejectionCode::Unknown, format!("candid code TransferCyclesCallbackQuest error: {:?}", candid_error)), try_number);
                 return;
             }
-            if try_number < 7 {
-                log_try(transfer_cycles_callback_call_error, try_number + 1);
-            } else {
+        };
+
+        let mut transfer_cycles_callback_call_future = call_raw128(
+            original_caller_canister_id,
+            "cycles_transferrer_transfer_cycles_callback",
+            &transfer_cycles_callback_quest_cb,
+            cycles_transfer_refund
+        );
+        
+        if let Poll::Ready(call_result) = futures::poll!(&mut transfer_cycles_callback_call_future) {
+            log_try(call_result.unwrap_err(), try_number);
+            return;
+        }
+        
+        match transfer_cycles_callback_call_future.await {
+            Ok(_) => {
                 g();
+            },
+            Err(transfer_cycles_callback_call_error) => {
+                if msg_cycles_refunded128() != cycles_transfer_refund {
+                    g();
+                    return;
+                }
+                log_try(transfer_cycles_callback_call_error, try_number + 1);
+            }
+        }
+       
+    } else {
+        match call_with_payment128::<(CanisterIdRecord,),()>(
+            MANAGEMENT_CANISTER_ID,
+            "deposit_cycles",
+            (CanisterIdRecord{
+                canister_id: original_caller_canister_id
+            },),
+            cycles_transfer_refund
+        ).await {
+            Ok(()) => {
+                g();
+            },
+            Err(call_error) => {
+                log_try(call_error, try_number + 1);
             }
         }
     }
@@ -369,6 +394,7 @@ pub async fn cts_do_try_transfer_cycles_callbacks() {
             ctc_data.try_transfer_cycles_callbacks.drain(..).map(
                 |try_transfer_cycles_callback: TryTransferCyclesCallback| {
                     do_transfer_cycles_callback(
+                        try_transfer_cycles_callback.original_caller_canister_id,
                         try_transfer_cycles_callback.transfer_cycles_callback_quest, 
                         try_transfer_cycles_callback.cycles_transfer_refund,
                         try_transfer_cycles_callback.try_number

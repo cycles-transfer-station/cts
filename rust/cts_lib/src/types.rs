@@ -338,9 +338,144 @@ pub mod user_canister {
         pub cycles_transfer_memo: CyclesTransferMemo
     }
     
+}
+
+
+pub mod cycles_market {
+    use super::{CandidType, Deserialize, Cycles, XdrPerMyriadPerIcp};
+    use crate::ic_ledger_types::{IcpTokens, IcpBlockHeight, IcpTransferError, IcpId};
     
+    pub type PositionId = u128;
+    pub type PurchaseId = u128;
     
-    
+    #[derive(CandidType, Deserialize)]
+    pub struct CreateCyclesPositionQuest {
+        pub cycles: Cycles,
+        pub minimum_purchase: Cycles,
+        pub xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+        
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum CreateCyclesPositionError{
+        MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition,
+        MsgCyclesTooLow{ create_position_fee: Cycles },
+        CyclesMarketIsBusy,
+        CyclesMarketIsFull,
+        CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_cycles_position_for_a_bump: Cycles },
+        MinimumCyclesPosition(Cycles)   
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CreateCyclesPositionSuccess {
+        pub position_id: PositionId,
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CreateIcpPositionQuest {
+        pub icp: IcpTokens,
+        pub minimum_purchase: IcpTokens,
+        pub xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum CreateIcpPositionError {
+        MinimumPurchaseMustBeEqualOrLessThanTheIcpPosition,
+        MsgCyclesTooLow{ create_position_fee: Cycles },
+        CyclesMarketIsFull,
+        CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
+        CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
+        UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+        CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
+        MinimumIcpPosition(IcpTokens),
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CreateIcpPositionSuccess {
+        pub position_id: PositionId
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct PurchaseCyclesPositionQuest {
+        pub cycles_position_id: PositionId,
+        pub cycles: Cycles
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum PurchaseCyclesPositionError {
+        MsgCyclesTooLow{ purchase_position_fee: Cycles },
+        CyclesMarketIsBusy,
+        CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
+        CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
+        UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+        CyclesPositionNotFound,
+        CyclesPositionCyclesIsLessThanThePurchaseQuest{ cycles_position_cycles: Cycles },
+        CyclesPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ cycles_position_minimum_purchase: Cycles },
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct PurchaseCyclesPositionSuccess {
+        pub purchase_id: PurchaseId,
+    }
+
+    pub type PurchaseCyclesPositionResult = Result<PurchaseCyclesPositionSuccess, PurchaseCyclesPositionError>;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct PurchaseIcpPositionQuest {
+        pub icp_position_id: PositionId,
+        pub icp: IcpTokens
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum PurchaseIcpPositionError {
+        MsgCyclesTooLow{ purchase_position_fee: Cycles },
+        CyclesMarketIsBusy,
+        IcpPositionNotFound,
+        IcpPositionIcpIsLessThanThePurchaseQuest{ icp_position_icp: IcpTokens },
+        IcpPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ icp_position_minimum_purchase: IcpTokens }
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct PurchaseIcpPositionSuccess {
+        pub purchase_id: PurchaseId
+    }
+
+    pub type PurchaseIcpPositionResult = Result<PurchaseIcpPositionSuccess, PurchaseIcpPositionError>;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct VoidPositionQuest {
+        pub position_id: PositionId
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum VoidPositionError {
+        WrongCaller,
+        CyclesMarketIsBusy,
+        PositionNotFound,
+    }
+
+    pub type VoidPositionResult = Result<(), VoidPositionError>;
+
+    #[derive(CandidType, Deserialize)]
+    pub struct TransferIcpBalanceQuest {
+        pub icp: IcpTokens,
+        pub icp_fee: Option<IcpTokens>,
+        pub to: IcpId
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum TransferIcpBalanceError {
+        MsgCyclesTooLow{ transfer_icp_balance_fee: Cycles },
+        CyclesMarketIsBusy,
+        CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
+        CheckUserCyclesMarketIcpLedgerBalanceCallError((u32, String)),
+        UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+        IcpTransferCallError((u32, String)),
+        IcpTransferError(IcpTransferError)
+    }
+
+    pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceError>;
+
 }
 
 

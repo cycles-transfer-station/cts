@@ -88,6 +88,7 @@ use cts_lib::{
         UserId,
         UserCanisterId,
         UsersMapCanisterId,
+        XdrPerMyriadPerIcp,
         cts,
         cycles_transferrer,
         user_canister::{
@@ -95,6 +96,7 @@ use cts_lib::{
             UserTransferCyclesQuest
         },
         management_canister,
+        cycles_market,
     },
     consts::{
         KiB,
@@ -111,7 +113,9 @@ use cts_lib::{
                 with, 
                 with_mut,
             }
-        }
+        },
+        icptokens_to_cycles,
+        cycles_to_icptokens
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -123,7 +127,7 @@ fn set_global_timer(seconds: u64) {
 // -------------------------------------------------------------------------
 
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize)]
 struct CyclesTransferIn {
     by_the_canister: Principal,
     cycles: Cycles,
@@ -131,7 +135,7 @@ struct CyclesTransferIn {
     timestamp_nanos: u64
 }
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize)]
 struct CyclesTransferOut {
     for_the_canister: Principal,
     cycles_sent: Cycles,
@@ -142,7 +146,7 @@ struct CyclesTransferOut {
     fee_paid: u64 // cycles_transferrer_fee
 }
 
-
+#[derive(CandidType, Deserialize)]
 struct CMCyclesPosition{
     id: cycles_market::PositionId,   
     cycles: Cycles,
@@ -152,6 +156,7 @@ struct CMCyclesPosition{
     timestamp_nanos: u64,
 }
 
+#[derive(CandidType, Deserialize)]
 struct CMIcpPosition{
     id: cycles_market::PositionId,   
     icp: IcpTokens,
@@ -161,6 +166,7 @@ struct CMIcpPosition{
     timestamp_nanos: u64,
 }
 
+#[derive(CandidType, Deserialize)]
 struct CMCyclesPositionPurchase{
     cycles_position_id: cycles_market::PositionId,
     cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
@@ -170,6 +176,7 @@ struct CMCyclesPositionPurchase{
     timestamp_nanos: u64,
 }
 
+#[derive(CandidType, Deserialize)]
 struct CMIcpPositionPurchase{
     icp_position_id: cycles_market::PositionId,
     icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
@@ -179,6 +186,7 @@ struct CMIcpPositionPurchase{
     timestamp_nanos: u64,
 }
 
+#[derive(CandidType, Deserialize)]
 struct CMIcpTransferOut{
     icp: IcpTokens,
     icp_fee: Option<IcpTokens>,
@@ -189,8 +197,7 @@ struct CMIcpTransferOut{
 }
 
 
-
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize)]
 struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<(u64,CyclesTransferIn)>,
@@ -910,7 +917,7 @@ pub fn user_delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u64
 
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCMCreateCyclesPositionError {
     UserCanisterCTSFuelTooLow,
     UserCanisterMemoryIsFull,
@@ -921,7 +928,7 @@ pub enum UserCMCreateCyclesPositionError {
 
 
 #[update]
-pub fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
+pub async fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -938,13 +945,13 @@ pub fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesP
         return Err(UserCMCreateCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
 
-    match call_with_payment128::<(cycles_market::CreateCyclesPositionQuest,), (Result<cycles_market::CreateCyclesPositionSuccess, cycles_market::CreateCyclesPositionError>,)>(
+    match call_with_payment128::<(&cycles_market::CreateCyclesPositionQuest,), (Result<cycles_market::CreateCyclesPositionSuccess, cycles_market::CreateCyclesPositionError>,)>(
         with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "create_cycles_position",
-        (q.clone(),),
+        (&q/*.clone()*/,),
         q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE
     ).await {
-        Ok(cm_create_cycles_position_result) => match cm_create_cycles_position_result {
+        Ok((cm_create_cycles_position_result,)) => match cm_create_cycles_position_result {
             Ok(cm_create_cycles_position_success) => {
                 with_mut(&UC_DATA, |uc_data| {
                     uc_data.user_data.cm_cycles_positions.push(
@@ -976,7 +983,7 @@ pub fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesP
 // ------------
 
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCMCreateIcpPositionError {
     UserCanisterCTSFuelTooLow,
     UserCanisterMemoryIsFull,
@@ -987,7 +994,7 @@ pub enum UserCMCreateIcpPositionError {
 
 
 #[update]
-pub fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
+pub async fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1004,13 +1011,13 @@ pub fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositio
         return Err(UserCMCreateIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
 
-    match call_with_payment128::<(cycles_market::CreateIcpPositionQuest,), (Result<cycles_market::CreateIcpPositionSuccess, cycles_market::CreateIcpPositionError>,)>(
+    match call_with_payment128::<(&cycles_market::CreateIcpPositionQuest,), (Result<cycles_market::CreateIcpPositionSuccess, cycles_market::CreateIcpPositionError>,)>(
         with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "create_icp_position",
-        (q.clone(),),
+        (&q,),
         CYCLES_MARKET_CREATE_POSITION_FEE
     ).await {
-        Ok(cm_create_icp_position_result) => match cm_create_icp_position_result {
+        Ok((cm_create_icp_position_result,)) => match cm_create_icp_position_result {
             Ok(cm_create_icp_position_success) => {
                 with_mut(&UC_DATA, |uc_data| {
                     uc_data.user_data.cm_icp_positions.push(
@@ -1041,11 +1048,13 @@ pub fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositio
 
 // --------------
 
+#[derive(CandidType, Deserialize)]
 pub struct UserCMPurchaseCyclesPositionQuest {
     cycles_market_purchase_cycles_position_quest: cycles_market::PurchaseCyclesPositionQuest,
-    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcpRate // for the user_canister-log
+    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp // for the user_canister-log
 }
 
+#[derive(CandidType, Deserialize)]
 pub enum UserCMPurchaseCyclesPositionError {
     UserCanisterCTSFuelTooLow,
     UserCanisterMemoryIsFull,
@@ -1056,7 +1065,7 @@ pub enum UserCMPurchaseCyclesPositionError {
 
 
 #[update]
-pub fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
+pub async fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1073,13 +1082,13 @@ pub fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositi
         return Err(UserCMPurchaseCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
 
-    match call_with_payment128::<(cycles_market::PurchaseCyclesPositionQuest,), (Result<cycles_market::PurchaseCyclesPositionSuccess, cycles_market::PurchaseCyclesPositionError>,)>(
+    match call_with_payment128::<(&cycles_market::PurchaseCyclesPositionQuest,), (Result<cycles_market::PurchaseCyclesPositionSuccess, cycles_market::PurchaseCyclesPositionError>,)>(
         with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "purchase_cycles_position",
-        (q.cycles_market_purchase_cycles_position_quest.clone(),),
+        (&q.cycles_market_purchase_cycles_position_quest,),
         CYCLES_MARKET_PURCHASE_POSITION_FEE
     ).await {
-        Ok(cm_purchase_cycles_position_result) => match cm_purchase_cycles_position_result {
+        Ok((cm_purchase_cycles_position_result,)) => match cm_purchase_cycles_position_result {
             Ok(cm_purchase_cycles_position_success) => {
                 with_mut(&UC_DATA, |uc_data| {
                     uc_data.user_data.cm_cycles_positions_purchases.push(
@@ -1109,12 +1118,13 @@ pub fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositi
 
 // ---------------
 
-
+#[derive(CandidType, Deserialize)]
 pub struct UserCMPurchaseIcpPositionQuest {
     cycles_market_purchase_icp_position_quest: cycles_market::PurchaseIcpPositionQuest,
-    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcpRate // for the user_canister-log
+    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp // for the user_canister-log
 }
 
+#[derive(CandidType, Deserialize)]
 pub enum UserCMPurchaseIcpPositionError {
     UserCanisterCTSFuelTooLow,
     UserCanisterMemoryIsFull,
@@ -1125,7 +1135,7 @@ pub enum UserCMPurchaseIcpPositionError {
 
 
 #[update]
-pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
+pub async fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1142,13 +1152,13 @@ pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQues
         return Err(UserCMPurchaseIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
 
-    match call_with_payment128::<(cycles_market::PurchaseIcpPositionQuest,), (Result<cycles_market::PurchaseIcpPositionSuccess, cycles_market::PurchaseIcpPositionError>,)>(
+    match call_with_payment128::<(&cycles_market::PurchaseIcpPositionQuest,), (Result<cycles_market::PurchaseIcpPositionSuccess, cycles_market::PurchaseIcpPositionError>,)>(
         with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "purchase_icp_position",
-        (q.cycles_market_purchase_icp_position_quest.clone(),),
+        (&q.cycles_market_purchase_icp_position_quest,),
         CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate)
     ).await {
-        Ok(cm_purchase_icp_position_result) => match cm_purchase_icp_position_result {
+        Ok((cm_purchase_icp_position_result,)) => match cm_purchase_icp_position_result {
             Ok(cm_purchase_icp_position_success) => {
                 with_mut(&UC_DATA, |uc_data| {
                     uc_data.user_data.cm_icp_positions_purchases.push(
@@ -1178,6 +1188,7 @@ pub fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQues
 
 // ---------------------
 
+#[derive(CandidType, Deserialize)]
 pub enum UserCMVoidPositionError {
     UserCanisterCTSFuelTooLow,
     CyclesMarketVoidPositionCallError((u32, String)),
@@ -1186,7 +1197,7 @@ pub enum UserCMVoidPositionError {
 
 
 #[update]
-pub fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+pub async fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1200,7 +1211,7 @@ pub fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> 
         "void_position",
         (q,)
     ).await {
-        Ok(cm_void_position_result) => match cm_void_position_result {
+        Ok((cm_void_position_result,)) => match cm_void_position_result {
             Ok(()) => Ok(()),
             Err(cm_void_position_error) => {
                 return Err(UserCMVoidPositionError::CyclesMarketVoidPositionError(cm_void_position_error));
@@ -1217,14 +1228,14 @@ pub fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> 
 
 // -------
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCMSeeIcpLockError {
     UserCanisterCTSFuelTooLow,
     CyclesMarketSeeIcpLockCallError((u32, String)),
 }
 
 #[update]
-pub fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
+pub async fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1238,7 +1249,7 @@ pub fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockEr
         "see_icp_lock",
         ()
     ).await {
-        Ok(icp_tokens) => Ok(icp_tokens),
+        Ok((icp_tokens,)) => Ok(icp_tokens),
         Err(call_error) => {
             return Err(UserCMSeeIcpLockError::CyclesMarketSeeIcpLockCallError((call_error.0 as u32, call_error.1)));
         }
@@ -1248,7 +1259,7 @@ pub fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockEr
 
 // -------
 
-
+#[derive(CandidType, Deserialize)]
 pub enum UserCMTransferIcpBalanceError {
     UserCanisterCTSFuelTooLow,
     UserCanisterMemoryIsFull,
@@ -1275,16 +1286,16 @@ pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferI
         return Err(UserCMTransferIcpBalanceError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
     }
 
-    match call_with_payment128::<(cycles_market::TransferIcpBalanceQuest,), (Result<IcpBlockHeight, cycles_market::TransferIcpBalanceError>,)>(
+    match call_with_payment128::<(&cycles_market::TransferIcpBalanceQuest,), (Result<IcpBlockHeight, cycles_market::TransferIcpBalanceError>,)>(
         with(&UC_DATA, |uc_data| { uc_data.cycles_market_id }),
         "transfer_icp_balance",
-        (q.clone(),),
+        (&q,),
         CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE
     ).await {
-        Ok(cm_transfer_icp_balance_result) => match cm_transfer_icp_balance_result {
+        Ok((cm_transfer_icp_balance_result,)) => match cm_transfer_icp_balance_result {
             Ok(block_height) => {
                 with_mut(&UC_DATA, |uc_data| {
-                    uc_data.user_data.icp_transfers_out.push(
+                    uc_data.user_data.cm_icp_transfers_out.push(
                         CMIcpTransferOut{
                             icp: q.icp,
                             icp_fee: q.icp_fee,
@@ -1302,7 +1313,7 @@ pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferI
             }
         },
         Err(call_error) => {
-            return Err(UserCMTransferIcpBalanceError::CyclesMarketTransferIcpBalanceCallError((call_error.0 as u32, call_error.1));
+            return Err(UserCMTransferIcpBalanceError::CyclesMarketTransferIcpBalanceCallError((call_error.0 as u32, call_error.1)));
         }
     }
 
@@ -1637,7 +1648,7 @@ pub struct UserUCMetrics {
     cycles_transfers_in_len: u64,
     storage_usage: u64,
     user_download_cycles_transfers_in_chunk_size: u64,
-    user_download_cycles_transfers_out_chunk_size: u64
+    user_download_cycles_transfers_out_chunk_size: u64,
     cm_cycles_positions_len: u64,
     cm_icp_positions_len: u64,
     cm_cycles_positions_purchases_len: u64,

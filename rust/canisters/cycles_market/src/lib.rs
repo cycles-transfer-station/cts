@@ -27,8 +27,7 @@ use cts_lib::{
         XdrPerMyriadPerIcp,
         cycles_transferrer,
         management_canister,
-        
-        
+        cycles_market::*,
     },
     ic_ledger_types::{
         IcpTransferError,
@@ -96,9 +95,6 @@ use cts_lib::{
 // on a cycles-payout, the cycles-market will try once to send the cycles with a cycles_transfer-method call and if it fails, the cycles-market will use the deposit_cycles management canister method and close the position.
 
 // make sure the positors and purchaser are secret and hidden. public-data is the position-id, the commodity, the minimum purchase, and the rate, (and the timestamp? no that makes it traceable)
-
-type PositionId = u128;
-type PurchaseId = u128;
 
 type VoidCyclesPositionId = PositionId;
 type CyclesPositionPurchaseId = PurchaseId;
@@ -854,29 +850,7 @@ async fn do_payouts() {
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct CreateCyclesPositionQuest {
-    cycles: Cycles,
-    minimum_purchase: Cycles,
-    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
-    
-}
 
-#[derive(CandidType, Deserialize)]
-pub enum CreateCyclesPositionError{
-    MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition,
-    MsgCyclesTooLow{ create_position_fee: Cycles },
-    CyclesMarketIsBusy,
-    CyclesMarketIsFull,
-    CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_cycles_position_for_a_bump: Cycles },
-    MinimumCyclesPosition(Cycles),
-    
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct CreateCyclesPositionSuccess {
-    position_id: PositionId,
-}
 
 #[update(manual_reply = true)]
 pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result<CreateCyclesPositionSuccess, CreateCyclesPositionError> {
@@ -1005,31 +979,6 @@ pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result
 
 // ------------------
 
-
-#[derive(CandidType, Deserialize)]
-pub struct CreateIcpPositionQuest {
-    icp: IcpTokens,
-    minimum_purchase: IcpTokens,
-    xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum CreateIcpPositionError {
-    MinimumPurchaseMustBeEqualOrLessThanTheIcpPosition,
-    MsgCyclesTooLow{ create_position_fee: Cycles },
-    CyclesMarketIsFull,
-    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
-    CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
-    UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
-    CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
-    MinimumIcpPosition(IcpTokens),
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct CreateIcpPositionSuccess {
-    position_id: PositionId
-
-}
 
 
 #[update(manual_reply = true)]
@@ -1181,31 +1130,6 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
 
 // ------------------
 
-
-#[derive(CandidType, Deserialize)]
-pub struct PurchaseCyclesPositionQuest {
-    cycles_position_id: PositionId,
-    cycles: Cycles
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum PurchaseCyclesPositionError {
-    MsgCyclesTooLow{ purchase_position_fee: Cycles },
-    CyclesMarketIsBusy,
-    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
-    CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
-    UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
-    CyclesPositionNotFound,
-    CyclesPositionCyclesIsLessThanThePurchaseQuest{ cycles_position_cycles: Cycles },
-    CyclesPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ cycles_position_minimum_purchase: Cycles },
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct PurchaseCyclesPositionSuccess {
-    purchase_id: PurchaseId,
-}
-
-pub type PurchaseCyclesPositionResult = Result<PurchaseCyclesPositionSuccess, PurchaseCyclesPositionError>;
 
 #[update(manual_reply = true)]
 pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Result<PurchaseCyclesPositionSuccess, PurchaseCyclesPositionError>
@@ -1371,28 +1295,6 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
 // -------------------
 
 
-#[derive(CandidType, Deserialize)]
-pub struct PurchaseIcpPositionQuest {
-    icp_position_id: PositionId,
-    icp: IcpTokens
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum PurchaseIcpPositionError {
-    MsgCyclesTooLow{ purchase_position_fee: Cycles },
-    CyclesMarketIsBusy,
-    IcpPositionNotFound,
-    IcpPositionIcpIsLessThanThePurchaseQuest{ icp_position_icp: IcpTokens },
-    IcpPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ icp_position_minimum_purchase: IcpTokens },
-
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct PurchaseIcpPositionSuccess {
-    purchase_id: PurchaseId
-}
-
-pub type PurchaseIcpPositionResult = Result<PurchaseIcpPositionSuccess, PurchaseIcpPositionError>;
 
 #[update(manual_reply = true)]
 pub async fn purchase_icp_position(q: PurchaseIcpPositionQuest) {
@@ -1493,20 +1395,6 @@ pub async fn purchase_icp_position(q: PurchaseIcpPositionQuest) {
 // --------------------------
 
 
-#[derive(CandidType, Deserialize)]
-pub struct VoidPositionQuest {
-    position_id: PositionId
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum VoidPositionError {
-    WrongCaller,
-    CyclesMarketIsBusy,
-    PositionNotFound,
-}
-
-pub type VoidPositionResult = Result<(), VoidPositionError>;
-
 
 #[update(manual_reply = true)]
 pub async fn void_position(q: VoidPositionQuest) {
@@ -1565,26 +1453,6 @@ pub fn see_icp_lock() -> IcpTokens {
 
 // ----------------
 
-
-#[derive(CandidType, Deserialize)]
-pub struct TransferIcpBalanceQuest {
-    icp: IcpTokens,
-    icp_fee: Option<IcpTokens>,
-    to: IcpId
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum TransferIcpBalanceError {
-    MsgCyclesTooLow{ transfer_icp_balance_fee: Cycles },
-    CyclesMarketIsBusy,
-    CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
-    CheckUserCyclesMarketIcpLedgerBalanceCallError((u32, String)),
-    UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
-    IcpTransferCallError((u32, String)),
-    IcpTransferError(IcpTransferError)
-}
-
-pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceError>;
 
 #[update(manual_reply = true)]
 pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
