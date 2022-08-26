@@ -34,9 +34,6 @@ pub type XdrPerMyriadPerIcp = u64;
 
 
 
-
-
-
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
     Nat(u128),
@@ -48,59 +45,6 @@ pub enum CyclesTransferMemo {
 pub struct CyclesTransfer {
     pub memo: CyclesTransferMemo
 }
-
-
-
-
-
-
-
-
-
-
-
-// repr(packed) ?
-#[derive(CandidType, Deserialize, Copy, Clone, serde::Serialize)]
-pub struct UserLock {
-    lock: bool,
-    last_lock_time_nanos: u64 
-}
-impl UserLock {
-    pub fn new() -> Self {
-        Self {
-            lock: false,
-            last_lock_time_nanos: 0
-        }
-    }
-    
-    pub const MAX_LOCK_TIME_NANOS: u64 =  30 * 60 * 1_000_000_000;
-    
-    pub fn is_lock_on(&self) -> bool {
-        self.lock && time() - self.last_lock_time_nanos <= Self::MAX_LOCK_TIME_NANOS
-    }
-    pub fn lock(&mut self) {
-        self.lock = true;
-        self.last_lock_time_nanos = time();
-    }
-    pub fn unlock(&mut self) {
-        self.lock = false;
-    }
-    
-    pub const SERIALIZE_SIZE: usize = 9;
-    pub fn serialize(&self) -> [u8; Self::SERIALIZE_SIZE] {
-        let mut b: [u8; Self::SERIALIZE_SIZE] = [0; Self::SERIALIZE_SIZE];
-        b[0] = if self.lock { 1 } else { 0 };
-        b[1..9].copy_from_slice(&self.last_lock_time_nanos.to_be_bytes());
-        b
-    }
-    pub fn backwards(b: &[u8; Self::SERIALIZE_SIZE]) -> Result<Self, String> {
-        Ok(Self {
-            lock: match b[0] { 1 => true, 0 => false, _ => return Err("unknown lock byte".to_string()) },
-            last_lock_time_nanos: u64::from_be_bytes((&b[1..9]).try_into().unwrap())
-        })
-    }
-}
-
 
 
 
@@ -183,10 +127,13 @@ pub mod user_canister_cache {
             self.hashmap.insert(user_id, UserCacheData{ opt_user_canister_id, timestamp_nanos: time() });
         }
         
-        pub fn check(&self, user_id: UserId) -> Option<Option<UserCanisterId>> {
-            match self.hashmap.get(&user_id) {
+        pub fn check(&mut self, user_id: UserId) -> Option<Option<UserCanisterId>> {
+            match self.hashmap.get_mut(&user_id) {
                 None => None,
-                Some(user_cache_data) => Some(user_cache_data.opt_user_canister_id)
+                Some(user_cache_data) => {
+                    user_cache_data.timestamp_nanos = time();
+                    Some(user_cache_data.opt_user_canister_id)
+                }
             }
         }
     }

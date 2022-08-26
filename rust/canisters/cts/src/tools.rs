@@ -9,7 +9,6 @@ use crate::{
 //use candid::{CandidType,Deserialize};
 use cts_lib::{
     types::{
-        UserLock,
         canister_code::CanisterCode,
         Cycles,
         users_map_canister::{
@@ -123,7 +122,7 @@ pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallRe
             fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
             from_subaccount: Some(principal_icp_subaccount(user_id)),
             to: main_cts_icp_id(),
-            created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
+            created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
         }
     ).await
 }
