@@ -4,8 +4,8 @@
 members = [
     "cts_lib",
     "canisters/cts",
-    "canisters/users_map_canister",
-    "canisters/user_canister",
+    "canisters/cbs_map",
+    "canisters/cycles_bank",
     "canisters/cycles_transferrer",
     "canisters/cycles_market",
     

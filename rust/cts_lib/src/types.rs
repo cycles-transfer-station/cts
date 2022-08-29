@@ -23,9 +23,6 @@ use crate::{
 pub type Cycles = u128;
 pub type CyclesTransferRefund = Cycles;
 pub type CTSFuel = Cycles;
-pub type UserId = Principal;
-pub type UserCanisterId = Principal;
-pub type UsersMapCanisterId = Principal;
 pub type XdrPerMyriadPerIcp = u64;
 
 
@@ -86,26 +83,26 @@ pub mod canister_code {
 
 
 
-pub mod user_canister_cache {
-    use super::{UserId, UserCanisterId, time};
+pub mod cycles_banks_cache {
+    use super::{Principal, time};
     use std::collections::{HashMap};
     
     // private
     #[derive(Clone, Copy)]
-    struct UserCacheData {
+    struct CBCacheData {
         timestamp_nanos: u64,
-        opt_user_canister_id: Option<UserCanisterId>
+        opt_cycles_bank_canister_id: Option<Principal>
     }
 
     // cacha for this. with a max users->user-canisters
     // on a new user, put/update insert the new user into this cache
     // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
         
-    pub struct UserCanisterCache {
-        hashmap: HashMap<UserId, UserCacheData>,
+    pub struct CBSCache {
+        hashmap: HashMap<Principal, CBCacheData>,
         max_size: usize
     }
-    impl UserCanisterCache {
+    impl CBSCache {
         
         pub fn new(max_size: usize) -> Self {
             Self {
@@ -114,7 +111,7 @@ pub mod user_canister_cache {
             }
         }
         
-        pub fn put(&mut self, user_id: UserId, opt_user_canister_id: Option<UserCanisterId>) {
+        pub fn put(&mut self, user_id: Principal, opt_cycles_bank_canister_id: Option<Principal>) {
             if self.hashmap.len() >= self.max_size {
                 self.hashmap.remove(
                     &(self.hashmap.iter().min_by_key(
@@ -124,15 +121,15 @@ pub mod user_canister_cache {
                     ).unwrap().0.clone())
                 );
             }
-            self.hashmap.insert(user_id, UserCacheData{ opt_user_canister_id, timestamp_nanos: time() });
+            self.hashmap.insert(user_id, CBCacheData{ opt_cycles_bank_canister_id, timestamp_nanos: time() });
         }
         
-        pub fn check(&mut self, user_id: UserId) -> Option<Option<UserCanisterId>> {
+        pub fn check(&mut self, user_id: Principal) -> Option<Option<Principal>> {
             match self.hashmap.get_mut(&user_id) {
                 None => None,
                 Some(user_cache_data) => {
                     user_cache_data.timestamp_nanos = time();
-                    Some(user_cache_data.opt_user_canister_id)
+                    Some(user_cache_data.opt_cycles_bank_canister_id)
                 }
             }
         }
@@ -264,9 +261,9 @@ pub mod cts {
     use super::*;
     
     #[derive(CandidType, Deserialize)]
-    pub struct UserCanisterLifetimeTerminationQuest {
-        pub user_id: UserId,
-        pub user_cycles_balance: Cycles
+    pub struct CyclesBankLifetimeTerminationQuest {
+        pub user_id: Principal,
+        pub cycles_balance: Cycles
     }
     
 }
@@ -277,31 +274,31 @@ pub mod cts {
 
 
 
-pub mod users_map_canister {
+pub mod cbs_map {
     use super::*;
 
     #[derive(CandidType, Deserialize)]
-    pub struct UsersMapCanisterInit {
+    pub struct CBSMInit {
         pub cts_id: Principal
     }
 
     #[derive(CandidType, Deserialize, Clone)]    
-    pub struct UMCUserData {
-        pub user_canister_id: UserCanisterId,
-        pub user_canister_latest_known_module_hash: [u8; 32],
+    pub struct CBSMUserData {
+        pub cycles_bank_canister_id: Principal,
+        pub cycles_bank_latest_known_module_hash: [u8; 32],
     }
 
     #[derive(CandidType,Deserialize)]
     pub enum PutNewUserError {
         CanisterIsFull,
-        FoundUser(UMCUserData)
+        FoundUser(CBSMUserData)
     }
 
     
-    pub type UMCUpgradeUCError = (UserCanisterId, UMCUpgradeUCCallErrorType, (u32, String));
+    pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBCallErrorType, (u32, String));
 
     #[derive(CandidType, Deserialize, Clone, Debug)]
-    pub enum UMCUpgradeUCCallErrorType {
+    pub enum CBSMUpgradeCBCallErrorType {
         StopCanisterCallError,
         UpgradeCodeCallError{wasm_module_hash: [u8; 32]},
         StartCanisterCallError
@@ -318,16 +315,16 @@ pub mod users_map_canister {
 
 
 
-pub mod user_canister {
+pub mod cycles_bank {
     use super::*;
 
     #[derive(CandidType, Deserialize)]
-    pub struct UserCanisterInit {
-        pub user_id: UserId,
+    pub struct CyclesBankInit {
+        pub user_id: Principal,
         pub cts_id: Principal,
         pub cycles_market_id: Principal, 
-        pub user_canister_storage_size_mib: u64,                         
-        pub user_canister_lifetime_termination_timestamp_seconds: u64,
+        pub storage_size_mib: u64,                         
+        pub lifetime_termination_timestamp_seconds: u64,
         pub cycles_transferrer_canisters: Vec<Principal>
     }
     

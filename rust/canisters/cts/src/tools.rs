@@ -4,21 +4,18 @@ use std::collections::HashMap;
 use crate::{
     CTS_DATA,
     LATEST_KNOWN_CMC_RATE,
-    MAX_USERS_MAP_CANISTERS,
+    MAX_CBS_MAPS,
 };
 //use candid::{CandidType,Deserialize};
 use cts_lib::{
     types::{
         canister_code::CanisterCode,
         Cycles,
-        users_map_canister::{
-            UsersMapCanisterInit,
-            UMCUserData,
-            PutNewUserError as UsersMapCanisterPutNewUserError
+        cbs_map::{
+            CBSMInit,
+            CBSMUserData,
+            PutNewUserError as CBSMPutNewUserError
         },
-        UserId,
-        UserCanisterId,
-        UsersMapCanisterId,
         management_canister::{
             ManagementCanisterInstallCodeMode,
             ManagementCanisterInstallCodeQuest,
@@ -491,51 +488,51 @@ pub async fn ledger_topup_cycles_cmc_notify(cmc_icp_transfer_block_height: IcpBl
 
 
 #[derive(CandidType, Deserialize)]
-pub enum PutNewUserIntoAUsersMapCanisterError {
-    UsersMapCanisterPutNewUserCallFail(UsersMapCanisterId, String), // principal of the failiing users-map-canister
-    UsersMapCanisterPutNewUserError(UsersMapCanisterPutNewUserError),
-    CreateNewUsersMapCanisterError(CreateNewUsersMapCanisterError),
+pub enum PutNewUserIntoACBSMError {
+    CBSMPutNewUserCallFail(Principal, String), // principal of the failiing users-map-canister
+    CBSMPutNewUserError(CBSMPutNewUserError),
+    CreateNewCBSMError(CreateNewCBSMError),
     
 }
 
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
-pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, umc_user_data: UMCUserData) -> Result<UsersMapCanisterId, PutNewUserIntoAUsersMapCanisterError> {
+pub async fn put_new_user_into_a_cbsm(user_id: Principal, cbsm_user_data: CBSMUserData) -> Result<Principal, PutNewUserIntoACBSMError> {
     
-    for i in (0..with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.len() })).rev() {
-        let umc_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters[i] });
-        match call::<(UserId, UMCUserData), (Result<(), UsersMapCanisterPutNewUserError>,)>(
-            umc_id,
+    for i in (0..with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.len() })).rev() {
+        let cbsm_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.cbs_maps[i] });
+        match call::<(Principal, CBSMUserData), (Result<(), CBSMPutNewUserError>,)>(
+            cbsm_id,
             "put_new_user",
-            (user_id, umc_user_data.clone()),
+            (user_id, cbsm_user_data.clone()),
         ).await {
-            Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
-                Ok(()) => return Ok(umc_id),
-                Err(users_map_canister_put_new_user_error) => match users_map_canister_put_new_user_error {
-                    UsersMapCanisterPutNewUserError::CanisterIsFull => continue,
-                    _ => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error)) /*error can be that the user is already in the canister. the new_user function should have locked the user and checked for the user first before calling this function.  */
+            Ok((cbsm_put_new_user_sponse,)) => match cbsm_put_new_user_sponse {
+                Ok(()) => return Ok(cbsm_id),
+                Err(cbsm_put_new_user_error) => match cbsm_put_new_user_error {
+                    CBSMPutNewUserError::CanisterIsFull => continue,
+                    _ => return Err(PutNewUserIntoACBSMError::CBSMPutNewUserError(cbsm_put_new_user_error)) /*error can be that the user is already in the canister. the new_user function should have locked the user and checked for the user first before calling this function.  */
                 }
             },
-            Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, format!("{:?}", users_map_canister_put_new_user_call_fail))),
+            Err(cbsm_put_new_user_call_fail) => return Err(PutNewUserIntoACBSMError::CBSMPutNewUserCallFail(cbsm_id, format!("{:?}", cbsm_put_new_user_call_fail))),
         }
     }
     
-    // if each users_map_canister is full,
-    // create a new users_map_canister
-    let umc_id: UsersMapCanisterId = match create_new_users_map_canister().await {
-        Ok(new_users_map_canister_id) => new_users_map_canister_id,
-        Err(create_new_users_map_canister_error) => return Err(PutNewUserIntoAUsersMapCanisterError::CreateNewUsersMapCanisterError(create_new_users_map_canister_error))
+    // if each cbs_map is full,
+    // create a new cbs_map
+    let cbsm_id: Principal = match create_new_cbs_map().await {
+        Ok(new_cbs_map_canister_id) => new_cbs_map_canister_id,
+        Err(create_new_cbs_map_error) => return Err(PutNewUserIntoACBSMError::CreateNewCBSMError(create_new_cbs_map_error))
     };
     
-    match call::<(UserId, UMCUserData), (Result<(), UsersMapCanisterPutNewUserError>,)>(
-        umc_id,
+    match call::<(Principal, CBSMUserData), (Result<(), CBSMPutNewUserError>,)>(
+        cbsm_id,
         "put_new_user",
-        (user_id, umc_user_data),
+        (user_id, cbsm_user_data),
     ).await {
-        Ok((users_map_canister_put_new_user_sponse,)) => match users_map_canister_put_new_user_sponse {
-            Ok(()) => return Ok(umc_id),
-            Err(users_map_canister_put_new_user_error) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserError(users_map_canister_put_new_user_error))
+        Ok((cbsm_put_new_user_sponse,)) => match cbsm_put_new_user_sponse {
+            Ok(()) => return Ok(cbsm_id),
+            Err(cbsm_put_new_user_error) => return Err(PutNewUserIntoACBSMError::CBSMPutNewUserError(cbsm_put_new_user_error))
         },
-        Err(users_map_canister_put_new_user_call_fail) => return Err(PutNewUserIntoAUsersMapCanisterError::UsersMapCanisterPutNewUserCallFail(umc_id, format!("{:?}", users_map_canister_put_new_user_call_fail))),
+        Err(cbsm_put_new_user_call_fail) => return Err(PutNewUserIntoACBSMError::CBSMPutNewUserCallFail(cbsm_id, format!("{:?}", cbsm_put_new_user_call_fail))),
     }
     
 
@@ -544,25 +541,25 @@ pub async fn put_new_user_into_a_users_map_canister(user_id: UserId, umc_user_da
 
 
 #[derive(CandidType, Deserialize)]
-pub enum CreateNewUsersMapCanisterError {
-    MaxUsersMapCanisters,
-    CreateNewUsersMapCanisterLockIsOn,
+pub enum CreateNewCBSMError {
+    MaxCBSMapCanisters,
+    CreateNewCBSMapLockIsOn,
     GetNewCanisterError(GetNewCanisterError),
-    UsersMapCanisterCodeNotFound,
+    CBSMapCanisterCodeNotFound,
     InstallCodeCallError(String)
 }
 
-pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, CreateNewUsersMapCanisterError> {
-    if with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.len() }) >= MAX_USERS_MAP_CANISTERS {
-        return Err(CreateNewUsersMapCanisterError::MaxUsersMapCanisters);
+pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
+    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.len() }) >= MAX_CBS_MAPS {
+        return Err(CreateNewCBSMError::MaxCBSMapCanisters);
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock }) == true {
-        return Err(CreateNewUsersMapCanisterError::CreateNewUsersMapCanisterLockIsOn);
+    if with(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock }) == true {
+        return Err(CreateNewCBSMError::CreateNewCBSMapLockIsOn);
     }
-    with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = true; });
+    with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = true; });
     
-    let new_users_map_canister_id: Principal = match get_new_canister(
+    let new_cbs_map_canister_id: Principal = match get_new_canister(
         Some(ManagementCanisterOptionalCanisterSettings{
             controllers : None,
             compute_allocation : None,
@@ -573,16 +570,16 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
     ).await {
         Ok(canister_id) => canister_id,
         Err(get_new_canister_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
-            return Err(CreateNewUsersMapCanisterError::GetNewCanisterError(get_new_canister_error));
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+            return Err(CreateNewCBSMError::GetNewCanisterError(get_new_canister_error));
         }
     };    
     
     // install code
-    if with(&CTS_DATA, |cts_data| cts_data.users_map_canister_code.module().len() ) == 0 {
-        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_users_map_canister_id); });
-        with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
-        return Err(CreateNewUsersMapCanisterError::UsersMapCanisterCodeNotFound);
+    if with(&CTS_DATA, |cts_data| cts_data.cbs_map_canister_code.module().len() ) == 0 {
+        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cbs_map_canister_id); });
+        with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+        return Err(CreateNewCBSMError::CBSMapCanisterCodeNotFound);
     }
     
     match call::<(ManagementCanisterInstallCodeQuest,), ()>(
@@ -590,22 +587,22 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
         "install_code",
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
-            canister_id : new_users_map_canister_id,
-            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.users_map_canister_code.module() as *const Vec<u8> })},
-            arg : &encode_one(&UsersMapCanisterInit{
+            canister_id : new_cbs_map_canister_id,
+            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cbs_map_canister_code.module() as *const Vec<u8> })},
+            arg : &encode_one(&CBSMInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
         },)
     ).await {
         Ok(_) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.push(new_users_map_canister_id); }); 
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
-            Ok(new_users_map_canister_id)    
+            with_mut(&CTS_DATA, |cts_data| { cts_data.cbs_maps.push(new_cbs_map_canister_id); }); 
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+            Ok(new_cbs_map_canister_id)    
         },
         Err(install_code_call_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_users_map_canister_id); });
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_users_map_canister_lock = false; });
-            return Err(CreateNewUsersMapCanisterError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
+            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cbs_map_canister_id); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+            return Err(CreateNewCBSMError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }
     }
 }
@@ -617,18 +614,18 @@ pub async fn create_new_users_map_canister() -> Result<UsersMapCanisterId, Creat
 
 
 #[derive(CandidType, Deserialize)]
-pub enum FindUserInTheUsersMapCanistersError {
-    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, (u32, String))>)
+pub enum FindUserInTheCBSMapsError {
+    CBSMapsFindUserCallFails(Vec<(Principal, (u32, String))>)
 }
 
-pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<Option<(UMCUserData, UsersMapCanisterId)>, FindUserInTheUsersMapCanistersError> {
+pub async fn find_user_in_the_cbs_maps(user_id: Principal) -> Result<Option<(CBSMUserData, Principal)>, FindUserInTheCBSMapsError> {
     
-    let call_results: Vec<CallResult<(Option<UMCUserData>,)>> = futures::future::join_all(
+    let call_results: Vec<CallResult<(Option<CBSMUserData>,)>> = futures::future::join_all(
         with(&CTS_DATA, |cts_data| { 
-            cts_data.users_map_canisters.iter().map(
-                |umc| { 
-                    call::<(UserId,), (Option<UMCUserData>,)>(
-                        umc.clone(), 
+            cts_data.cbs_maps.iter().map(
+                |cbsm| { 
+                    call::<(Principal,), (Option<CBSMUserData>,)>(
+                        cbsm.clone(), 
                         "find_user", 
                         (user_id,)
                     )
@@ -637,22 +634,22 @@ pub async fn find_user_in_the_users_map_canisters(user_id: UserId) -> Result<Opt
         })
     ).await;
     
-    let mut call_fails: Vec<(UsersMapCanisterId, (u32, String))> = Vec::new();
+    let mut call_fails: Vec<(Principal, (u32, String))> = Vec::new();
     
     for (i,call_result) in call_results.into_iter().enumerate() {
-        let umc_id: UsersMapCanisterId = with(&CTS_DATA, |cts_data| cts_data.users_map_canisters[i]);
+        let cbsm_id: Principal = with(&CTS_DATA, |cts_data| cts_data.cbs_maps[i]);
         match call_result {
-            Ok((optional_umc_user_data,)) => match optional_umc_user_data {
-                Some(umc_user_data) => return Ok(Some((umc_user_data, umc_id))),
+            Ok((optional_cbsm_user_data,)) => match optional_cbsm_user_data {
+                Some(cbsm_user_data) => return Ok(Some((cbsm_user_data, cbsm_id))),
                 None => continue
             },
-            Err(find_user_call_error) => call_fails.push((umc_id, (find_user_call_error.0 as u32, find_user_call_error.1)))
+            Err(find_user_call_error) => call_fails.push((cbsm_id, (find_user_call_error.0 as u32, find_user_call_error.1)))
         }
     }
     
     match call_fails.len() {
         0 => Ok(None),
-        _ => Err(FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(call_fails))
+        _ => Err(FindUserInTheCBSMapsError::CBSMapsFindUserCallFails(call_fails))
     }
 
 }

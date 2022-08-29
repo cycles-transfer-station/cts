@@ -25,12 +25,9 @@ use cts_lib::{
         CTSFuel,
         CyclesTransfer,
         CyclesTransferMemo,
-        UserId,
-        UserCanisterId,
-        UsersMapCanisterId,
         XdrPerMyriadPerIcp,
         canister_code::CanisterCode,
-        user_canister_cache::UserCanisterCache,
+        cycles_banks_cache::CBSCache,
         management_canister::{
             ManagementCanisterInstallCodeMode,
             ManagementCanisterInstallCodeQuest,
@@ -43,15 +40,15 @@ use cts_lib::{
             
         },
         cts::{
-        
+            CyclesBankLifetimeTerminationQuest
         },
-        users_map_canister::{
-            UMCUserData,
-            UMCUpgradeUCError,
-            UMCUpgradeUCCallErrorType
+        cbs_map::{
+            CBSMUserData,
+            CBSMUpgradeCBError,
+            CBSMUpgradeCBCallErrorType
         },
-        user_canister::{
-            UserCanisterInit,
+        cycles_bank::{
+            CyclesBankInit,
         },
         cycles_transferrer::{
             CyclesTransferrerCanisterInit,
@@ -173,10 +170,10 @@ use tools::{
     take_user_icp_ledger,
     CmcNotifyError,
     CmcNotifyCreateCanisterQuest,
-    PutNewUserIntoAUsersMapCanisterError,
-    put_new_user_into_a_users_map_canister,
-    FindUserInTheUsersMapCanistersError,
-    find_user_in_the_users_map_canisters,
+    PutNewUserIntoACBSMError,
+    put_new_user_into_a_cbsm,
+    FindUserInTheCBSMapsError,
+    find_user_in_the_cbs_maps,
     ledger_topup_cycles_cmc_icp_transfer,
     ledger_topup_cycles_cmc_notify,
     LedgerTopupCyclesCmcIcpTransferError,
@@ -194,17 +191,17 @@ use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_ha
 pub struct CTSData {
     controllers: Vec<Principal>,
     cycles_market_id: Principal,
-    user_canister_code: CanisterCode,
-    users_map_canister_code: CanisterCode,
+    cycles_bank_canister_code: CanisterCode,
+    cbs_map_canister_code: CanisterCode,
     cycles_transferrer_canister_code: CanisterCode,
     frontcode_files: Files,
     frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
-    users_map_canisters: Vec<Principal>,
-    create_new_users_map_canister_lock: bool,
+    cbs_maps: Vec<Principal>,
+    create_new_cbs_map_lock: bool,
     cycles_transferrer_canisters: Vec<Principal>,
     cycles_transferrer_canisters_round_robin_counter: u32,
     canisters_for_the_use: HashSet<Principal>,
-    new_users: HashMap<Principal, NewUserData>,
+    cycles_bank_purchases: HashMap<Principal, PurchaseCyclesBankData>,
     users_burn_icp_mint_cycles: HashMap<Principal, UserBurnIcpMintCyclesData>,
     users_transfer_icp: HashMap<Principal, UserTransferIcpData>
 
@@ -214,17 +211,17 @@ impl CTSData {
         Self {
             controllers: Vec::new(),
             cycles_market_id: Principal::from_slice(&[]),
-            user_canister_code: CanisterCode::new(Vec::new()),
-            users_map_canister_code: CanisterCode::new(Vec::new()),
+            cycles_bank_canister_code: CanisterCode::new(Vec::new()),
+            cbs_map_canister_code: CanisterCode::new(Vec::new()),
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
             frontcode_files_hashes: Vec::new(), // field is [only] use for the upgrades.
-            users_map_canisters: Vec::new(),
-            create_new_users_map_canister_lock: false,
+            cbs_maps: Vec::new(),
+            create_new_cbs_map_lock: false,
             cycles_transferrer_canisters: Vec::new(),
             cycles_transferrer_canisters_round_robin_counter: 0,
             canisters_for_the_use: HashSet::new(),
-            new_users: HashMap::new(),
+            cycles_bank_purchases: HashMap::new(),
             users_burn_icp_mint_cycles: HashMap::new(),
             users_transfer_icp: HashMap::new()
         }
@@ -251,8 +248,8 @@ pub const NEW_USER_CANISTER_CREATION_CYCLES: Cycles = {
     + NEW_USER_CANISTER_BACKUP_CYCLES
 };
 
-pub const MAX_NEW_USERS: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
-pub const MAX_USERS_MAP_CANISTERS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
+pub const MAX_CYCLES_BANK_PURCHASES: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
+pub const MAX_CBS_MAPS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
 pub const MAX_USERS_TRANSFER_ICP: usize = 2000;
 pub const CTS_TRANSFER_ICP_FEE: Cycles = 50_000_000_000; // taken as the icptokens by the conversion-rate
@@ -275,7 +272,7 @@ thread_local! {
     // not save through the upgrades
     pub static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::new()); // is with the save through the upgrades by the frontcode_files_hashes field on the CTSData
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
-    static     USER_CANISTER_CACHE: RefCell<UserCanisterCache> = RefCell::new(UserCanisterCache::new(1400));
+    static     CYCLES_BANKS_CACHE: RefCell<CBSCache> = RefCell::new(CBSCache::new(1400));
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
     
@@ -499,20 +496,20 @@ pub fn see_fees() -> Fees {
 
 
 
-// save the fees in the new_user_data so the fees cant change while creating a new user
+// save the fees in the purchase_cycles_bank_data so the fees cant change while creating a new user
 
 #[derive(Clone, CandidType, Deserialize)]
-pub struct NewUserData {
+pub struct PurchaseCyclesBankData {
     start_time_nanos: u64,
     lock: bool,    
-    new_user_quest: NewUserQuest,
+    purchase_cycles_bank_quest: PurchaseCyclesBankQuest,
     // the options and bools are for the memberance of the steps
     current_xdr_icp_rate: Option<XdrPerMyriadPerIcp>,
-    look_if_user_is_in_the_users_map_canisters: bool,
-    referral_user_canister_id: Option<UserCanisterId>, // use if a referral
+    look_if_user_is_in_the_cbs_maps: bool,
+    referral_user_canister_id: Option<Principal>, // use if a referral
     create_user_canister_block_height: Option<IcpBlockHeight>,
     user_canister: Option<Principal>,
-    users_map_canister: Option<UsersMapCanisterId>,
+    users_map_canister: Option<Principal>,
     user_canister_uninstall_code: bool,
     user_canister_install_code: bool,
     user_canister_status_record: Option<ManagementCanisterCanisterStatusRecord>,
@@ -527,20 +524,20 @@ pub struct NewUserData {
 
 
 #[derive(CandidType, Deserialize)]
-pub enum NewUserMidCallError{
-    UsersMapCanistersFindUserCallFails(Vec<(UsersMapCanisterId, (u32, String))>),
-    PutNewUserIntoAUsersMapCanisterError(PutNewUserIntoAUsersMapCanisterError),
-    CreateUserCanisterIcpTransferError(IcpTransferError),
-    CreateUserCanisterIcpTransferCallError((u32, String)),
-    CreateUserCanisterCmcNotifyError(CmcNotifyError),
-    CreateUserCanisterCmcNotifyCallError((u32, String)),
-    UserCanisterUninstallCodeCallError((u32, String)),
-    UserCanisterCodeNotFound,
-    UserCanisterInstallCodeCallError((u32, String)),
-    UserCanisterStatusCallError((u32, String)),
-    UserCanisterModuleVerificationError,
-    UserCanisterStartCanisterCallError((u32, String)),
-    UserCanisterUpdateSettingsCallError((u32, String)),
+pub enum PurchaseCyclesBankMidCallError{
+    CBSMapsFindUserCallFails(Vec<(Principal, (u32, String))>),
+    PutNewUserIntoACBSMError(PutNewUserIntoACBSMError),
+    CreateCyclesBankCanisterIcpTransferError(IcpTransferError),
+    CreateCyclesBankCanisterIcpTransferCallError((u32, String)),
+    CreateCyclesBankCanisterCmcNotifyError(CmcNotifyError),
+    CreateCyclesBankCanisterCmcNotifyCallError((u32, String)),
+    CyclesBankUninstallCodeCallError((u32, String)),
+    CyclesBankCodeNotFound,
+    CyclesBankInstallCodeCallError((u32, String)),
+    CyclesBankCanisterStatusCallError((u32, String)),
+    CyclesBankModuleVerificationError,
+    CyclesBankStartCanisterCallError((u32, String)),
+    CyclesBankUpdateSettingsCallError((u32, String)),
     CollectCyclesLedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
     CollectCyclesLedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
     ReferralUserReferralPaymentCyclesTransferCallError((u32, String)),
@@ -552,7 +549,7 @@ pub enum NewUserMidCallError{
 
 
 #[derive(CandidType, Deserialize)]
-pub enum NewUserError{
+pub enum PurchaseCyclesBankError{
     ReferralUserCannotBeTheCaller,
     CheckIcpBalanceCallError((u32, String)),
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
@@ -561,34 +558,33 @@ pub enum NewUserError{
         user_icp_ledger_balance: IcpTokens,
         icp_ledger_transfer_fee: IcpTokens
     },
-    UserIsInTheMiddleOfANewUserCall,
-    UserIsInTheMiddleOfANewUserCallMustCallComplete,
-    UserIsInTheMiddleOfAUserTransferIcpCall,
-    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall,
-    MaxNewUsers,
-    FoundUserCanister(UserCanisterId),
+    UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: bool },
+    CTSIsBusy,
+    FoundCyclesBank(Principal),
     ReferralUserNotFound,
-    CreateUserCanisterCmcNotifyError(CmcNotifyError),
-    MidCallError(NewUserMidCallError),    // re-try the call on this sponse
+    CreateCyclesBankCanisterCmcNotifyError(CmcNotifyError),
+    MidCallError(PurchaseCyclesBankMidCallError),    // call complete_purchase_cycles_bank on this sponse
 }
 
 
 #[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
-pub struct NewUserQuest {
-    opt_referral_user_id: Option<UserId>,
+pub struct PurchaseCyclesBankQuest {
+    opt_referral_user_id: Option<Principal>,
 }
 
 
 #[derive(CandidType, Deserialize)]
-pub struct NewUserSuccess {
-    user_canister_id: UserCanisterId,
+pub struct PurchaseCyclesBankSuccess {
+    cycles_bank_canister_id: Principal,
 }
 
 
-fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
+fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_data: PurchaseCyclesBankData) {
     with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.new_users.get_mut(user_id) {
-            Some(nud) => { *nud = new_user_data; },
+        match cts_data.cycles_bank_purchases.get_mut(user_id) {
+            Some(nud) => { *nud = purchase_cycles_bank_data; },
             None => {}
         }
     });
@@ -596,42 +592,39 @@ fn write_new_user_data(user_id: &Principal, new_user_data: NewUserData) {
 
 // for the now a user must pay with the icp.
 #[update]
-pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccess, NewUserError> {
+pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
 
     let user_id: Principal = caller();
 
     if let Some(ref referral_user_id) = q.opt_referral_user_id {
         if *referral_user_id == user_id {
-            return Err(NewUserError::ReferralUserCannotBeTheCaller);
+            return Err(PurchaseCyclesBankError::ReferralUserCannotBeTheCaller);
         }
     }
 
-    let new_user_data: NewUserData = with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.new_users.get(&user_id) {
-            Some(new_user_data) => {
-                if new_user_data.lock == true {
-                    return Err(NewUserError::UserIsInTheMiddleOfANewUserCall);
-                }
-                return Err(NewUserError::UserIsInTheMiddleOfANewUserCallMustCallComplete);
+    let purchase_cycles_bank_data: PurchaseCyclesBankData = with_mut(&CTS_DATA, |cts_data| {
+        match cts_data.cycles_bank_purchases.get(&user_id) {
+            Some(purchase_cycles_bank_data) => {
+                return Err(PurchaseCyclesBankError::UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: !purchase_cycles_bank_data.lock });
             },
             None => {
                 if get(&STOP_CALLS) { trap("Maintenance. try soon."); }
-                if cts_data.users_burn_icp_mint_cycles.contains_key(&user_id) {
-                    return Err(NewUserError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall);
+                if let Some(user_burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
+                    return Err(PurchaseCyclesBankError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: !user_burn_icp_mint_cycles_data.lock });
                 }
-                if cts_data.users_transfer_icp.contains_key(&user_id) {
-                    return Err(NewUserError::UserIsInTheMiddleOfAUserTransferIcpCall);
+                if let Some(user_transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
+                    return Err(PurchaseCyclesBankError::UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: !user_transfer_icp_data.lock });
                 }
-                if cts_data.new_users.len() >= MAX_NEW_USERS {
-                    return Err(NewUserError::MaxNewUsers);
+                if cts_data.cycles_bank_purchases.len() >= MAX_CYCLES_BANK_PURCHASES {
+                    return Err(PurchaseCyclesBankError::CTSIsBusy);
                 }
-                let new_user_data: NewUserData = NewUserData{
+                let purchase_cycles_bank_data: PurchaseCyclesBankData = PurchaseCyclesBankData{
                     start_time_nanos: time(),
                     lock: true,
-                    new_user_quest: q,
+                    purchase_cycles_bank_quest: q,
                     // the options and bools are for the memberance of the steps
                     current_xdr_icp_rate: None,
-                    look_if_user_is_in_the_users_map_canisters: false,
+                    look_if_user_is_in_the_cbs_maps: false,
                     referral_user_canister_id: None,
                     create_user_canister_block_height: None,
                     user_canister: None,
@@ -645,61 +638,61 @@ pub async fn new_user(q: NewUserQuest) -> Result<NewUserSuccess, NewUserError> {
                     referral_user_referral_payment_cycles_transfer: false,
                     user_referral_payment_cycles_transfer: false
                 };
-                cts_data.new_users.insert(user_id, new_user_data.clone());
-                Ok(new_user_data)
+                cts_data.cycles_bank_purchases.insert(user_id, purchase_cycles_bank_data.clone());
+                Ok(purchase_cycles_bank_data)
             }
         }
     })?;    
     
-    new_user_(user_id, new_user_data).await
+    purchase_cycles_bank_(user_id, purchase_cycles_bank_data).await
 }
 
 
 #[derive(CandidType, Deserialize)]
-pub enum CompleteNewUserError {
-    UserNotFoundInTheNewUsersMap,
-    NewUserError(NewUserError)
+pub enum CompletePurchaseCyclesBankError {
+    UserIsNotInTheMiddleOfAPurchaseCyclesBankCall,
+    PurchaseCyclesBankError(PurchaseCyclesBankError)
 }
 
 
 #[update]
-pub async fn complete_new_user() -> Result<NewUserSuccess, CompleteNewUserError> {
+pub async fn complete_purchase_cycles_bank() -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
 
     let user_id: Principal = caller();
     
-    complete_new_user_(user_id).await
+    complete_purchase_cycles_bank_(user_id).await
     
 }
 
 
-async fn complete_new_user_(user_id: Principal) -> Result<NewUserSuccess, CompleteNewUserError> {
+async fn complete_purchase_cycles_bank_(user_id: Principal) -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
     
-    let new_user_data: NewUserData = with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.new_users.get_mut(&user_id) {
-            Some(new_user_data) => {
-                if new_user_data.lock == true {
-                    return Err(CompleteNewUserError::NewUserError(NewUserError::UserIsInTheMiddleOfANewUserCall));
+    let purchase_cycles_bank_data: PurchaseCyclesBankData = with_mut(&CTS_DATA, |cts_data| {
+        match cts_data.cycles_bank_purchases.get_mut(&user_id) {
+            Some(purchase_cycles_bank_data) => {
+                if purchase_cycles_bank_data.lock == true {
+                    return Err(CompletePurchaseCyclesBankError::PurchaseCyclesBankError(PurchaseCyclesBankError::UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: false }));
                 }
-                new_user_data.lock = true;
-                Ok(new_user_data.clone())
+                purchase_cycles_bank_data.lock = true;
+                Ok(purchase_cycles_bank_data.clone())
             },
             None => {
-                return Err(CompleteNewUserError::UserNotFoundInTheNewUsersMap);
+                return Err(CompletePurchaseCyclesBankError::UserIsNotInTheMiddleOfAPurchaseCyclesBankCall);
             }
         }
     })?;
 
-    new_user_(user_id, new_user_data).await
-        .map_err(|new_user_error| { 
-            CompleteNewUserError::NewUserError(new_user_error) 
+    purchase_cycles_bank_(user_id, purchase_cycles_bank_data).await
+        .map_err(|purchase_cycles_bank_error| { 
+            CompletePurchaseCyclesBankError::PurchaseCyclesBankError(purchase_cycles_bank_error) 
         })
     
 }
 
 
-async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<NewUserSuccess, NewUserError> {
+async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data: PurchaseCyclesBankData) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
     
-    if new_user_data.current_xdr_icp_rate.is_none() {
+    if purchase_cycles_bank_data.current_xdr_icp_rate.is_none() {
 
         let (
             check_user_icp_ledger_balance_sponse,
@@ -715,77 +708,77 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
         let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
             Ok(tokens) => tokens,
             Err(check_balance_call_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-                return Err(NewUserError::CheckIcpBalanceCallError((check_balance_call_error.0 as u32, check_balance_call_error.1)));
+                with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+                return Err(PurchaseCyclesBankError::CheckIcpBalanceCallError((check_balance_call_error.0 as u32, check_balance_call_error.1)));
             }
         };
                 
         let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
             Ok(rate) => rate,
             Err(check_xdr_icp_rate_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-                return Err(NewUserError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
+                with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+                return Err(PurchaseCyclesBankError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
             }
         };
         
         let current_membership_cost_icp: IcpTokens = cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES, current_xdr_icp_rate); 
         
         if user_icp_ledger_balance < current_membership_cost_icp + IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-            return Err(NewUserError::UserIcpLedgerBalanceTooLow{
+            with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+            return Err(PurchaseCyclesBankError::UserIcpLedgerBalanceTooLow{
                 cts_user_contract_cost_icp: current_membership_cost_icp,
                 user_icp_ledger_balance,
                 icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
             });
         }   
         
-        new_user_data.current_xdr_icp_rate = Some(current_xdr_icp_rate);
+        purchase_cycles_bank_data.current_xdr_icp_rate = Some(current_xdr_icp_rate);
     }
     
     
-    if new_user_data.look_if_user_is_in_the_users_map_canisters == false {
+    if purchase_cycles_bank_data.look_if_user_is_in_the_cbs_maps == false {
         // check in the list of the users-whos cycles-balance is save but without a user-canister 
         
         match find_user_canister_of_the_specific_user(user_id).await {
             Ok(opt_user_canister_id) => match opt_user_canister_id {
                 Some(user_canister_id) => {
-                    with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-                    return Err(NewUserError::FoundUserCanister(user_canister_id));
+                    with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+                    return Err(PurchaseCyclesBankError::FoundCyclesBank(user_canister_id));
                 },
                 None => {
-                    new_user_data.look_if_user_is_in_the_users_map_canisters = true;
+                    purchase_cycles_bank_data.look_if_user_is_in_the_cbs_maps = true;
                 }
             },
             Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
-                FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanistersFindUserCallFails(umc_call_errors)));
+                FindUserInTheCBSMapsError::CBSMapsFindUserCallFails(umc_call_errors) => {
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CBSMapsFindUserCallFails(umc_call_errors)));
                 }
             }
         }
         
     }
     
-    if new_user_data.new_user_quest.opt_referral_user_id.is_some() {
+    if purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.is_some() {
     
-        if new_user_data.referral_user_canister_id.is_none() {
+        if purchase_cycles_bank_data.referral_user_canister_id.is_none() {
         
-            match find_user_canister_of_the_specific_user(new_user_data.new_user_quest.opt_referral_user_id.as_ref().unwrap().clone()).await {
+            match find_user_canister_of_the_specific_user(purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.as_ref().unwrap().clone()).await {
                 Ok(opt_user_canister_id) => match opt_user_canister_id {
                     Some(user_canister_id) => {
-                        new_user_data.referral_user_canister_id = Some(user_canister_id);
+                        purchase_cycles_bank_data.referral_user_canister_id = Some(user_canister_id);
                     },
                     None => {
-                        with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-                        return Err(NewUserError::ReferralUserNotFound);
+                        with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+                        return Err(PurchaseCyclesBankError::ReferralUserNotFound);
                     }
                 },
                 Err(find_user_in_the_users_map_canisters_error) => match find_user_in_the_users_map_canisters_error {
-                    FindUserInTheUsersMapCanistersError::UsersMapCanistersFindUserCallFails(umc_call_errors) => {
-                        new_user_data.lock = false;
-                        write_new_user_data(&user_id, new_user_data);
-                        return Err(NewUserError::MidCallError(NewUserMidCallError::UsersMapCanistersFindUserCallFails(umc_call_errors)));
+                    FindUserInTheCBSMapsError::CBSMapsFindUserCallFails(umc_call_errors) => {
+                        purchase_cycles_bank_data.lock = false;
+                        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CBSMapsFindUserCallFails(umc_call_errors)));
                     }
                 }
             }
@@ -795,12 +788,12 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
     }
     
 
-    if new_user_data.create_user_canister_block_height.is_none() {
+    if purchase_cycles_bank_data.create_user_canister_block_height.is_none() {
         let create_user_canister_block_height: IcpBlockHeight = match icp_transfer(
             MAINNET_LEDGER_CANISTER_ID,
             IcpTransferArgs {
                 memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
-                amount: cycles_to_icptokens(NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate.unwrap()),
+                amount: cycles_to_icptokens(NEW_USER_CANISTER_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()),
                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                 from_subaccount: Some(principal_icp_subaccount(&user_id)),
                 to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
@@ -810,30 +803,30 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
             Ok(transfer_result) => match transfer_result {
                 Ok(block_height) => block_height,
                 Err(transfer_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferError(transfer_error)));                    
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferError(transfer_error)));                    
                 }
             },
             Err(transfer_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterIcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1))));
             }
         };
     
-        new_user_data.create_user_canister_block_height = Some(create_user_canister_block_height);
+        purchase_cycles_bank_data.create_user_canister_block_height = Some(create_user_canister_block_height);
     }
 
 
-    if new_user_data.user_canister.is_none() {
+    if purchase_cycles_bank_data.user_canister.is_none() {
     
         let user_canister: Principal = match call::<(CmcNotifyCreateCanisterQuest,), (Result<Principal, CmcNotifyError>,)>(
             MAINNET_CYCLES_MINTING_CANISTER_ID,
             "notify_create_canister",
             (CmcNotifyCreateCanisterQuest {
                 controller: id(),
-                block_index: new_user_data.create_user_canister_block_height.unwrap()
+                block_index: purchase_cycles_bank_data.create_user_canister_block_height.unwrap()
             },)
         ).await {
             Ok((notify_result,)) => match notify_result {
@@ -842,59 +835,59 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
                     // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
                     match cmc_notify_error {
                         CmcNotifyError::TransactionTooOld(_) | CmcNotifyError::Refunded{ .. } => {
-                            with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
-                            return Err(NewUserError::CreateUserCanisterCmcNotifyError(cmc_notify_error));
+                            with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
+                            return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error));
                         },
                         CmcNotifyError::InvalidTransaction(_) // 
                         | CmcNotifyError::Other{ .. }
                         | CmcNotifyError::Processing
                         => {
-                            new_user_data.lock = false;
-                            write_new_user_data(&user_id, new_user_data);
-                            return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyError(cmc_notify_error)));   
+                            purchase_cycles_bank_data.lock = false;
+                            write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                            return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error)));   
                         },
                     }                    
                 }
             },
             Err(cmc_notify_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::CreateUserCanisterCmcNotifyCallError((cmc_notify_call_error.0 as u32, cmc_notify_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyCallError((cmc_notify_call_error.0 as u32, cmc_notify_call_error.1))));
             }      
         };
         
-        new_user_data.user_canister = Some(user_canister);
-        with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.put(user_id, Some(user_canister)); });
-        new_user_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
+        purchase_cycles_bank_data.user_canister = Some(user_canister);
+        with_mut(&CYCLES_BANKS_CACHE, |uc_cache| { uc_cache.put(user_id, Some(user_canister)); });
+        purchase_cycles_bank_data.user_canister_uninstall_code = true; // because a fresh cmc canister is empty 
     }
         
  
 
-    if new_user_data.user_canister_uninstall_code == false {
+    if purchase_cycles_bank_data.user_canister_uninstall_code == false {
         
         match call::<(CanisterIdRecord,), ()>(
             MANAGEMENT_CANISTER_ID,
             "uninstall_code",
-            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },),
+            (CanisterIdRecord { canister_id: purchase_cycles_bank_data.user_canister.unwrap() },),
         ).await {
             Ok(_) => {},
             Err(uninstall_code_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUninstallCodeCallError((uninstall_code_call_error.0 as u32, uninstall_code_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankUninstallCodeCallError((uninstall_code_call_error.0 as u32, uninstall_code_call_error.1))));
             }
         }
         
-        new_user_data.user_canister_uninstall_code = true;
+        purchase_cycles_bank_data.user_canister_uninstall_code = true;
     }
 
 
-    if new_user_data.user_canister_install_code == false {
+    if purchase_cycles_bank_data.user_canister_install_code == false {
     
-        if with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module().len() == 0 }) {
-            new_user_data.lock = false;
-            write_new_user_data(&user_id, new_user_data);
-            return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
+        if with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module().len() == 0 }) {
+            purchase_cycles_bank_data.lock = false;
+            write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+            return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankCodeNotFound));
         }
 
         match call::<(ManagementCanisterInstallCodeQuest,), ()>(
@@ -902,102 +895,102 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
             "install_code",
             (ManagementCanisterInstallCodeQuest {
                 mode : ManagementCanisterInstallCodeMode::install,
-                canister_id : new_user_data.user_canister.unwrap(),
-                wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module() as *const Vec<u8> })},
-                arg : &encode_one(&UserCanisterInit{ 
+                canister_id : purchase_cycles_bank_data.user_canister.unwrap(),
+                wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module() as *const Vec<u8> })},
+                arg : &encode_one(&CyclesBankInit{ 
                     cts_id: id(), 
                     cycles_market_id: cycles_market_id(),
                     user_id: user_id,
-                    user_canister_storage_size_mib: NEW_USER_CONTRACT_STORAGE_SIZE_MiB,                         
-                    user_canister_lifetime_termination_timestamp_seconds: time()/1_000_000_000 + NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS,
+                    storage_size_mib: NEW_USER_CONTRACT_STORAGE_SIZE_MiB,                         
+                    lifetime_termination_timestamp_seconds: time()/1_000_000_000 + NEW_USER_CONTRACT_LIFETIME_DURATION_SECONDS,
                     cycles_transferrer_canisters: with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.clone() })
                 }).unwrap()
             },),
         ).await {
             Ok(()) => {},
             Err(put_code_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterInstallCodeCallError((put_code_call_error.0 as u32, put_code_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankInstallCodeCallError((put_code_call_error.0 as u32, put_code_call_error.1))));
             }
         }
         
-        new_user_data.user_canister_install_code = true;
+        purchase_cycles_bank_data.user_canister_install_code = true;
     }
     
-    if new_user_data.user_canister_status_record.is_none() {
+    if purchase_cycles_bank_data.user_canister_status_record.is_none() {
         
         let canister_status_record: ManagementCanisterCanisterStatusRecord = match call(
             MANAGEMENT_CANISTER_ID,
             "canister_status",
-            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },),
+            (CanisterIdRecord { canister_id: purchase_cycles_bank_data.user_canister.unwrap() },),
         ).await {
             Ok((canister_status_record,)) => canister_status_record,
             Err(canister_status_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankCanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1))));
             }
         };
         
-        new_user_data.user_canister_status_record = Some(canister_status_record);
+        purchase_cycles_bank_data.user_canister_status_record = Some(canister_status_record);
     }
         
-    // no async in this if-block so no NewUserData field needed. can make it for the optimization though
-    if with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module().len() == 0 }) {
-        new_user_data.lock = false;
-        write_new_user_data(&user_id, new_user_data);
-        return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterCodeNotFound));
+    // no async in this if-block so no PurchaseCyclesBankData field needed. can make it for the optimization though
+    if with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module().len() == 0 }) {
+        purchase_cycles_bank_data.lock = false;
+        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankCodeNotFound));
     }
-    if new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.is_none() || new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone() != with(&CTS_DATA, |cts_data| { cts_data.user_canister_code.module_hash().clone() }) {
+    if purchase_cycles_bank_data.user_canister_status_record.as_ref().unwrap().module_hash.is_none() || purchase_cycles_bank_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone() != with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module_hash().clone() }) {
         // go back a couple of steps
-        new_user_data.user_canister_uninstall_code = false;                                  
-        new_user_data.user_canister_install_code = false;
-        new_user_data.user_canister_status_record = None;
-        new_user_data.lock = false;
-        write_new_user_data(&user_id, new_user_data);
-        return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterModuleVerificationError));
+        purchase_cycles_bank_data.user_canister_uninstall_code = false;                                  
+        purchase_cycles_bank_data.user_canister_install_code = false;
+        purchase_cycles_bank_data.user_canister_status_record = None;
+        purchase_cycles_bank_data.lock = false;
+        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankModuleVerificationError));
     }
     
 
-    if new_user_data.user_canister_status_record.as_ref().unwrap().status != ManagementCanisterCanisterStatusVariant::running {
+    if purchase_cycles_bank_data.user_canister_status_record.as_ref().unwrap().status != ManagementCanisterCanisterStatusVariant::running {
     
         match call::<(CanisterIdRecord,), ()>(
             MANAGEMENT_CANISTER_ID,
             "start_canister",
-            (CanisterIdRecord { canister_id: new_user_data.user_canister.unwrap() },)
+            (CanisterIdRecord { canister_id: purchase_cycles_bank_data.user_canister.unwrap() },)
         ).await {
             Ok(_) => {
-                new_user_data.user_canister_status_record.as_mut().unwrap().status = ManagementCanisterCanisterStatusVariant::running; 
+                purchase_cycles_bank_data.user_canister_status_record.as_mut().unwrap().status = ManagementCanisterCanisterStatusVariant::running; 
             },
             Err(start_canister_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterStartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankStartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1))));
             }
         }
         
     }
 
     
-    if new_user_data.users_map_canister.is_none() {
+    if purchase_cycles_bank_data.users_map_canister.is_none() {
         
-        let users_map_canister_id: UsersMapCanisterId = match put_new_user_into_a_users_map_canister(
+        let users_map_canister_id: Principal = match put_new_user_into_a_cbsm(
             user_id, 
-            UMCUserData{
-                user_canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
-                user_canister_latest_known_module_hash: new_user_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone()
+            CBSMUserData{
+                cycles_bank_canister_id: purchase_cycles_bank_data.user_canister.as_ref().unwrap().clone(),
+                cycles_bank_latest_known_module_hash: purchase_cycles_bank_data.user_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone()
             }
         ).await {
             Ok(umcid) => umcid,
             Err(put_new_user_into_a_users_map_canister_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::PutNewUserIntoAUsersMapCanisterError(put_new_user_into_a_users_map_canister_error)));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::PutNewUserIntoACBSMError(put_new_user_into_a_users_map_canister_error)));
             }
         };
         
-        new_user_data.users_map_canister = Some(users_map_canister_id);
+        purchase_cycles_bank_data.users_map_canister = Some(users_map_canister_id);
     }
 
 
@@ -1007,21 +1000,21 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
     let put_user_canister_settings: ManagementCanisterCanisterSettings = ManagementCanisterCanisterSettings{
         controllers : vec![
             id(), 
-            new_user_data.users_map_canister.as_ref().unwrap().clone(),
-            new_user_data.user_canister.as_ref().unwrap().clone(),
+            purchase_cycles_bank_data.users_map_canister.as_ref().unwrap().clone(),
+            purchase_cycles_bank_data.user_canister.as_ref().unwrap().clone(),
         ],
         compute_allocation : 0,
         memory_allocation : NEW_USER_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128,
         freezing_threshold : 2592000 
     };
     
-    if new_user_data.user_canister_status_record.as_ref().unwrap().settings != put_user_canister_settings {
+    if purchase_cycles_bank_data.user_canister_status_record.as_ref().unwrap().settings != put_user_canister_settings {
                 
         match call::<(ChangeCanisterSettingsRecord,), ()>(
             MANAGEMENT_CANISTER_ID,
             "update_settings",
             (ChangeCanisterSettingsRecord{
-                canister_id: new_user_data.user_canister.as_ref().unwrap().clone(),
+                canister_id: purchase_cycles_bank_data.user_canister.as_ref().unwrap().clone(),
                 settings: ManagementCanisterOptionalCanisterSettings{
                     controllers : Some(put_user_canister_settings.controllers.clone()),
                     compute_allocation : Some(put_user_canister_settings.compute_allocation),
@@ -1031,53 +1024,53 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
             },)
         ).await {
             Ok(()) => {
-                new_user_data.user_canister_status_record.as_mut().unwrap().settings = put_user_canister_settings;
+                purchase_cycles_bank_data.user_canister_status_record.as_mut().unwrap().settings = put_user_canister_settings;
             },
             Err(update_settings_call_error) => {
-                new_user_data.lock = false;
-                write_new_user_data(&user_id, new_user_data);
-                return Err(NewUserError::MidCallError(NewUserMidCallError::UserCanisterUpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1))));
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankUpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1))));
             }
         }
     }
     
     
     // hand out the referral-bonuses if there is.
-    if new_user_data.new_user_quest.opt_referral_user_id.is_some() {
+    if purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.is_some() {
         
-        if new_user_data.collect_cycles_cmc_icp_transfer_block_height.is_none() {
+        if purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height.is_none() {
             match ledger_topup_cycles_cmc_icp_transfer(
-                cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate.unwrap()), 
+                cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()), 
                 Some(principal_icp_subaccount(&user_id)), 
                 id()
             ).await {
                 Ok(block_height) => {
-                    new_user_data.collect_cycles_cmc_icp_transfer_block_height = Some(block_height);
+                    purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height = Some(block_height);
                 },
                 Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectCyclesLedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error)));
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectCyclesLedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error)));
                 }
             }
         }
         
-        if new_user_data.collect_cycles_cmc_notify_cycles.is_none() {
-            match ledger_topup_cycles_cmc_notify(new_user_data.collect_cycles_cmc_icp_transfer_block_height.unwrap(), id()).await {
+        if purchase_cycles_bank_data.collect_cycles_cmc_notify_cycles.is_none() {
+            match ledger_topup_cycles_cmc_notify(purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height.unwrap(), id()).await {
                 Ok(topup_cycles) => {
-                    new_user_data.collect_cycles_cmc_notify_cycles = Some(topup_cycles); 
+                    purchase_cycles_bank_data.collect_cycles_cmc_notify_cycles = Some(topup_cycles); 
                 }, 
                 Err(ledger_topup_cycles_cmc_notify_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectCyclesLedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectCyclesLedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
                 }
             }
         }
         
-        if new_user_data.referral_user_referral_payment_cycles_transfer == false {
+        if purchase_cycles_bank_data.referral_user_referral_payment_cycles_transfer == false {
             match call_with_payment128::<(CyclesTransfer,), ()>(
-                new_user_data.referral_user_canister_id.as_ref().unwrap().clone(),        
+                purchase_cycles_bank_data.referral_user_canister_id.as_ref().unwrap().clone(),        
                 "cycles_transfer",
                 (CyclesTransfer{
                     memo: CyclesTransferMemo::Blob(b"CTS-REFERRAL-PAYMENT".to_vec())
@@ -1085,19 +1078,19 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
                 1_000_000_000_000
             ).await {
                 Ok(()) => {
-                    new_user_data.referral_user_referral_payment_cycles_transfer = true;
+                    purchase_cycles_bank_data.referral_user_referral_payment_cycles_transfer = true;
                 }, 
                 Err(referral_user_referral_payment_cycles_transfer_call_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::ReferralUserReferralPaymentCyclesTransferCallError((referral_user_referral_payment_cycles_transfer_call_error.0 as u32, referral_user_referral_payment_cycles_transfer_call_error.1))));
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::ReferralUserReferralPaymentCyclesTransferCallError((referral_user_referral_payment_cycles_transfer_call_error.0 as u32, referral_user_referral_payment_cycles_transfer_call_error.1))));
                 }
             }
         }
         
-        if new_user_data.user_referral_payment_cycles_transfer == false {
+        if purchase_cycles_bank_data.user_referral_payment_cycles_transfer == false {
             match call_with_payment128::<(CyclesTransfer,), ()>(
-                new_user_data.user_canister.as_ref().unwrap().clone(),
+                purchase_cycles_bank_data.user_canister.as_ref().unwrap().clone(),
                 "cycles_transfer",
                 (CyclesTransfer{
                     memo: CyclesTransferMemo::Blob(b"CTS-REFERRAL-PAYMENT".to_vec())
@@ -1105,34 +1098,34 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
                 1_000_000_000_000
             ).await {
                 Ok(()) => {
-                    new_user_data.user_referral_payment_cycles_transfer = true;
+                    purchase_cycles_bank_data.user_referral_payment_cycles_transfer = true;
                 }, 
                 Err(user_referral_payment_cycles_transfer_call_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::UserReferralPaymentCyclesTransferCallError((user_referral_payment_cycles_transfer_call_error.0 as u32, user_referral_payment_cycles_transfer_call_error.1))));
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::UserReferralPaymentCyclesTransferCallError((user_referral_payment_cycles_transfer_call_error.0 as u32, user_referral_payment_cycles_transfer_call_error.1))));
                 }
             }
         }
         
     } else {
         
-        if new_user_data.collect_icp == false {
-            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, new_user_data.current_xdr_icp_rate.unwrap())).await {
+        if purchase_cycles_bank_data.collect_icp == false {
+            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_USER_CONTRACT_COST_CYCLES - NEW_USER_CANISTER_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap())).await {
                 Ok(icp_transfer_result) => match icp_transfer_result {
                     Ok(_block_height) => {
-                        new_user_data.collect_icp = true;
+                        purchase_cycles_bank_data.collect_icp = true;
                     },
                     Err(icp_transfer_error) => {
-                        new_user_data.lock = false;
-                        write_new_user_data(&user_id, new_user_data);
-                        return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferError(icp_transfer_error)));          
+                        purchase_cycles_bank_data.lock = false;
+                        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectIcpTransferError(icp_transfer_error)));          
                     }
                 }, 
                 Err(icp_transfer_call_error) => {
-                    new_user_data.lock = false;
-                    write_new_user_data(&user_id, new_user_data);
-                    return Err(NewUserError::MidCallError(NewUserMidCallError::CollectIcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1))));          
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectIcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1))));          
                 }               
             }
         }
@@ -1141,10 +1134,10 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
     
 
 
-    with_mut(&CTS_DATA, |cts_data| { cts_data.new_users.remove(&user_id); });
+    with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_bank_purchases.remove(&user_id); });
     
-    Ok(NewUserSuccess {
-        user_canister_id: new_user_data.user_canister.unwrap()
+    Ok(PurchaseCyclesBankSuccess {
+        cycles_bank_canister_id: purchase_cycles_bank_data.user_canister.unwrap()
     })
 }
 
@@ -1159,24 +1152,29 @@ async fn new_user_(user_id: UserId, mut new_user_data: NewUserData) -> Result<Ne
 
 
 #[derive(CandidType, Deserialize)]
-pub enum FindUserCanisterError {
-    UserIsInTheNewUsersMap, // in the frontcode on this error, make a call to finish the new_user steps
-    FindUserInTheUsersMapCanistersError(FindUserInTheUsersMapCanistersError),
+pub enum FindCyclesBankError {
+    UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: bool },
+    FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),
 }
 
 #[update]
-pub async fn find_user_canister() -> Result<Option<UserCanisterId>, FindUserCanisterError> {
+pub async fn find_cycles_bank() -> Result<Option<Principal>, FindCyclesBankError> {
     //if localkey::get::(&STOP_CALLS) { trap("Maintenance. try again soon."); }
 
-    let user_id: UserId = caller();
+    let user_id: Principal = caller();
     
-    if with(&CTS_DATA, |cts_data| { cts_data.new_users.contains_key(&user_id) }) {
-        return Err(FindUserCanisterError::UserIsInTheNewUsersMap);
-    }
+    with(&CTS_DATA, |cts_data| { 
+        match cts_data.cycles_bank_purchases.get(&user_id) {
+            None => Ok(()),
+            Some(purchase_cycles_bank_data) => { 
+                return Err(FindCyclesBankError::UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: !purchase_cycles_bank_data.lock });    
+            }
+        }
+    })?;
     
     find_user_canister_of_the_specific_user(user_id).await.map_err(
         |find_user_in_the_users_map_canisters_error| { 
-            FindUserCanisterError::FindUserInTheUsersMapCanistersError(find_user_in_the_users_map_canisters_error) 
+            FindCyclesBankError::FindUserInTheCBSMapsError(find_user_in_the_users_map_canisters_error) 
         }
     )
 
@@ -1184,14 +1182,14 @@ pub async fn find_user_canister() -> Result<Option<UserCanisterId>, FindUserCani
 
 
 
-async fn find_user_canister_of_the_specific_user(user_id: UserId) -> Result<Option<UserCanisterId>, FindUserInTheUsersMapCanistersError> {
-    if let Some(opt_user_canister_id) = with_mut(&USER_CANISTER_CACHE, |uc_cache| { uc_cache.check(user_id) }) {
+async fn find_user_canister_of_the_specific_user(user_id: Principal) -> Result<Option<Principal>, FindUserInTheCBSMapsError> {
+    if let Some(opt_user_canister_id) = with_mut(&CYCLES_BANKS_CACHE, |uc_cache| { uc_cache.check(user_id) }) {
         return Ok(opt_user_canister_id);
     } 
-    find_user_in_the_users_map_canisters(user_id).await.map(
+    find_user_in_the_cbs_maps(user_id).await.map(
         |opt_umc_user_data_and_umc_id| {
-            let opt_user_canister_id: Option<UserCanisterId> = opt_umc_user_data_and_umc_id.map(|(umc_user_data, _umc_id)| { umc_user_data.user_canister_id });
-            with_mut(&USER_CANISTER_CACHE, |uc_cache| {
+            let opt_user_canister_id: Option<Principal> = opt_umc_user_data_and_umc_id.map(|(umc_user_data, _umc_id)| { umc_user_data.cycles_bank_canister_id });
+            with_mut(&CYCLES_BANKS_CACHE, |uc_cache| {
                 uc_cache.put(user_id, opt_user_canister_id);
             });    
             opt_user_canister_id
@@ -1217,7 +1215,7 @@ pub struct UserBurnIcpMintCyclesData {
     lock: bool,
     user_burn_icp_mint_cycles_quest: UserBurnIcpMintCyclesQuest, 
     user_burn_icp_mint_cycles_fee: Cycles,
-    user_canister_id: Option<UserCanisterId>,
+    user_canister_id: Option<Principal>,
     cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
     cmc_cycles: Option<Cycles>,
     call_user_canister_cycles_transfer_refund: Option<Cycles>,
@@ -1232,17 +1230,16 @@ pub struct UserBurnIcpMintCyclesQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserBurnIcpMintCyclesError {
-    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall,
-    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCallMustCallComplete,    
-    UserIsInTheMiddleOfANewUserCall, 
-    UserIsInTheMiddleOfAUserTransferIcpCall,
+    UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: bool },
     MinimumUserBurnIcpMintCycles{minimum_user_burn_icp_mint_cycles: IcpTokens},
     IcpCheckBalanceCallError((u32, String)),
     UserIcpBalanceTooLow{user_icp_balance: IcpTokens, icp_ledger_transfer_fee: IcpTokens},
-    FindUserInTheUsersMapCanistersError(FindUserInTheUsersMapCanistersError),
-    UserCanisterNotFound,
-    MaxUsersBurnIcpMintCycles,
-    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError), // mid call error? or remove on this error?
+    FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),
+    CyclesBankNotFound,
+    CTSIsBusy,
+    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
     MidCallError(UserBurnIcpMintCyclesMidCallError) // on this error, call with the same-parameters for the completion of this call. 
 }
 
@@ -1250,8 +1247,8 @@ pub enum UserBurnIcpMintCyclesError {
 #[derive(CandidType, Deserialize)]
 pub enum UserBurnIcpMintCyclesMidCallError {
     LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-    CallUserCanisterCyclesTransferCandidEncodeError(String),
-    CallUserCanisterCallPerformError(u32),
+    CallCyclesBankCyclesTransferCandidEncodeError(String),
+    CallCyclesBankCallPerformError(u32),
     ManagementCanisterPositCyclesCallError((u32, String))
 }
 
@@ -1265,7 +1262,7 @@ pub struct UserBurnIcpMintCyclesSuccess {
 #[update]
 pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError> {
 
-    let user_id: UserId = caller(); 
+    let user_id: Principal = caller(); 
 
     if q.burn_icp < MINIMUM_USER_BURN_ICP_MINT_CYCLES {
         return Err(UserBurnIcpMintCyclesError::MinimumUserBurnIcpMintCycles{
@@ -1276,21 +1273,18 @@ pub async fn user_burn_icp_mint_cycles(q: UserBurnIcpMintCyclesQuest) -> Result<
     let user_burn_icp_mint_cycles_data: UserBurnIcpMintCyclesData = with_mut(&CTS_DATA, |cts_data| {
         match cts_data.users_burn_icp_mint_cycles.get(&user_id) {
             Some(user_burn_icp_mint_cycles_data) => {
-                if user_burn_icp_mint_cycles_data.lock == true {
-                    return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall);
-                }
-                return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCallMustCallComplete);
+                return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: !user_burn_icp_mint_cycles_data.lock });
             },
             None => {
                 if get(&STOP_CALLS) { trap("Maintenance. try soon."); }
-                if cts_data.new_users.contains_key(&user_id) {
-                    return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfANewUserCall);
+                if let Some(purchase_cycles_bank_data) = cts_data.cycles_bank_purchases.get(&user_id) {
+                    return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: !purchase_cycles_bank_data.lock });
                 }
-                if cts_data.users_transfer_icp.contains_key(&user_id) {
-                    return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserTransferIcpCall);
+                if let Some(user_transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
+                    return Err(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: !user_transfer_icp_data.lock });
                 }
                 if cts_data.users_burn_icp_mint_cycles.len() >= MAX_USERS_BURN_ICP_MINT_CYCLES {
-                    return Err(UserBurnIcpMintCyclesError::MaxUsersBurnIcpMintCycles);
+                    return Err(UserBurnIcpMintCyclesError::CTSIsBusy);
                 }
                 let user_burn_icp_mint_cycles_data: UserBurnIcpMintCyclesData = UserBurnIcpMintCyclesData{
                     start_time_nanos: time(),
@@ -1322,7 +1316,7 @@ pub enum CompleteUserBurnIcpMintCyclesError{
 #[update]
 pub async fn complete_user_burn_icp_mint_cycles() -> Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError> {
 
-    let user_id: UserId = caller(); 
+    let user_id: Principal = caller(); 
     
     complete_user_burn_icp_mint_cycles_(user_id).await
 
@@ -1335,7 +1329,7 @@ async fn complete_user_burn_icp_mint_cycles_(user_id: Principal) -> Result<UserB
         match cts_data.users_burn_icp_mint_cycles.get_mut(&user_id) {
             Some(user_burn_icp_mint_cycles_data) => {
                 if user_burn_icp_mint_cycles_data.lock == true {
-                    return Err(CompleteUserBurnIcpMintCyclesError::UserBurnIcpMintCyclesError(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall));
+                    return Err(CompleteUserBurnIcpMintCyclesError::UserBurnIcpMintCyclesError(UserBurnIcpMintCyclesError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: false }));
                 }
                 user_burn_icp_mint_cycles_data.lock = true;
                 Ok(user_burn_icp_mint_cycles_data.clone())
@@ -1355,7 +1349,7 @@ async fn complete_user_burn_icp_mint_cycles_(user_id: Principal) -> Result<UserB
 
 
 
-async fn user_burn_icp_mint_cycles_(user_id: UserId, mut user_burn_icp_mint_cycles_data: UserBurnIcpMintCyclesData) -> Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError> {
+async fn user_burn_icp_mint_cycles_(user_id: Principal, mut user_burn_icp_mint_cycles_data: UserBurnIcpMintCyclesData) -> Result<UserBurnIcpMintCyclesSuccess, UserBurnIcpMintCyclesError> {
     
     if user_burn_icp_mint_cycles_data.user_canister_id.is_none() {
             
@@ -1375,17 +1369,17 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, mut user_burn_icp_mint_cycl
             });
         }
         
-        let user_canister_id: UserCanisterId = match find_user_canister_of_the_specific_user(user_id).await {
+        let user_canister_id: Principal = match find_user_canister_of_the_specific_user(user_id).await {
             Ok(opt_user_canister_id) => match opt_user_canister_id {
                 None => {
                     with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
-                    return Err(UserBurnIcpMintCyclesError::UserCanisterNotFound);
+                    return Err(UserBurnIcpMintCyclesError::CyclesBankNotFound);
                 },
                 Some(user_canister_id) => user_canister_id
             },
             Err(find_user_in_the_users_map_canisters_error) => {
                 with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
-                return Err(UserBurnIcpMintCyclesError::FindUserInTheUsersMapCanistersError(find_user_in_the_users_map_canisters_error));
+                return Err(UserBurnIcpMintCyclesError::FindUserInTheCBSMapsError(find_user_in_the_users_map_canisters_error));
             }
         };
         
@@ -1437,7 +1431,7 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, mut user_burn_icp_mint_cycl
                             None => {}
                         }
                     });
-                    return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallUserCanisterCyclesTransferCandidEncodeError(format!("{}", candid_error))));          
+                    return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallCyclesBankCyclesTransferCandidEncodeError(format!("{}", candid_error))));          
                 } 
             },
             cycles_for_the_user_canister
@@ -1452,7 +1446,7 @@ async fn user_burn_icp_mint_cycles_(user_id: UserId, mut user_burn_icp_mint_cycl
                     None => {}
                 }
             });
-            return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallUserCanisterCallPerformError(call_error.0 as u32)));    
+            return Err(UserBurnIcpMintCyclesError::MidCallError(UserBurnIcpMintCyclesMidCallError::CallCyclesBankCallPerformError(call_error.0 as u32)));    
         }
         
         cycles_transfer_call_future.await; 
@@ -1520,12 +1514,11 @@ pub struct UserTransferIcpQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserTransferIcpError{
-    UserIsInTheMiddleOfAUserTransferIcpCall,
-    UserIsInTheMiddleOfAUserTransferIcpCallMustCallComplete,
-    UserIsInTheMiddleOfANewUserCall,
-    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall,
+    UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: bool },
+    UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: bool },
     CheckIcpBalanceCallError((u32, String)),
-    MaxUsersTransferIcp,
+    CTSIsBusy,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
     UserIcpLedgerBalanceTooLow{
         user_icp_ledger_balance: IcpTokens,
@@ -1551,21 +1544,18 @@ pub async fn user_transfer_icp(q: UserTransferIcpQuest) -> Result<IcpBlockHeight
     let user_transfer_icp_data = with_mut(&CTS_DATA, |cts_data| {
         match cts_data.users_transfer_icp.get(&user_id) {
             Some(user_transfer_icp_data) => {
-                if user_transfer_icp_data.lock == true {
-                    return Err(UserTransferIcpError::UserIsInTheMiddleOfAUserTransferIcpCall);
-                }
-                return Err(UserTransferIcpError::UserIsInTheMiddleOfAUserTransferIcpCallMustCallComplete);
+                return Err(UserTransferIcpError::UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: !user_transfer_icp_data.lock });
             },
             None => {
                 if localkey::cell::get(&STOP_CALLS) { trap("maintenance, try soon.") }
-                if cts_data.new_users.contains_key(&user_id) {
-                    return Err(UserTransferIcpError::UserIsInTheMiddleOfANewUserCall);
+                if let Some(purchase_cycles_bank_data) = cts_data.cycles_bank_purchases.get(&user_id) {
+                    return Err(UserTransferIcpError::UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: !purchase_cycles_bank_data.lock });
                 }
-                if cts_data.users_burn_icp_mint_cycles.contains_key(&user_id) {
-                    return Err(UserTransferIcpError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall);   
+                if let Some(user_burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
+                    return Err(UserTransferIcpError::UserIsInTheMiddleOfAUserBurnIcpMintCyclesCall{ must_call_complete: !user_burn_icp_mint_cycles_data.lock });   
                 }
                 if cts_data.users_transfer_icp.len() >= MAX_USERS_TRANSFER_ICP {
-                    return Err(UserTransferIcpError::MaxUsersTransferIcp);
+                    return Err(UserTransferIcpError::CTSIsBusy);
                 }
                 let user_transfer_icp_data: UserTransferIcpData = UserTransferIcpData{
                     start_time_nanos: time(),
@@ -1605,7 +1595,7 @@ async fn complete_user_transfer_icp_(user_id: Principal) -> Result<IcpBlockHeigh
         match cts_data.users_transfer_icp.get_mut(&user_id) {
             Some(user_transfer_icp_data) => {
                 if user_transfer_icp_data.lock == true {
-                    return Err(CompleteUserTransferIcpError::UserTransferIcpError(UserTransferIcpError::UserIsInTheMiddleOfAUserTransferIcpCall));
+                    return Err(CompleteUserTransferIcpError::UserTransferIcpError(UserTransferIcpError::UserIsInTheMiddleOfAUserTransferIcpCall{ must_call_complete: false }));
                 }
                 user_transfer_icp_data.lock = true;
                 Ok(user_transfer_icp_data.clone())
@@ -1771,7 +1761,7 @@ pub fn controller_put_umc_code(canister_code: CanisterCode) -> () {
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        cts_data.users_map_canister_code = canister_code;
+        cts_data.cbs_map_canister_code = canister_code;
     });
 }
 
@@ -1785,7 +1775,7 @@ pub fn controller_see_users_map_canisters() {
         trap("Caller must be a controller for this method.")
     }
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.users_map_canisters),));
+        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cbs_maps),));
     });
 }
 
@@ -1803,11 +1793,11 @@ pub enum ControllerUpgradeUMCCallErrorType {
 
 
 #[update]
-pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanisterId>>, post_upgrade_arg: Vec<u8>) -> Vec<ControllerUpgradeUMCError>/*umcs that upgrade call-fail*/ {
+pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Vec<ControllerUpgradeUMCError>/*umcs that upgrade call-fail*/ {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    if with(&CTS_DATA, |cts_data| cts_data.users_map_canister_code.module().len() == 0 ) {
+    if with(&CTS_DATA, |cts_data| cts_data.cbs_map_canister_code.module().len() == 0 ) {
         trap("USERS_MAP_CANISTER_CODE.module().len() is 0.")
     }
     
@@ -1815,14 +1805,14 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanist
         if let Some(upgrade_umcs) = opt_upgrade_umcs {
             with(&CTS_DATA, |cts_data| { 
                 upgrade_umcs.iter().for_each(|upgrade_umc| {
-                    if cts_data.users_map_canisters.contains(&upgrade_umc) == false {
-                        trap(&format!("cts users_map_canisters does not contain: {:?}", upgrade_umc));
+                    if cts_data.cbs_maps.contains(&upgrade_umc) == false {
+                        trap(&format!("cts cbs_maps does not contain: {:?}", upgrade_umc));
                     }
                 });
             });    
             upgrade_umcs
         } else {
-            with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.clone() })
+            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.clone() })
         }
     };     
     
@@ -1847,7 +1837,7 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<UsersMapCanist
                     &encode_one(&ManagementCanisterInstallCodeQuest{
                         mode : ManagementCanisterInstallCodeMode::upgrade,
                         canister_id : *umc_id/*copy*/,
-                        wasm_module : unsafe {&*with(&CTS_DATA, |cts_data| { cts_data.users_map_canister_code.module() as *const Vec<u8> })},
+                        wasm_module : unsafe {&*with(&CTS_DATA, |cts_data| { cts_data.cbs_map_canister_code.module() as *const Vec<u8> })},
                         arg : &post_upgrade_arg,
                     }).unwrap(),
                     0
@@ -1903,36 +1893,36 @@ pub fn controller_put_user_canister_code(canister_code: CanisterCode) -> () {
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        cts_data.user_canister_code = canister_code;
+        cts_data.cycles_bank_canister_code = canister_code;
     });
 }
 
 
 
-pub type ControllerPutUCCodeOntoTheUMCError = (UsersMapCanisterId, (u32, String));
+pub type ControllerPutUCCodeOntoTheUMCError = (Principal, (u32, String));
 
 #[update]
-pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<UsersMapCanisterId>>) -> Vec<ControllerPutUCCodeOntoTheUMCError>/*umcs that the put_uc_code call fail*/ {
+pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal>>) -> Vec<ControllerPutUCCodeOntoTheUMCError>/*umcs that the put_uc_code call fail*/ {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
         
-    if with(&CTS_DATA, |cts_data| cts_data.user_canister_code.module().len() == 0 ) {
+    if with(&CTS_DATA, |cts_data| cts_data.cycles_bank_canister_code.module().len() == 0 ) {
         trap("USER_CANISTER_CODE.module().len() is 0.")
     }
     
-    let call_umcs: Vec<UsersMapCanisterId> = {
+    let call_umcs: Vec<Principal> = {
         if let Some(call_umcs) = opt_umcs {
             with(&CTS_DATA, |cts_data| { 
                 call_umcs.iter().for_each(|call_umc| {
-                    if cts_data.users_map_canisters.contains(&call_umc) == false {
-                        trap(&format!("cts users_map_canisters does not contain: {:?}", call_umc));
+                    if cts_data.cbs_maps.contains(&call_umc) == false {
+                        trap(&format!("cts cbs_maps does not contain: {:?}", call_umc));
                     }
                 });
             });    
             call_umcs
         } else {
-            with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.clone() })
+            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.clone() })
         }
     };    
     
@@ -1942,7 +1932,7 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<UsersMapC
                 match call::<(&CanisterCode,), ()>(
                     *call_umc,
                     "cts_put_user_canister_code",
-                    (unsafe{&*with(&CTS_DATA, |cts_data| { &(cts_data.user_canister_code) as *const CanisterCode })},)
+                    (unsafe{&*with(&CTS_DATA, |cts_data| { &(cts_data.cycles_bank_canister_code) as *const CanisterCode })},)
                 ).await {
                     Ok(_) => {},
                     Err(call_error) => {
@@ -1975,16 +1965,16 @@ pub enum ControllerUpgradeUCSOnAUMCError {
 
 
 #[update]
-pub async fn controller_upgrade_ucs_on_a_umc(umc: UsersMapCanisterId, opt_upgrade_ucs: Option<Vec<UserCanisterId>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<UMCUpgradeUCError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
+pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<CBSMUpgradeCBError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.users_map_canisters.contains(&umc) }) == false {
-        trap(&format!("cts users_map_canisters does not contain: {:?}", umc));
+    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.contains(&umc) }) == false {
+        trap(&format!("cts cbs_maps does not contain: {:?}", umc));
     }
     
-    match call::<(Option<Vec<UserCanisterId>>, Vec<u8>/*post-upgrade-arg*/), (Option<Vec<UMCUpgradeUCError>>,)>(
+    match call::<(Option<Vec<Principal>>, Vec<u8>/*post-upgrade-arg*/), (Option<Vec<CBSMUpgradeCBError>>,)>(
         umc,
         "cts_upgrade_ucs_chunk",
         (opt_upgrade_ucs, post_upgrade_arg)
@@ -2289,86 +2279,86 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
 
 // ----- NEW_USERS-METHODS --------------------------
 
-#[export_name = "canister_query controller_see_new_users"]
-pub fn controller_see_new_users() {
+#[export_name = "canister_query controller_see_cycles_bank_purchases"]
+pub fn controller_see_cycles_bank_purchases() {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(Vec<(&UserId, &NewUserData)>,)>((cts_data.new_users.iter().collect::<Vec<(&UserId, &NewUserData)>>(),));
+        ic_cdk::api::call::reply::<(Vec<(&Principal, &PurchaseCyclesBankData)>,)>((cts_data.cycles_bank_purchases.iter().collect::<Vec<(&Principal, &PurchaseCyclesBankData)>>(),));
     });
 }
 
 // put new user data
 #[update]
-pub fn controller_put_new_user_data(new_user_id: UserId, put_data: NewUserData, override_lock: bool) {
+pub fn controller_put_purchase_cycles_bank_data(new_user_id: Principal, put_data: PurchaseCyclesBankData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        if let Some(new_user_data) = cts_data.new_users.get(&new_user_id) {
-            if new_user_data.lock == true {
+        if let Some(purchase_cycles_bank_data) = cts_data.cycles_bank_purchases.get(&new_user_id) {
+            if purchase_cycles_bank_data.lock == true {
                 if override_lock == false {
-                    trap("user is with the lock == true in the new_users. set the override_lock flag if want override.")
+                    trap("user is with the lock == true in the cycles_bank_purchases. set the override_lock flag if want override.")
                 }
             }
         }
-        cts_data.new_users.insert(new_user_id, put_data);
+        cts_data.cycles_bank_purchases.insert(new_user_id, put_data);
     });
 
 }
 // remove new user
 #[update]
-pub fn controller_remove_new_user(new_user_id: UserId, override_lock: bool) {
+pub fn controller_remove_new_user(new_user_id: Principal, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        if let Some(new_user_data) = cts_data.new_users.get(&new_user_id) {
-            if new_user_data.lock == true {
+        if let Some(purchase_cycles_bank_data) = cts_data.cycles_bank_purchases.get(&new_user_id) {
+            if purchase_cycles_bank_data.lock == true {
                 if override_lock == false {
-                    trap("user is with the lock == true in the new_users. set the override_lock flag if want override.")
+                    trap("user is with the lock == true in the cycles_bank_purchases. set the override_lock flag if want override.")
                 }
             }
         }
-        cts_data.new_users.remove(&new_user_id);
+        cts_data.cycles_bank_purchases.remove(&new_user_id);
     });
 }
 
-// complete new users
+
 #[update]
-pub async fn controller_complete_new_users(opt_complete_new_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<NewUserSuccess, CompleteNewUserError>)> {
+pub async fn controller_complete_cycles_bank_purchases(opt_complete_cycles_bank_purchases_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
 
-    let complete_new_users_ids: Vec<UserId> = match opt_complete_new_users_ids {
-        Some(complete_new_users_ids) => complete_new_users_ids,
+    let complete_cycles_bank_purchases_ids: Vec<Principal> = match opt_complete_cycles_bank_purchases_ids {
+        Some(complete_cycles_bank_purchases_ids) => complete_cycles_bank_purchases_ids,
         None => {
             with(&CTS_DATA, |cts_data| { 
-                cts_data.new_users.iter()
-                .filter(|&(_user_id, new_user_data): &(&UserId, &NewUserData)| {
-                    new_user_data.lock == false
+                cts_data.cycles_bank_purchases.iter()
+                .filter(|&(_user_id, purchase_cycles_bank_data): &(&Principal, &PurchaseCyclesBankData)| {
+                    purchase_cycles_bank_data.lock == false
                 })
-                .map(|(user_id, _new_user_data): (&UserId, &NewUserData)| {
+                .map(|(user_id, _purchase_cycles_bank_data): (&Principal, &PurchaseCyclesBankData)| {
                     user_id.clone()
                 })
-                .collect::<Vec<UserId>>() 
+                .collect::<Vec<Principal>>() 
             })
         }
     };
     
-    let rs: Vec<Result<NewUserSuccess, CompleteNewUserError>> = futures::future::join_all(
-        complete_new_users_ids.iter().map(
-            |complete_new_user_id: &UserId| {
-                complete_new_user_(complete_new_user_id.clone())
+    let rs: Vec<Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError>> = futures::future::join_all(
+        complete_cycles_bank_purchases_ids.iter().map(
+            |complete_new_user_id: &Principal| {
+                complete_purchase_cycles_bank_(complete_new_user_id.clone())
             }
         ).collect::<Vec<_>>()
     ).await;
     
-    complete_new_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(UserId, Result<NewUserSuccess,CompleteNewUserError>)>>()
+    complete_cycles_bank_purchases_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<PurchaseCyclesBankSuccess,CompletePurchaseCyclesBankError>)>>()
     
 }
 
@@ -2384,12 +2374,12 @@ pub fn controller_see_users_burn_icp_mint_cycles() {
         trap("Caller must be a controller for this method.")
     }
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(Vec<(&UserId, &UserBurnIcpMintCyclesData)>,)>((cts_data.users_burn_icp_mint_cycles.iter().collect::<Vec<(&UserId, &UserBurnIcpMintCyclesData)>>(),));
+        ic_cdk::api::call::reply::<(Vec<(&Principal, &UserBurnIcpMintCyclesData)>,)>((cts_data.users_burn_icp_mint_cycles.iter().collect::<Vec<(&Principal, &UserBurnIcpMintCyclesData)>>(),));
     });
 }
 
 #[update]
-pub fn controller_put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: UserBurnIcpMintCyclesData, override_lock: bool) {
+pub fn controller_put_user_burn_icp_mint_cycles_data(user_id: Principal, put_data: UserBurnIcpMintCyclesData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2408,7 +2398,7 @@ pub fn controller_put_user_burn_icp_mint_cycles_data(user_id: UserId, put_data: 
 }
 
 #[update]
-pub fn controller_remove_user_burn_icp_mint_cycles(user_id: UserId, override_lock: bool) {
+pub fn controller_remove_user_burn_icp_mint_cycles(user_id: Principal, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2427,36 +2417,36 @@ pub fn controller_remove_user_burn_icp_mint_cycles(user_id: UserId, override_loc
 
 
 #[update]
-pub async fn controller_complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)> {
+pub async fn controller_complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
 
-    let complete_users_ids: Vec<UserId> = match opt_complete_users_ids {
+    let complete_users_ids: Vec<Principal> = match opt_complete_users_ids {
         Some(complete_users_ids) => complete_users_ids,
         None => {
             with(&CTS_DATA, |cts_data| { 
                 cts_data.users_burn_icp_mint_cycles.iter()
-                .filter(|&(_user_id, user_burn_icp_mint_cycles_data): &(&UserId, &UserBurnIcpMintCyclesData)| {
+                .filter(|&(_user_id, user_burn_icp_mint_cycles_data): &(&Principal, &UserBurnIcpMintCyclesData)| {
                     user_burn_icp_mint_cycles_data.lock == false
                 })
-                .map(|(user_id, _user_burn_icp_mint_cycles_data): (&UserId, &UserBurnIcpMintCyclesData)| {
+                .map(|(user_id, _user_burn_icp_mint_cycles_data): (&Principal, &UserBurnIcpMintCyclesData)| {
                     user_id.clone()
                 })
-                .collect::<Vec<UserId>>()
+                .collect::<Vec<Principal>>()
             })
         }
     };
     
     let rs: Vec<Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>> = futures::future::join_all(
         complete_users_ids.iter().map(
-            |complete_user_id: &UserId| {
+            |complete_user_id: &Principal| {
                 complete_user_burn_icp_mint_cycles_(complete_user_id.clone())
             }
         ).collect::<Vec<_>>()
     ).await;
     
-    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(UserId, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)>>()
+    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<UserBurnIcpMintCyclesSuccess, CompleteUserBurnIcpMintCyclesError>)>>()
 
 }
 
@@ -2471,12 +2461,12 @@ pub fn controller_see_users_transfer_icp() {
         trap("Caller must be a controller for this method.")
     }
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(Vec<(&UserId, &UserTransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&UserId, &UserTransferIcpData)>>(),));
+        ic_cdk::api::call::reply::<(Vec<(&Principal, &UserTransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&Principal, &UserTransferIcpData)>>(),));
     });
 }
 
 #[update]
-pub fn controller_put_user_transfer_icp_data(user_id: UserId, put_data: UserTransferIcpData, override_lock: bool) {
+pub fn controller_put_user_transfer_icp_data(user_id: Principal, put_data: UserTransferIcpData, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2495,7 +2485,7 @@ pub fn controller_put_user_transfer_icp_data(user_id: UserId, put_data: UserTran
 }
 
 #[update]
-pub fn controller_remove_user_transfer_icp(user_id: UserId, override_lock: bool) {
+pub fn controller_remove_user_transfer_icp(user_id: Principal, override_lock: bool) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2514,36 +2504,36 @@ pub fn controller_remove_user_transfer_icp(user_id: UserId, override_lock: bool)
 
 
 #[update]
-pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<UserId>>) -> Vec<(UserId, Result<IcpBlockHeight, CompleteUserTransferIcpError>)> {
+pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<IcpBlockHeight, CompleteUserTransferIcpError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
 
-    let complete_users_ids: Vec<UserId> = match opt_complete_users_ids {
+    let complete_users_ids: Vec<Principal> = match opt_complete_users_ids {
         Some(complete_users_ids) => complete_users_ids,
         None => {
             with(&CTS_DATA, |cts_data| { 
                 cts_data.users_transfer_icp.iter()
-                .filter(|&(_user_id, user_transfer_icp_data): &(&UserId, &UserTransferIcpData)| {
+                .filter(|&(_user_id, user_transfer_icp_data): &(&Principal, &UserTransferIcpData)| {
                     user_transfer_icp_data.lock == false
                 })
-                .map(|(user_id, _user_transfer_icp_data): (&UserId, &UserTransferIcpData)| {
+                .map(|(user_id, _user_transfer_icp_data): (&Principal, &UserTransferIcpData)| {
                     user_id.clone()
                 })
-                .collect::<Vec<UserId>>()
+                .collect::<Vec<Principal>>()
             })
         }
     };
     
     let rs: Vec<Result<IcpBlockHeight, CompleteUserTransferIcpError>> = futures::future::join_all(
         complete_users_ids.iter().map(
-            |complete_user_id: &UserId| {
+            |complete_user_id: &Principal| {
                 complete_user_transfer_icp_(complete_user_id.clone())
             }
         ).collect::<Vec<_>>()
     ).await;
     
-    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(UserId, Result<IcpBlockHeight, CompleteUserTransferIcpError>)>>()
+    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<IcpBlockHeight, CompleteUserTransferIcpError>)>>()
 
 }
 
@@ -2757,7 +2747,7 @@ pub struct CTSMetrics {
     users_map_canisters_count: u64,
     cycles_transferrer_canisters_count: u64,
     latest_known_cmc_rate: IcpXdrConversionRate,
-    new_users_count: u64,
+    cycles_bank_purchases_count: u64,
     users_burn_icp_mint_cycles_count: u64,
 }
 
@@ -2774,13 +2764,13 @@ pub fn controller_see_metrics() -> CTSMetrics {
             stable_size: ic_cdk::api::stable::stable64_size(),
             cycles_balance: ic_cdk::api::canister_balance128(),
             canisters_for_the_use_count: cts_data.canisters_for_the_use.len() as u64,
-            users_map_canister_code_hash: if cts_data.users_map_canister_code.module().len() != 0 { Some(cts_data.users_map_canister_code.module_hash().clone()) } else { None },
-            user_canister_code_hash: if cts_data.user_canister_code.module().len() != 0 { Some(cts_data.user_canister_code.module_hash().clone()) } else { None },
+            users_map_canister_code_hash: if cts_data.cbs_map_canister_code.module().len() != 0 { Some(cts_data.cbs_map_canister_code.module_hash().clone()) } else { None },
+            user_canister_code_hash: if cts_data.cycles_bank_canister_code.module().len() != 0 { Some(cts_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
             cycles_transferrer_canister_code_hash: if cts_data.cycles_transferrer_canister_code.module().len() != 0 { Some(cts_data.cycles_transferrer_canister_code.module_hash().clone()) } else { None },
-            users_map_canisters_count: cts_data.users_map_canisters.len() as u64,
+            users_map_canisters_count: cts_data.cbs_maps.len() as u64,
             cycles_transferrer_canisters_count: cts_data.cycles_transferrer_canisters.len() as u64,
             latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
-            new_users_count: cts_data.new_users.len() as u64,
+            cycles_bank_purchases_count: cts_data.cycles_bank_purchases.len() as u64,
             users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64
             
         }

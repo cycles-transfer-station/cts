@@ -1,5 +1,5 @@
 [package]
-name = "users_map_canister"
+name = "cbs_map"
 version = "0.1.0"
 edition = "2021"
 
