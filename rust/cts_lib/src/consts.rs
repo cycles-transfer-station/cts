@@ -9,9 +9,9 @@ use crate::{
 };
  
 
-pub const KiB: u64 = 1024;
-pub const MiB: u64 = KiB * 1024;
-pub const GiB: u64 = MiB * 1024;
+pub const KiB: usize = 1024;
+pub const MiB: usize = KiB * 1024;
+pub const GiB: usize = MiB * 1024;
 
 pub const WASM_PAGE_SIZE_BYTES: usize = 65536; // 2^16 // 64KiB
 
@@ -28,7 +28,7 @@ pub const NETWORK_XNET_CALL_FEE_CYCLES                          : Cycles = 260_0
 pub const NETWORK_XNET_BYTE_TRANSMISSION_FEE_CYCLES             : Cycles = 1_000;               // For every byte sent in an inter-canister call (for bytes sent in the request and response)
 pub const NETWORK_INGRESS_MESSAGE_CEPTION_FEE_CYCLES            : Cycles = 1_200_000;
 pub const NETWORK_INGRESS_BYTE_CEPTION_FEE_CYCLES               : Cycles = 2_000;               // what about bytes sent back as a sponse?
-pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES             : u64 = 127_000;             // 4 SDR per GiB per year => 4e12 Cycles per year
+pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES             : Cycles = 127_000;             // 4 SDR per GiB per year => 4e12 Cycles per year
 
 
 

@@ -286,6 +286,7 @@ pub mod cbs_map {
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
         pub cycles_bank_latest_known_module_hash: [u8; 32],
+        pub cycles_bank_lifetime_termination_timestamp_seconds: u128
     }
 
     #[derive(CandidType,Deserialize)]
@@ -322,17 +323,16 @@ pub mod cycles_bank {
     pub struct CyclesBankInit {
         pub user_id: Principal,
         pub cts_id: Principal,
+        pub cbsm_id: Principal, 
         pub cycles_market_id: Principal, 
-        pub storage_size_mib: u64,                         
-        pub lifetime_termination_timestamp_seconds: u64,
+        pub storage_size_mib: u128,                         
+        pub lifetime_termination_timestamp_seconds: u128,
         pub cycles_transferrer_canisters: Vec<Principal>
     }
     
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct UserTransferCyclesQuest {
-        pub for_the_canister: Principal,
-        pub cycles: Cycles,
-        pub cycles_transfer_memo: CyclesTransferMemo
+    #[derive(CandidType, Deserialize)]
+    pub struct LengthenLifetimeQuest {
+        pub set_lifetime_termination_timestamp_seconds: u128
     }
     
 }

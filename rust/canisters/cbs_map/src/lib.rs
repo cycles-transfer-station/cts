@@ -65,6 +65,7 @@ use cts_lib::{
             UMCUpgradeUCError,
             UMCUpgradeUCCallErrorType
         },
+        cycles_bank,
         management_canister::{
             CanisterIdRecord,
             ManagementCanisterInstallCodeQuest,
@@ -303,6 +304,23 @@ pub fn update_user() {
         }
     });
 }
+
+
+
+// -------------------------------
+
+
+
+#[update]
+pub fn cb_lengthen_lifetime(q: cycles_bank::LengthenLifetimeQuest) -> () {
+    with_mut(&UMC_DATA, |umc_data| {
+        let (_user_id, data): (&mut Principal, &mut CBSMUserData) = umc_data.users_map.iter_mut().find(|(_user_id, data): &(&mut Principal, &mut CBSMUserData)| { data.cycles_bank_canister_id == caller() }).unwrap_or_else(|| { trap("caller must be a cycles_bank in this cbs_map") });
+        data.cycles_bank_lifetime_termination_timestamp_seconds = q.set_lifetime_termination_timestamp_seconds;
+    });
+}
+
+
+
 
 
 
