@@ -442,13 +442,13 @@ async fn canister_global_timer() {
     /*
     if time()/1_000_000_000 > with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
         // call the cts-main for the user-canister-termination
-        // the CTS will save the user_id, user_canister_id, and user_cycles_balance for a minimum of the 10-years.
+        // the CTS will save the user_id, user_canister_id, and cycles_balance for a minimum of the 10-years.
         match call::<(cts::CyclesBankLifetimeTerminationQuest,), ()>(
             cts_id(),
             "user_canister_lifetime_termination",
             (cts::CyclesBankLifetimeTerminationQuest{
                 user_id: user_id(),
-                cycles_balance: user_cycles_balance()
+                cycles_balance: cycles_balance()
             },),
         ).await {
             Ok(_) => {},
@@ -471,7 +471,7 @@ fn user_id() -> Principal {
     with(&CB_DATA, |cb_data| { cb_data.user_id })
 }
 
-fn user_cycles_balance() -> Cycles {
+fn cycles_balance() -> Cycles {
     with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance })
 }
 
@@ -535,7 +535,7 @@ fn calculate_free_storage() -> u128 {
 
 fn ctsfuel_balance() -> CTSFuel {
     canister_balance128()
-    .saturating_sub(user_cycles_balance())
+    .saturating_sub(cycles_balance())
     .saturating_sub(USER_CANISTER_BACKUP_CYCLES)
     .saturating_sub(
         with(&CB_DATA, |cb_data| { 
@@ -643,8 +643,8 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
 
 
 
-#[export_name = "canister_query user_download_cycles_transfers_in"]
-pub fn user_download_cycles_transfers_in() {
+#[export_name = "canister_query download_cycles_transfers_in"]
+pub fn download_cycles_transfers_in() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -666,7 +666,7 @@ pub fn user_download_cycles_transfers_in() {
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
+pub fn delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -712,17 +712,17 @@ pub struct UserTransferCyclesQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserTransferCyclesError {
-    UserCanisterCTSFuelBalanceTooLow,
-    UserCanisterMemoryIsFull,
+    CTSFuelTooLow,
+    MemoryIsFull,
     InvalidCyclesTransferMemoSize{max_size_bytes: u128},
     InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
-    UserCyclesBalanceTooLow { user_cycles_balance: Cycles, cycles_transferrer_transfer_cycles_fee: Cycles },
+    CyclesBalanceTooLow { cycles_balance: Cycles, cycles_transferrer_transfer_cycles_fee: Cycles },
     CyclesTransferrerTransferCyclesError(cycles_transferrer::TransferCyclesError),
     CyclesTransferrerTransferCyclesCallError((u32, String))
 }
 
 #[update]
-pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, UserTransferCyclesError> {
+pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, UserTransferCyclesError> {
 
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
@@ -731,19 +731,19 @@ pub async fn user_transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
     
     if ctsfuel_balance() < 15_000_000_000 {
-        return Err(UserTransferCyclesError::UserCanisterCTSFuelBalanceTooLow);
+        return Err(UserTransferCyclesError::CTSFuelTooLow);
     }
     
     if calculate_free_storage() < std::mem::size_of::<CyclesTransferOut>() as u128 + 32 + 40 {
-        return Err(UserTransferCyclesError::UserCanisterMemoryIsFull);
+        return Err(UserTransferCyclesError::MemoryIsFull);
     }
     
     if q.cycles < MINIMUM_USER_TRANSFER_CYCLES {
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
     }
     
-    if q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE > user_cycles_balance() {
-        return Err(UserTransferCyclesError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_transferrer_transfer_cycles_fee: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE });
+    if q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE > cycles_balance() {
+        return Err(UserTransferCyclesError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_transferrer_transfer_cycles_fee: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE });
     }
     
     // check memo size
@@ -859,8 +859,8 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
 
 
 
-#[export_name = "canister_query user_download_cycles_transfers_out"]
-pub fn user_download_cycles_transfers_out() {
+#[export_name = "canister_query download_cycles_transfers_out"]
+pub fn download_cycles_transfers_out() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -883,7 +883,7 @@ pub fn user_download_cycles_transfers_out() {
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
+pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -925,30 +925,30 @@ pub fn user_delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u12
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMCreateCyclesPositionError {
-    UserCanisterCTSFuelTooLow,
-    UserCanisterMemoryIsFull,
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
     CyclesMarketCreateCyclesPositionCallError((u32, String)),
     CyclesMarketCreateCyclesPositionError(cycles_market::CreateCyclesPositionError)
 }
 
 
 #[update]
-pub async fn user_cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
+pub async fn cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMCreateCyclesPositionError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMCreateCyclesPositionError::CTSFuelTooLow);
     }
     
     if calculate_free_storage() < std::mem::size_of::<CMCyclesPosition>() as u128 {
-        return Err(UserCMCreateCyclesPositionError::UserCanisterMemoryIsFull);
+        return Err(UserCMCreateCyclesPositionError::MemoryIsFull);
     }
    
-    if user_cycles_balance() < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    if cycles_balance() < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
 
     match call_with_payment128::<(&cycles_market::CreateCyclesPositionQuest,), (Result<cycles_market::CreateCyclesPositionSuccess, cycles_market::CreateCyclesPositionError>,)>(
@@ -991,30 +991,30 @@ pub async fn user_cycles_market_create_cycles_position(q: cycles_market::CreateC
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMCreateIcpPositionError {
-    UserCanisterCTSFuelTooLow,
-    UserCanisterMemoryIsFull,
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
     CyclesMarketCreateIcpPositionCallError((u32, String)),
     CyclesMarketCreateIcpPositionError(cycles_market::CreateIcpPositionError)
 }
 
 
 #[update]
-pub async fn user_cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
+pub async fn cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMCreateIcpPositionError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMCreateIcpPositionError::CTSFuelTooLow);
     }
     
     if calculate_free_storage() < std::mem::size_of::<CMIcpPosition>() as u128 {
-        return Err(UserCMCreateIcpPositionError::UserCanisterMemoryIsFull);
+        return Err(UserCMCreateIcpPositionError::MemoryIsFull);
     }
    
-    if user_cycles_balance() < CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    if cycles_balance() < CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateIcpPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
 
     match call_with_payment128::<(&cycles_market::CreateIcpPositionQuest,), (Result<cycles_market::CreateIcpPositionSuccess, cycles_market::CreateIcpPositionError>,)>(
@@ -1062,30 +1062,30 @@ pub struct UserCMPurchaseCyclesPositionQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMPurchaseCyclesPositionError {
-    UserCanisterCTSFuelTooLow,
-    UserCanisterMemoryIsFull,
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
     CyclesMarketPurchaseCyclesPositionCallError((u32, String)),
     CyclesMarketPurchaseCyclesPositionError(cycles_market::PurchaseCyclesPositionError)
 }
 
 
 #[update]
-pub async fn user_cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
+pub async fn cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMPurchaseCyclesPositionError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMPurchaseCyclesPositionError::CTSFuelTooLow);
     }
     
     if calculate_free_storage() < std::mem::size_of::<CMCyclesPositionPurchase>() as u128 {
-        return Err(UserCMPurchaseCyclesPositionError::UserCanisterMemoryIsFull);
+        return Err(UserCMPurchaseCyclesPositionError::MemoryIsFull);
     }
     
-    if user_cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE {
-        return Err(UserCMPurchaseCyclesPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    if cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE {
+        return Err(UserCMPurchaseCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
 
     match call_with_payment128::<(&cycles_market::PurchaseCyclesPositionQuest,), (Result<cycles_market::PurchaseCyclesPositionSuccess, cycles_market::PurchaseCyclesPositionError>,)>(
@@ -1132,30 +1132,30 @@ pub struct UserCMPurchaseIcpPositionQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMPurchaseIcpPositionError {
-    UserCanisterCTSFuelTooLow,
-    UserCanisterMemoryIsFull,
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
     CyclesMarketPurchaseIcpPositionCallError((u32, String)),
     CyclesMarketPurchaseIcpPositionError(cycles_market::PurchaseIcpPositionError)
 }
 
 
 #[update]
-pub async fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
+pub async fn cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMPurchaseIcpPositionError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMPurchaseIcpPositionError::CTSFuelTooLow);
     }
     
     if calculate_free_storage() < std::mem::size_of::<CMIcpPositionPurchase>() as u128 {
-        return Err(UserCMPurchaseIcpPositionError::UserCanisterMemoryIsFull);
+        return Err(UserCMPurchaseIcpPositionError::MemoryIsFull);
     }
     
-    if user_cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate) {
-        return Err(UserCMPurchaseIcpPositionError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    if cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE + icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate) {
+        return Err(UserCMPurchaseIcpPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
 
     match call_with_payment128::<(&cycles_market::PurchaseIcpPositionQuest,), (Result<cycles_market::PurchaseIcpPositionSuccess, cycles_market::PurchaseIcpPositionError>,)>(
@@ -1196,20 +1196,20 @@ pub async fn user_cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositi
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMVoidPositionError {
-    UserCanisterCTSFuelTooLow,
+    CTSFuelTooLow,
     CyclesMarketVoidPositionCallError((u32, String)),
     CyclesMarketVoidPositionError(cycles_market::VoidPositionError)
 }
 
 
 #[update]
-pub async fn user_cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+pub async fn cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMVoidPositionError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMVoidPositionError::CTSFuelTooLow);
     }
     
     match call::<(cycles_market::VoidPositionQuest,), (Result<(), cycles_market::VoidPositionError>,)>(
@@ -1236,18 +1236,18 @@ pub async fn user_cycles_market_void_position(q: cycles_market::VoidPositionQues
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMSeeIcpLockError {
-    UserCanisterCTSFuelTooLow,
+    CTSFuelTooLow,
     CyclesMarketSeeIcpLockCallError((u32, String)),
 }
 
 #[update]
-pub async fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
+pub async fn cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMSeeIcpLockError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMSeeIcpLockError::CTSFuelTooLow);
     }
     
     match call::<(), (IcpTokens,)>(
@@ -1267,29 +1267,29 @@ pub async fn user_cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcp
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMTransferIcpBalanceError {
-    UserCanisterCTSFuelTooLow,
-    UserCanisterMemoryIsFull,
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, cycles_market_transfer_icp_balance_fee: Cycles },
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_transfer_icp_balance_fee: Cycles },
     CyclesMarketTransferIcpBalanceCallError((u32, String)),
     CyclesMarketTransferIcpBalanceError(cycles_market::TransferIcpBalanceError)
 }
 
 #[update]
-pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) -> Result<IcpBlockHeight, UserCMTransferIcpBalanceError> {
+pub async fn cycles_market_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) -> Result<IcpBlockHeight, UserCMTransferIcpBalanceError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
     if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMTransferIcpBalanceError::UserCanisterCTSFuelTooLow);
+        return Err(UserCMTransferIcpBalanceError::CTSFuelTooLow);
     }
 
     if calculate_free_storage() < std::mem::size_of::<CMIcpTransferOut>() as u128 {
-        return Err(UserCMTransferIcpBalanceError::UserCanisterMemoryIsFull);
+        return Err(UserCMTransferIcpBalanceError::MemoryIsFull);
     }
 
-    if user_cycles_balance() < CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE {
-        return Err(UserCMTransferIcpBalanceError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
+    if cycles_balance() < CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE {
+        return Err(UserCMTransferIcpBalanceError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
     }
 
     match call_with_payment128::<(&cycles_market::TransferIcpBalanceQuest,), (Result<IcpBlockHeight, cycles_market::TransferIcpBalanceError>,)>(
@@ -1332,7 +1332,7 @@ pub async fn user_cycles_market_transfer_icp_balance(q: cycles_market::TransferI
 
 
 #[query(manual_reply = true)]
-pub fn user_download_cm_cycles_positions() {
+pub fn download_cm_cycles_positions() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1352,7 +1352,7 @@ pub fn user_download_cm_cycles_positions() {
 
 
 #[query(manual_reply = true)]
-pub fn user_download_cm_icp_positions() {
+pub fn download_cm_icp_positions() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1372,7 +1372,7 @@ pub fn user_download_cm_icp_positions() {
 
 
 #[query(manual_reply = true)]
-pub fn user_download_cm_cycles_positions_purchases() {
+pub fn download_cm_cycles_positions_purchases() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1393,7 +1393,7 @@ pub fn user_download_cm_cycles_positions_purchases() {
 
 
 #[query(manual_reply = true)]
-pub fn user_download_cm_icp_positions_purchases() {
+pub fn download_cm_icp_positions_purchases() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1413,7 +1413,7 @@ pub fn user_download_cm_icp_positions_purchases() {
 
 
 #[query(manual_reply = true)]
-pub fn user_download_cm_icp_transfers_out() {
+pub fn download_cm_icp_transfers_out() {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1438,7 +1438,7 @@ pub fn user_download_cm_icp_transfers_out() {
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
+pub fn delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1474,7 +1474,7 @@ pub fn user_delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
+pub fn delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1511,7 +1511,7 @@ pub fn user_delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases_ids: Vec<u128>) {
+pub fn delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1548,7 +1548,7 @@ pub fn user_delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purc
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: Vec<u128>) {
+pub fn delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1583,7 +1583,7 @@ pub fn user_delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_
 
 
 #[update(manual_reply = true)]
-pub fn user_delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
+pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1624,15 +1624,15 @@ pub fn user_delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u12
 
 
 /*
-#[export_name = "canister_query user_cycles_balance"]
-pub fn user_cycles_balance_canister_method() {  // -> Cycles
+#[export_name = "canister_query cycles_balance"]
+pub fn cycles_balance_canister_method() {  // -> Cycles
     if caller() != user_id() {
         trap("caller must be the user")
     }
     
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
     
-    reply::<(Cycles,)>((user_cycles_balance(),));
+    reply::<(Cycles,)>((cycles_balance(),));
     return;
 }
 */
@@ -1642,7 +1642,7 @@ pub fn user_cycles_balance_canister_method() {  // -> Cycles
 
 #[derive(CandidType, Deserialize)]
 pub struct UserUCMetrics {
-    user_cycles_balance: Cycles,
+    cycles_balance: Cycles,
     user_canister_ctsfuel_balance: CTSFuel,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
@@ -1653,18 +1653,18 @@ pub struct UserUCMetrics {
     cycles_transfers_out_len: u128,
     cycles_transfers_in_len: u128,
     storage_usage: u128,
-    user_download_cycles_transfers_in_chunk_size: u128,
-    user_download_cycles_transfers_out_chunk_size: u128,
+    download_cycles_transfers_in_chunk_size: u128,
+    download_cycles_transfers_out_chunk_size: u128,
     cm_cycles_positions_len: u128,
     cm_icp_positions_len: u128,
     cm_cycles_positions_purchases_len: u128,
     cm_icp_positions_purchases_len: u128,
     cm_icp_transfers_out_len: u128,
-    user_download_cm_cycles_positions_chunk_size: u128,
-    user_download_cm_icp_positions_chunk_size: u128,
-    user_download_cm_cycles_positions_purchases_chunk_size: u128,
-    user_download_cm_icp_positions_purchases_chunk_size: u128,
-    user_download_cm_icp_transfers_out_chunk_size: u128,
+    download_cm_cycles_positions_chunk_size: u128,
+    download_cm_icp_positions_chunk_size: u128,
+    download_cm_cycles_positions_purchases_chunk_size: u128,
+    download_cm_icp_positions_purchases_chunk_size: u128,
+    download_cm_icp_transfers_out_chunk_size: u128,
 }
 
 
@@ -1676,7 +1676,7 @@ pub fn user_see_metrics() -> UserUCMetrics {
     
     with(&CB_DATA, |cb_data| {
         UserUCMetrics{
-            user_cycles_balance: cb_data.user_data.cycles_balance,
+            cycles_balance: cb_data.user_data.cycles_balance,
             user_canister_ctsfuel_balance: ctsfuel_balance(),
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,
@@ -1687,18 +1687,18 @@ pub fn user_see_metrics() -> UserUCMetrics {
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
             storage_usage: calculate_current_storage_usage(),
-            user_download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u128,
-            user_download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u128,
+            download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u128,
+            download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u128,
             cm_cycles_positions_len: cb_data.user_data.cm_cycles_positions.len() as u128,
             cm_icp_positions_len: cb_data.user_data.cm_icp_positions.len() as u128,
             cm_cycles_positions_purchases_len: cb_data.user_data.cm_cycles_positions_purchases.len() as u128,
             cm_icp_positions_purchases_len: cb_data.user_data.cm_icp_positions_purchases.len() as u128,
             cm_icp_transfers_out_len: cb_data.user_data.cm_icp_transfers_out.len() as u128,
-            user_download_cm_cycles_positions_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE as u128,
-            user_download_cm_icp_positions_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE as u128,
-            user_download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
-            user_download_cm_icp_positions_purchases_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
-            user_download_cm_icp_transfers_out_chunk_size: USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE as u128,
+            download_cm_cycles_positions_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE as u128,
+            download_cm_icp_positions_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE as u128,
+            download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
+            download_cm_icp_positions_purchases_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
+            download_cm_icp_transfers_out_chunk_size: USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE as u128,
         }
     })
 }
@@ -1721,19 +1721,19 @@ pub fn user_topup_ctsfuel_with_some_cycles() -> () {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCyclesBalanceForTheCTSFuelError {
-    UserCyclesBalanceTooLow { user_cycles_balance: Cycles }
+    CyclesBalanceTooLow { cycles_balance: Cycles }
 }
 
 #[update]
-pub fn user_cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<(), UserCyclesBalanceForTheCTSFuelError> {
+pub fn cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<(), UserCyclesBalanceForTheCTSFuelError> {
     if caller() != user_id() {
         trap("caller must be the user for this method.");
     }
     
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
     
-    if user_cycles_balance() < cycles_for_the_ctsfuel {
-        return Err(UserCyclesBalanceForTheCTSFuelError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance() });        
+    if cycles_balance() < cycles_for_the_ctsfuel {
+        return Err(UserCyclesBalanceForTheCTSFuelError::CyclesBalanceTooLow{ cycles_balance: cycles_balance() });        
     } 
     
     with_mut(&CB_DATA, |cb_data| {
@@ -1753,7 +1753,7 @@ pub fn user_cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Re
 #[derive(CandidType, Deserialize)]
 pub enum LengthenLifetimeError {
     MinimumSetLifetimeTerminationTimestampSeconds(u128),
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, lengthen_cost_cycles: Cycles },
+    CyclesBalanceTooLow{ cycles_balance: Cycles, lengthen_cost_cycles: Cycles },
     CBSMCallError((u32, String))
 }
 
@@ -1776,8 +1776,8 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
     };
     
-    if lengthen_cost_cycles > user_cycles_balance() {
-        return Err(LengthenLifetimeError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), lengthen_cost_cycles });
+    if lengthen_cost_cycles > cycles_balance() {
+        return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), lengthen_cost_cycles });
     }
     
     // let id for the log
@@ -1820,7 +1820,7 @@ pub struct UserChangeStorageSizeMibQuest {
 #[derive(CandidType, Deserialize)]
 pub enum UserChangeStorageSizeMibError {
     NewStorageSizeMibTooLow{ minimum_new_storage_size_mib: u128 },
-    UserCyclesBalanceTooLow{ user_cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
+    CyclesBalanceTooLow{ cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
     ManagementCanisterUpdateSettingsCallError((u32, String))
 }
 
@@ -1842,8 +1842,8 @@ pub async fn user_change_storage_size_mib(q: UserChangeStorageSizeMibQuest) -> R
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
     };
     
-    if user_cycles_balance() < new_storage_size_mib_cost_cycles {
-        return Err(UserChangeStorageSizeMibError::UserCyclesBalanceTooLow{ user_cycles_balance: user_cycles_balance(), new_storage_size_mib_cost_cycles });
+    if cycles_balance() < new_storage_size_mib_cost_cycles {
+        return Err(UserChangeStorageSizeMibError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), new_storage_size_mib_cost_cycles });
     }
 
     // take the cycles before the .await and if error after here, refund the cycles
@@ -1983,7 +1983,7 @@ pub fn cts_re_store_cb_data_out_of_the_state_snapshot() {
 #[derive(CandidType, Deserialize)]
 pub struct CTSUCMetrics {
     canister_cycles_balance: Cycles,
-    user_cycles_balance: Cycles,
+    cycles_balance: Cycles,
     user_canister_ctsfuel_balance: CTSFuel,
     wasm_memory_size_bytes: u128,
     stable_memory_size_bytes: u64,
@@ -2010,7 +2010,7 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
     with(&CB_DATA, |cb_data| {
         CTSUCMetrics{
             canister_cycles_balance: canister_balance128(),
-            user_cycles_balance: cb_data.user_data.cycles_balance,
+            cycles_balance: cb_data.user_data.cycles_balance,
             user_canister_ctsfuel_balance: ctsfuel_balance(),
             wasm_memory_size_bytes: ( core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES ) as u128,
             stable_memory_size_bytes: stable64_size() * WASM_PAGE_SIZE_BYTES as u64,

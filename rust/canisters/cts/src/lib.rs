@@ -1312,7 +1312,7 @@ pub async fn burn_icp_mint_cycles(q: BurnIcpMintCyclesQuest) -> Result<BurnIcpMi
 
 #[derive(CandidType, Deserialize)]
 pub enum CompleteBurnIcpMintCyclesError{
-    UserNotFoundInTheOngoingUsersBurnIcpMintCyclesMap,
+    UserIsNotInTheMiddleOfABurnIcpMintCyclesCall,
     BurnIcpMintCyclesError(BurnIcpMintCyclesError)
 }
 
@@ -1338,7 +1338,7 @@ async fn complete_burn_icp_mint_cycles_(user_id: Principal) -> Result<BurnIcpMin
                 Ok(burn_icp_mint_cycles_data.clone())
             },
             None => {
-                return Err(CompleteBurnIcpMintCyclesError::UserNotFoundInTheOngoingUsersBurnIcpMintCyclesMap);
+                return Err(CompleteBurnIcpMintCyclesError::UserIsNotInTheMiddleOfABurnIcpMintCyclesCall);
             }
         }
     })?;
@@ -1577,7 +1577,7 @@ pub async fn transfer_icp(q: TransferIcpQuest) -> Result<IcpBlockHeight, Transfe
 
 #[derive(CandidType, Deserialize)]
 pub enum CompleteTransferIcpError{
-    UserNotFoundInTheUsersTransferIcpMap,
+    UserIsNotInTheMiddleOfATransferIcpCall,
     TransferIcpError(TransferIcpError)
 }
 
@@ -1602,7 +1602,7 @@ async fn complete_transfer_icp_(user_id: Principal) -> Result<IcpBlockHeight, Co
                 Ok(transfer_icp_data.clone())
             },
             None => {
-                return Err(CompleteTransferIcpError::UserNotFoundInTheUsersTransferIcpMap);
+                return Err(CompleteTransferIcpError::UserIsNotInTheMiddleOfATransferIcpCall);
             }
         }
     })?;

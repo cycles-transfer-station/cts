@@ -12,9 +12,9 @@ ic-wasm target/wasm32-unknown-unknown/release/cts.wasm -o target/wasm32-unknown-
 
 ic-wasm target/wasm32-unknown-unknown/release/cycles_transferrer.wasm -o target/wasm32-unknown-unknown/release/cycles_transferrer-o.wasm shrink
 
-ic-wasm target/wasm32-unknown-unknown/release/users_map_canister.wasm -o target/wasm32-unknown-unknown/release/users_map_canister-o.wasm shrink
+ic-wasm target/wasm32-unknown-unknown/release/cbs_map.wasm -o target/wasm32-unknown-unknown/release/cbs_map-o.wasm shrink
 
-ic-wasm target/wasm32-unknown-unknown/release/user_canister.wasm -o target/wasm32-unknown-unknown/release/user_canister-o.wasm shrink
+ic-wasm target/wasm32-unknown-unknown/release/cycles_bank.wasm -o target/wasm32-unknown-unknown/release/cycles_bank-o.wasm shrink
 
 ic-wasm target/wasm32-unknown-unknown/release/cycles_market.wasm -o target/wasm32-unknown-unknown/release/cycles_market-o.wasm shrink
 

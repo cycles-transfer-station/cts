@@ -49,7 +49,7 @@ use cts_lib::{
         api::{
             id as cycles_market_canister_id,
             trap,
-            time,
+            time as time_u64,
             caller,
             call::{
                 call,
@@ -91,6 +91,8 @@ use cts_lib::{
     }
 };
 
+fn time() -> u128 { time_u64() as u128 }
+
 
 // on a cycles-payout, the cycles-market will try once to send the cycles with a cycles_transfer-method call and if it fails, the cycles-market will use the deposit_cycles management canister method and close the position.
 
@@ -108,7 +110,7 @@ struct CyclesPosition {
     cycles: Cycles,
     minimum_purchase: Cycles,
     xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -118,7 +120,7 @@ struct IcpPosition {
     icp: IcpTokens,
     minimum_purchase: IcpTokens,
     xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -129,7 +131,7 @@ struct CyclesPositionPurchase {
     id: PurchaseId,
     purchaser: Principal,
     cycles: Cycles,
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
     cycles_payout_lock: bool,
     icp_payout_lock: bool,
     cycles_payout_data: CyclesPayoutData,
@@ -144,7 +146,7 @@ struct IcpPositionPurchase {
     id: PurchaseId,
     purchaser: Principal,
     icp: IcpTokens,
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
     cycles_payout_lock: bool,
     icp_payout_lock: bool,
     cycles_payout_data: CyclesPayoutData,
@@ -154,7 +156,7 @@ struct IcpPositionPurchase {
 
 #[derive(Clone, CandidType, Deserialize)]
 struct CyclesPayoutData {
-    cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u64>,
+    cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u128>,
     cycles_transferrer_transfer_cycles_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
     management_canister_posit_cycles_call_success: bool // this is use for when the payout-cycles-transfer-refund != 0, call the management_canister-deposit_cycles(payout-cycles-transfer-refund)
 } 
@@ -187,7 +189,7 @@ struct VoidCyclesPosition {
     cycles: Cycles,
     cycles_payout_lock: bool,  // lock for the payout
     cycles_payout_data: CyclesPayoutData,
-    timestamp_nanos: u64
+    timestamp_nanos: u128
 }
 
 
@@ -232,7 +234,7 @@ pub const TRANSFER_ICP_BALANCE_FEE: Cycles = 50_000_000_000;
 
 pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
 
-pub const MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK: u64 = 1_000_000_000*60*60*10;
+pub const MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK: u128 = 1_000_000_000*60*60*10;
 
 pub const MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP: Cycles = 20_000_000_000_000;
 pub const MINIMUM_CYCLES_POSITION: Cycles = 5_000_000_000_000;
@@ -242,23 +244,23 @@ pub const MINIMUM_ICP_POSITION: IcpTokens = IcpTokens::from_e8s(50000000);
 
 
 
-const CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: u64 = 500; // multiple of 10
-const CANISTER_DATA_STORAGE_SIZE_MiB: u64 = CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 2 - 20/*memory-size at the start [re]placement*/; // multiple of 5 
+const CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: usize = 500; // multiple of 10
+const CANISTER_DATA_STORAGE_SIZE_MiB: usize = CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 2 - 20/*memory-size at the start [re]placement*/; // multiple of 5 
 
-const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
-const MAX_CYCLES_POSITIONS: usize = ( CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>() as u64 ) as usize;
+const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_CYCLES_POSITIONS: usize = CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>();
 
-const ICP_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
-const MAX_ICP_POSITIONS: usize = ( ICP_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPosition>() as u64 ) as usize;
+const ICP_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_ICP_POSITIONS: usize = ICP_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPosition>();
 
-const ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
-const MAX_ICP_POSITIONS_PURCHASES: usize = ( ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPositionPurchase>() as u64 ) as usize;
+const ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_ICP_POSITIONS_PURCHASES: usize = ICP_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<IcpPositionPurchase>();
 
-const CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
-const MAX_CYCLES_POSITIONS_PURCHASES: usize = ( CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPositionPurchase>() as u64 ) as usize;
+const CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_CYCLES_POSITIONS_PURCHASES: usize = CYCLES_POSITIONS_PURCHASES_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPositionPurchase>();
 
-const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: u64 = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
-const MAX_VOID_CYCLES_POSITIONS: usize = ( VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>() as u64 ) as usize;
+const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 5 * 1;
+const MAX_VOID_CYCLES_POSITIONS: usize = VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>();
 
 
 const DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 10;
@@ -276,7 +278,7 @@ const ICP_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START: &[u8; 6] = b"CM-IPP";
 const ICP_POSITION_PURCHASE_ICP_TRANSFER_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CM-IPP-0"));
 const CYCLES_POSITION_PURCHASE_ICP_TRANSFER_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CM-CPP-0"));
 
-const TRANSFER_ICP_BALANCE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CM-TR-BL"));
+const TRANSFER_ICP_BALANCE_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CMTRNSFR"));
 
 const SEE_CYCLES_POSITIONS_CHUNK_SIZE: usize = 300;
 const SEE_ICP_POSITIONS_CHUNK_SIZE: usize = 300;
@@ -482,7 +484,7 @@ pub enum DoCyclesPayoutError {
 }
 // use this enum in the stead of returning the CyclesPayoutData cause we want to make sure the cycles_payout_data is not re-place by this output cause the cycles_transferrer-transfer_cycles_callback can come back before this output is put back on the purchase/vcp. so we use this struct so that only the fields get re-place. 
 pub enum DoCyclesPayoutSponse {
-    CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(Option<u64>),
+    CyclesTransferrerTransferCyclesCallSuccessTimestampNanos(Option<u128>),
     ManagementCanisterPositCyclesCallSuccess(bool),
     NothingToDo
 }
@@ -490,7 +492,7 @@ pub enum DoCyclesPayoutSponse {
 async fn do_cycles_payout(q: DoCyclesPayoutQuest) -> Result<DoCyclesPayoutSponse, DoCyclesPayoutError> {
     
     if q.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.is_none() {
-        let cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u64>;
+        let cycles_transferrer_transfer_cycles_call_success_timestamp_nanos: Option<u128>;
         let cycles_transfer_memo_start: &[u8] = match q.do_cycles_payout_type {
             DoCyclesPayoutType::VoidCyclesPosition => &VOID_POSITION_CYCLES_TRANSFER_MEMO_START[..],
             DoCyclesPayoutType::CyclesPositionPurchase => &CYCLES_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START[..],
@@ -649,7 +651,7 @@ async fn do_payouts() {
                                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                                 from_subaccount: Some(principal_icp_subaccount(&cpp.purchaser)),
                                 to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&cpp.cycles_position_positor)),
-                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
                             }
                         )
                     )
@@ -696,7 +698,7 @@ async fn do_payouts() {
                                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                                 from_subaccount: Some(principal_icp_subaccount(&ipp.icp_position_positor)),
                                 to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&ipp.purchaser)),
-                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
                             }
                         )
                     )
@@ -1016,7 +1018,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
     
     match with_mut(&CM_DATA, |cm_data| {
         if cm_data.mid_call_user_icp_balance_locks.len() >= MAX_MID_CALL_USER_ICP_BALANCE_LOCKS {
-            reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::CyclesMarketIsFull),));
+            reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::CyclesMarketIsBusy),));
             return Err(());
         }
         if cm_data.mid_call_user_icp_balance_locks.contains(&positor) {
@@ -1513,7 +1515,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
             fee: q.icp_fee.unwrap_or(ICP_LEDGER_TRANSFER_DEFAULT_FEE),
             from_subaccount: Some(principal_icp_subaccount(&user_id)),
             to: q.to,
-            created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })
+            created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
         }   
     ).await {
         Ok(icp_transfer_result) => match icp_transfer_result {

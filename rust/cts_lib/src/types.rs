@@ -380,6 +380,7 @@ pub mod cycles_market {
         MinimumPurchaseMustBeEqualOrLessThanTheIcpPosition,
         MsgCyclesTooLow{ create_position_fee: Cycles },
         CyclesMarketIsFull,
+        CyclesMarketIsBusy,
         CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
         CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
         UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
