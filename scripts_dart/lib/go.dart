@@ -25,7 +25,10 @@ Caller controller3 = CallerEd25519(
     private_key: Uint8List.fromList(controllers_json['controller3']!['s_key']!.cast<int>()),
 );
 
-
+Caller temp_icp_holder = CallerEd25519(
+    public_key: Uint8List.fromList(controllers_json['temp_icp_holder']!['pub_key']!.cast<int>()),
+    private_key: Uint8List.fromList(controllers_json['temp_icp_holder']!['s_key']!.cast<int>()),
+);
 
 
 
@@ -169,39 +172,17 @@ Future<void> main(List<String> arguments) async {
         await call_canister_convert_icp_balance_for_the_cycles_with_the_cmc_rate(double.parse(arguments[1]));
     }
     
-    else if (first_command == 'call_canister_collect_balance') {
-        late Variant param;
-        if (arguments[1] == 'cycles') {
-            param = Variant.oftheMap({
-                'cycles_payout': Record.oftheMap({
-                    'cycles': Nat(int.parse(arguments[2])),
-                    'payout_cycles_transfer_canister': PrincipalCandid(Principal(arguments[3])).candid
-                })
-            });
-        } else if (arguments[1] == 'icp') {
-            param = Variant.oftheMap({
-                'icp_payout': Record.oftheMap({
-                    'icp': Record.oftheMap({
-                        'e8s': Nat64((double.parse(arguments[2]) * 100000000).toInt())
-                    }),
-                    'payout_icp_id': Blob(hexstringasthebytes(arguments[3]))
-                })
-            });
-        }
-
-        await call_canister_collect_balance(c_forwards([param]));
-    }
 
     else if (first_command == 'purchase_cycles_bank') {
         await purchase_cycles_bank(arguments[1]);
     }
 
     else if (first_command == 'see_cycles_transfer_purchases') {
-        await see_cycles_transfer_purchases(Nat(0));
+        await see_cycles_transfer_purchases(Nat(BigInt.from(0)));
     }
     
     else if (first_command == 'see_cycles_bank_purchases') {
-        await see_cycles_bank_purchases(Nat(0));
+        await see_cycles_bank_purchases(Nat(BigInt.from(0)));
     }
 
 
@@ -417,9 +398,11 @@ Future<void> main(List<String> arguments) async {
 
         //print(await cts_main.controllers());
 
-        print(await test_canister_2.controllers());
+        //print(await test_canister_2.controllers());
 
-
+        String ticph_icp_id = temp_icp_holder.principal.icp_id(); 
+        print(ticph_icp_id);
+        print(await common.check_icp_balance(ticph_icp_id));
 
 
     }
@@ -660,7 +643,7 @@ Future<void> call_user_canister_user_transfer_cycles() async {
         put_bytes: c_forwards([
             // sending cycles for my self, out then in
             Record.oftheMap({
-                'cycles': Nat(3),
+                'cycles': Nat(BigInt.from(3)),
                 'canister_id': canister.principal.candid,
                 'cycles_transfer_memo': Variant.oftheMap({
                     'Blob': Blob(get_user_subaccount_bytes())
@@ -741,7 +724,7 @@ Future<void> call_canister_see_balance([bool cts = false]) async {
     print({
         'Ok': {
             'cycles_balance': ((cs[0] as Variant)['Ok'] as Record)['cycles_balance'],
-            'icp_balance' : ((((cs[0] as Variant)['Ok'] as Record)['icp_balance'] as Record)['e8s'] as Nat64).value / 100000000
+            'icp_balance' : ((((cs[0] as Variant)['Ok'] as Record)['icp_balance'] as Record)['e8s'] as Nat64).value / BigInt.from(100000000)
         }
     });
 
@@ -775,7 +758,7 @@ Future<void> call_canister_convert_icp_balance_for_the_cycles_with_the_cmc_rate(
         put_bytes: c_forwards([
             Record.oftheMap({
                 'icp': Record.oftheMap({
-                    'e8s': Nat64((icp * 100000000).toInt())
+                    'e8s': Nat64(BigInt.from((icp * 100000000).toInt()))
                 })
             })
         ])
@@ -1323,7 +1306,7 @@ Future<void> controller_cts_call_canister() async {
                         })
                     })
                 ])),
-                'cycles': Nat(14)
+                'cycles': Nat(BigInt.from(14))
             })
         ])
     );
@@ -1720,7 +1703,7 @@ Future<void> call_canister() async {
         method_name: 'transfer_cycles',
         put_bytes: c_forwards([
             canister2.principal.candid,
-            Nat64(3),
+            Nat64(BigInt.from(3)),
             Record.oftheMap({
                 'memo': Variant.oftheMap({
                     'text': Text('memo')
@@ -1763,7 +1746,7 @@ Future<void> call_canister() async {
         caller: controller,
         calltype: CallType.call,
         method_name: 'transfers',
-        put_bytes: c_forwards([Nat64(1)])
+        put_bytes: c_forwards([Nat64(BigInt.from(1))])
     ));
     print(cs);
     Vector<Record> v = (cs[0] as Vector).cast_vector<Record>();
@@ -1782,7 +1765,7 @@ Future<void> call_canister() async {
         caller: controller2,
         calltype: CallType.call,
         method_name: 'transfers',
-        put_bytes: c_forwards([Nat64(1)])
+        put_bytes: c_forwards([Nat64(BigInt.from(1))])
     ));
     print(cs);
     Vector<Record> v2 = (cs[0] as Vector).cast_vector<Record>();

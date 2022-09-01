@@ -568,7 +568,7 @@ pub enum PurchaseCyclesBankError{
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     CTSIsBusy,
     FoundCyclesBank(Principal),
-    ReferralUserNotFound,
+    ReferralUserCyclesBankNotFound,
     CreateCyclesBankCanisterCmcNotifyError(CmcNotifyError),
     MidCallError(PurchaseCyclesBankMidCallError),    // call complete_purchase_cycles_bank on this sponse
 }
@@ -776,7 +776,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                     },
                     None => {
                         with_mut(&CTS_DATA, |cts_data| { cts_data.users_purchase_cycles_bank.remove(&user_id); });
-                        return Err(PurchaseCyclesBankError::ReferralUserNotFound);
+                        return Err(PurchaseCyclesBankError::ReferralUserCyclesBankNotFound);
                     }
                 },
                 Err(find_user_in_the_cbsms_error) => match find_user_in_the_cbsms_error {
@@ -1237,13 +1237,11 @@ pub struct BurnIcpMintCyclesQuest {
 pub enum BurnIcpMintCyclesError {
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     MinimumBurnIcpMintCycles{minimum_burn_icp_mint_cycles: IcpTokens},
-    IcpCheckBalanceCallError((u32, String)),
-    UserIcpBalanceTooLow{user_icp_balance: IcpTokens, icp_ledger_transfer_fee: IcpTokens},
     FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),
     CyclesBankNotFound,
     CTSIsBusy,
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    MidCallError(BurnIcpMintCyclesMidCallError) // on this error, call with the same-parameters for the completion of this call. 
+    MidCallError(BurnIcpMintCyclesMidCallError)
 }
 
 
@@ -1355,22 +1353,6 @@ async fn complete_burn_icp_mint_cycles_(user_id: Principal) -> Result<BurnIcpMin
 async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data: BurnIcpMintCyclesData) -> Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError> {
     
     if burn_icp_mint_cycles_data.cycles_bank_canister_id.is_none() {
-            
-        let user_icp_balance: IcpTokens = match check_user_icp_ledger_balance(&user_id).await {
-            Ok(icp_tokens) => icp_tokens,
-            Err(icp_check_balance_call_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
-                return Err(BurnIcpMintCyclesError::IcpCheckBalanceCallError((icp_check_balance_call_error.0 as u32, icp_check_balance_call_error.1)));
-            }
-        };
-        
-        if user_icp_balance < burn_icp_mint_cycles_data.burn_icp_mint_cycles_quest.burn_icp + ICP_LEDGER_TRANSFER_DEFAULT_FEE {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
-            return Err(BurnIcpMintCyclesError::UserIcpBalanceTooLow{
-                user_icp_balance,
-                icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE
-            });
-        }
         
         let cycles_bank_canister_id: Principal = match find_cycles_bank_canister_of_the_specific_user(user_id).await {
             Ok(opt_cycles_bank_canister_id) => match opt_cycles_bank_canister_id {
@@ -1516,11 +1498,20 @@ pub struct TransferIcpQuest {
 }
 
 #[derive(CandidType, Deserialize)]
+pub struct TransferIcpSuccess {
+    block_height: IcpBlockHeight,
+}
+
+
+
+
+#[derive(CandidType, Deserialize)]
 pub enum TransferIcpError{
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     CheckIcpBalanceCallError((u32, String)),
     CTSIsBusy,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
+    MaxTransfer{ max_transfer: IcpTokens },
     UserIcpLedgerBalanceTooLow{
         user_icp_ledger_balance: IcpTokens,
         icp_ledger_transfer_fee: IcpTokens,
@@ -1538,7 +1529,7 @@ pub enum TransferIcpMidCallError{
 }
 
 #[update]
-pub async fn transfer_icp(q: TransferIcpQuest) -> Result<IcpBlockHeight, TransferIcpError> {
+pub async fn transfer_icp(q: TransferIcpQuest) -> Result<TransferIcpSuccess, TransferIcpError> {
 
     let user_id: Principal = caller();
         
@@ -1582,7 +1573,7 @@ pub enum CompleteTransferIcpError{
 }
 
 #[update]
-pub async fn complete_transfer_icp() -> Result<IcpBlockHeight, CompleteTransferIcpError> {
+pub async fn complete_transfer_icp() -> Result<TransferIcpSuccess, CompleteTransferIcpError> {
     
     let user_id: Principal = caller();
     
@@ -1590,7 +1581,7 @@ pub async fn complete_transfer_icp() -> Result<IcpBlockHeight, CompleteTransferI
 
 }
 
-async fn complete_transfer_icp_(user_id: Principal) -> Result<IcpBlockHeight, CompleteTransferIcpError> {
+async fn complete_transfer_icp_(user_id: Principal) -> Result<TransferIcpSuccess, CompleteTransferIcpError> {
     
     let transfer_icp_data: TransferIcpData = with_mut(&CTS_DATA, |cts_data| {
         match cts_data.users_transfer_icp.get_mut(&user_id) {
@@ -1615,7 +1606,7 @@ async fn complete_transfer_icp_(user_id: Principal) -> Result<IcpBlockHeight, Co
 }
 
 
-async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpData) -> Result<IcpBlockHeight, TransferIcpError> {
+async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpData) -> Result<TransferIcpSuccess, TransferIcpError> {
 
     if transfer_icp_data.cts_transfer_icp_fee.is_none() {
 
@@ -1648,7 +1639,22 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
         
         let cts_transfer_icp_fee: IcpTokens = cycles_to_icptokens(CTS_TRANSFER_ICP_FEE, current_xdr_icp_rate);
         
-        if user_icp_ledger_balance < transfer_icp_data.transfer_icp_quest.icp + cts_transfer_icp_fee + IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
+        let icp_balance_quirement: IcpTokens = {
+            let max_transfer: IcpTokens = IcpTokens::MAX - cts_transfer_icp_fee - IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2);
+            match transfer_icp_data.transfer_icp_quest.icp.e8s().checked_add(cts_transfer_icp_fee.e8s()) {
+                None => return Err(TransferIcpError::MaxTransfer{ max_transfer }),
+                Some(t_e8s) => {
+                    match t_e8s.checked_add(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
+                        None => return Err(TransferIcpError::MaxTransfer{ max_transfer }),
+                        Some(final_e8s) => {
+                            IcpTokens::from_e8s(final_e8s)
+                        }
+                    }
+                }
+            }
+        }; 
+        
+        if user_icp_ledger_balance < icp_balance_quirement  {
             with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
             return Err(TransferIcpError::UserIcpLedgerBalanceTooLow{
                 user_icp_ledger_balance,
@@ -1720,7 +1726,9 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
     
     
     with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-    Ok(transfer_icp_data.icp_transfer_block_height.unwrap())
+    Ok(TransferIcpSuccess {
+        block_height: transfer_icp_data.icp_transfer_block_height.unwrap(),
+    })
 }
 
 
@@ -2505,7 +2513,7 @@ pub fn controller_remove_transfer_icp(user_id: Principal, override_lock: bool) {
 
 
 #[update]
-pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<IcpBlockHeight, CompleteTransferIcpError>)> {
+pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<TransferIcpSuccess, CompleteTransferIcpError>)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2526,7 +2534,7 @@ pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Opti
         }
     };
     
-    let rs: Vec<Result<IcpBlockHeight, CompleteTransferIcpError>> = futures::future::join_all(
+    let rs: Vec<Result<TransferIcpSuccess, CompleteTransferIcpError>> = futures::future::join_all(
         complete_users_ids.iter().map(
             |complete_user_id: &Principal| {
                 complete_transfer_icp_(complete_user_id.clone())
@@ -2534,7 +2542,7 @@ pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Opti
         ).collect::<Vec<_>>()
     ).await;
     
-    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<IcpBlockHeight, CompleteTransferIcpError>)>>()
+    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<TransferIcpSuccess, CompleteTransferIcpError>)>>()
 
 }
 
