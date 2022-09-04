@@ -1500,7 +1500,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
-    if usable_user_icp_balance < q.icp + q.icp_fee.unwrap_or(ICP_LEDGER_TRANSFER_DEFAULT_FEE) {
+    if usable_user_icp_balance < q.icp.saturating_add(q.icp_fee) {
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&user_id); });
         reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::UserIcpBalanceTooLow{ user_icp_balance: usable_user_icp_balance }),));
         do_payouts().await;
@@ -1512,7 +1512,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
         IcpTransferArgs {
             memo: TRANSFER_ICP_BALANCE_MEMO,
             amount: q.icp,
-            fee: q.icp_fee.unwrap_or(ICP_LEDGER_TRANSFER_DEFAULT_FEE),
+            fee: q.icp_fee,
             from_subaccount: Some(principal_icp_subaccount(&user_id)),
             to: q.to,
             created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })

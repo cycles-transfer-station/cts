@@ -110,13 +110,13 @@ pub async fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<Ic
 
 
 
-pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens) -> CallResult<IcpTransferResult> {
+pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens, icp_fee: IcpTokens) -> CallResult<IcpTransferResult> {
     icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
             memo: ICP_CTS_TAKE_FEE_MEMO,
             amount: icp,
-            fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+            fee: icp_fee,
             from_subaccount: Some(principal_icp_subaccount(user_id)),
             to: main_cts_icp_id(),
             created_at_time: Some(IcpTimestamp { timestamp_nanos: time()-1_000_000_000 })

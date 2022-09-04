@@ -1116,7 +1116,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     } else {
         
         if purchase_cycles_bank_data.collect_icp == false {
-            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_CYCLES_BANK_COST_CYCLES - NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap())).await {
+            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_CYCLES_BANK_COST_CYCLES - NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()), ICP_LEDGER_TRANSFER_DEFAULT_FEE).await {
                 Ok(icp_transfer_result) => match icp_transfer_result {
                     Ok(_block_height) => {
                         purchase_cycles_bank_data.collect_icp = true;
@@ -1494,6 +1494,7 @@ pub struct TransferIcpData{
 pub struct TransferIcpQuest {
     memo: IcpMemo,
     icp: IcpTokens,
+    icp_fee: IcpTokens,
     to: IcpId,
 }
 
@@ -1511,10 +1512,9 @@ pub enum TransferIcpError{
     CheckIcpBalanceCallError((u32, String)),
     CTSIsBusy,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
-    MaxTransfer{ max_transfer: IcpTokens },
+    MaxTransfer{ cts_transfer_icp_fee: IcpTokens },
     UserIcpLedgerBalanceTooLow{
         user_icp_ledger_balance: IcpTokens,
-        icp_ledger_transfer_fee: IcpTokens,
         cts_transfer_icp_fee: IcpTokens, // calculate by the current xdr-icp rate 
     },
     IcpTransferCallError((u32, String)),
@@ -1640,25 +1640,23 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
         let cts_transfer_icp_fee: IcpTokens = cycles_to_icptokens(CTS_TRANSFER_ICP_FEE, current_xdr_icp_rate);
         
         let icp_balance_quirement: IcpTokens = {
-            let max_transfer: IcpTokens = IcpTokens::MAX - cts_transfer_icp_fee - IcpTokens::from_e8s(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2);
             match transfer_icp_data.transfer_icp_quest.icp.e8s().checked_add(cts_transfer_icp_fee.e8s()) {
-                None => return Err(TransferIcpError::MaxTransfer{ max_transfer }),
+                None => return Err(TransferIcpError::MaxTransfer{ cts_transfer_icp_fee }),
                 Some(t_e8s) => {
-                    match t_e8s.checked_add(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2) {
-                        None => return Err(TransferIcpError::MaxTransfer{ max_transfer }),
+                    match t_e8s.checked_add(transfer_icp_data.transfer_icp_quest.icp_fee.e8s() * 2) {
+                        None => return Err(TransferIcpError::MaxTransfer{ cts_transfer_icp_fee }),
                         Some(final_e8s) => {
                             IcpTokens::from_e8s(final_e8s)
                         }
                     }
                 }
             }
-        }; 
+        };
         
         if user_icp_ledger_balance < icp_balance_quirement  {
             with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
             return Err(TransferIcpError::UserIcpLedgerBalanceTooLow{
                 user_icp_ledger_balance,
-                icp_ledger_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                 cts_transfer_icp_fee,
             });
         }
@@ -1673,7 +1671,7 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
             IcpTransferArgs {
                 memo: transfer_icp_data.transfer_icp_quest.memo,
                 amount: transfer_icp_data.transfer_icp_quest.icp,
-                fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                fee: transfer_icp_data.transfer_icp_quest.icp_fee,
                 from_subaccount: Some(principal_icp_subaccount(&user_id)),
                 to: transfer_icp_data.transfer_icp_quest.to,
                 created_at_time: Some(IcpTimestamp { timestamp_nanos: time() - 1_000_000_000 })
@@ -1697,7 +1695,7 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
     }
     
     if transfer_icp_data.cts_fee_taken == false {
-        match take_user_icp_ledger(&user_id, transfer_icp_data.cts_transfer_icp_fee.unwrap()).await {
+        match take_user_icp_ledger(&user_id, transfer_icp_data.cts_transfer_icp_fee.unwrap(), transfer_icp_data.transfer_icp_quest.icp_fee).await {
             Ok(icp_transfer_result) => match icp_transfer_result {
                 Ok(_block_height) => {
                     transfer_icp_data.cts_fee_taken = true;

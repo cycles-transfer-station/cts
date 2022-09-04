@@ -186,7 +186,7 @@ struct CMIcpPositionPurchase{
 #[derive(CandidType, Deserialize)]
 struct CMIcpTransferOut{
     icp: IcpTokens,
-    icp_fee: Option<IcpTokens>,
+    icp_fee: IcpTokens,
     to: IcpId,
     block_height: u128,
     timestamp_nanos: u128,
@@ -1649,10 +1649,10 @@ pub struct UserUCMetrics {
     cycles_transferrer_canisters: Vec<Principal>,
     user_id: Principal,
     user_canister_creation_timestamp_nanos: u128,
-    cycles_transfers_id_counter: u128,
-    cycles_transfers_out_len: u128,
-    cycles_transfers_in_len: u128,
     storage_usage: u128,
+    cycles_transfers_id_counter: u128,
+    cycles_transfers_in_len: u128,
+    cycles_transfers_out_len: u128,
     download_cycles_transfers_in_chunk_size: u128,
     download_cycles_transfers_out_chunk_size: u128,
     cm_cycles_positions_len: u128,
@@ -1669,7 +1669,7 @@ pub struct UserUCMetrics {
 
 
 #[query]
-pub fn user_see_metrics() -> UserUCMetrics {
+pub fn metrics() -> UserUCMetrics {
     if caller() != user_id() && caller() != cts_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1683,10 +1683,10 @@ pub fn user_see_metrics() -> UserUCMetrics {
             cycles_transferrer_canisters: cb_data.cycles_transferrer_canisters.clone(),
             user_id: cb_data.user_id,
             user_canister_creation_timestamp_nanos: cb_data.user_canister_creation_timestamp_nanos,
+            storage_usage: calculate_current_storage_usage(),
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
-            storage_usage: calculate_current_storage_usage(),
             download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u128,
             download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u128,
             cm_cycles_positions_len: cb_data.user_data.cm_cycles_positions.len() as u128,

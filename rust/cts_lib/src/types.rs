@@ -457,7 +457,7 @@ pub mod cycles_market {
     #[derive(CandidType, Deserialize)]
     pub struct TransferIcpBalanceQuest {
         pub icp: IcpTokens,
-        pub icp_fee: Option<IcpTokens>,
+        pub icp_fee: IcpTokens,
         pub to: IcpId
     }
 
