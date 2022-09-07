@@ -6,14 +6,11 @@ members = [
     "canisters/cts",
     "canisters/cbs_map",
     "canisters/cycles_bank",
-    "canisters/cycles_transferrer",
     "canisters/cycles_market",
-    
+    "canisters/safe_caller",
 ]
 
 exclude = [
-    "canisters/testcanister1",
-    "canisters/testcanister2",
         
 ]
 

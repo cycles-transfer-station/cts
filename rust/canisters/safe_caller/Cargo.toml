@@ -1,5 +1,5 @@
 [package]
-name = "cycles_transferrer"
+name = "safe_caller"
 version = "0.1.0"
 edition = "2021"
 
