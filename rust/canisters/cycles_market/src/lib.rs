@@ -1549,7 +1549,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeCyclesPositionsQuest {
-    chunk_i: u64
+    chunk_i: u128
 }
 
 #[query(manual_reply = true)]
@@ -1565,7 +1565,7 @@ pub fn see_cycles_positions(q: SeeCyclesPositionsQuest) {
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeIcpPositionsQuest {
-    chunk_i: u64
+    chunk_i: u128
 }
 
 #[query(manual_reply = true)]
@@ -1580,7 +1580,7 @@ pub fn see_icp_positions(q: SeeIcpPositionsQuest) {
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeCyclesPositionsPurchasesQuest {
-    chunk_i: u64
+    chunk_i: u128
 }
 
 #[query(manual_reply = true)]
@@ -1596,7 +1596,7 @@ pub fn see_cycles_positions_purchases(q: SeeCyclesPositionsPurchasesQuest) {
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeIcpPositionsPurchasesQuest {
-    chunk_i: u64
+    chunk_i: u128
 }
 
 #[query(manual_reply = true)]
