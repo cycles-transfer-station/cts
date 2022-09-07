@@ -50,8 +50,8 @@ use cts_lib::{
         cycles_bank::{
             CyclesBankInit,
         },
-        cycles_transferrer::{
-            CyclesTransferrerCanisterInit,
+        safe_caller::{
+            SafeCallerInit,
         },
     },
     consts::{
@@ -193,13 +193,13 @@ pub struct CTSData {
     cycles_market_id: Principal,
     cycles_bank_canister_code: CanisterCode,
     cbs_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
+    safe_caller_canister_code: CanisterCode,
     frontcode_files: Files,
     frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
     cbs_maps: Vec<Principal>,
     create_new_cbs_map_lock: bool,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
+    safe_callers: Vec<Principal>,
+    safe_callers_round_robin_counter: u32,
     canisters_for_the_use: HashSet<Principal>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
     users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
@@ -213,13 +213,13 @@ impl CTSData {
             cycles_market_id: Principal::from_slice(&[]),
             cycles_bank_canister_code: CanisterCode::new(Vec::new()),
             cbs_map_canister_code: CanisterCode::new(Vec::new()),
-            cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
+            safe_caller_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
             frontcode_files_hashes: Vec::new(), // field is [only] use for the upgrades.
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
-            cycles_transferrer_canisters: Vec::new(),
-            cycles_transferrer_canisters_round_robin_counter: 0,
+            safe_callers: Vec::new(),
+            safe_callers_round_robin_counter: 0,
             canisters_for_the_use: HashSet::new(),
             users_purchase_cycles_bank: HashMap::new(),
             users_burn_icp_mint_cycles: HashMap::new(),
@@ -310,7 +310,10 @@ fn create_cts_data_candid_bytes() -> Vec<u8> {
             ).collect::<Vec<(String, [u8; 32])>>() 
         });
     });
-
+    with_mut(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| {
+        *frontcode_files_hashes = FilesHashes::new(); 
+    });
+    
     let mut cts_data_candid_bytes: Vec<u8> = with(&CTS_DATA, |cts_data| { encode_one(cts_data).unwrap() });
     cts_data_candid_bytes.shrink_to_fit();
     cts_data_candid_bytes
@@ -929,7 +932,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                         user_id: user_id,
                         storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                         lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
-                        cycles_transferrer_canisters: with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.clone() })
+                        safe_callers: with(&CTS_DATA, |cts_data| { cts_data.safe_callers.clone() })
                     }).unwrap()
                 }).unwrap(),
                 0
@@ -1997,11 +2000,11 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Op
 
 
 
-// ----- CYCLES_TRANSFERRER_CANISTERS-METHODS --------------------------
+// ----- SAFE-CALLERS-METHODS --------------------------
 
 
 #[update]
-pub fn controller_put_ctc_code(canister_code: CanisterCode) -> () {
+pub fn controller_put_safe_caller_code(canister_code: CanisterCode) -> () {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2011,20 +2014,20 @@ pub fn controller_put_ctc_code(canister_code: CanisterCode) -> () {
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        cts_data.cycles_transferrer_canister_code = canister_code;
+        cts_data.safe_caller_canister_code = canister_code;
     });
 }
 
 
 
 
-#[export_name = "canister_query controller_see_cycles_transferrer_canisters"]
-pub fn controller_see_cycles_transferrer_canisters() {
+#[export_name = "canister_query controller_see_safe_callers"]
+pub fn controller_see_safe_callers() {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cycles_transferrer_canisters),));
+        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.safe_callers),));
     });
 }
 
@@ -2032,19 +2035,19 @@ pub fn controller_see_cycles_transferrer_canisters() {
 
 
 #[update]
-pub fn controller_put_cycles_transferrer_canisters(mut put_cycles_transferrer_canisters: Vec<Principal>) {
+pub fn controller_put_safe_callers(mut put_safe_callers: Vec<Principal>) {
     
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        for put_cycles_transferrer_canister in put_cycles_transferrer_canisters.iter() {
-            if cts_data.cycles_transferrer_canisters.contains(put_cycles_transferrer_canister) {
-                trap(&format!("{:?} already in the cycles_transferrer_canisters list", put_cycles_transferrer_canister));
+        for put_safe_caller in put_safe_callers.iter() {
+            if cts_data.safe_callers.contains(put_safe_caller) {
+                trap(&format!("{:?} already in the safe_callers list", put_safe_caller));
             }
         }
-        cts_data.cycles_transferrer_canisters.append(&mut put_cycles_transferrer_canisters);
+        cts_data.safe_callers.append(&mut put_safe_callers);
     });
 }
 
@@ -2059,12 +2062,12 @@ pub enum ControllerCreateNewCyclesTransferrerCanisterError {
 
 
 #[update]
-pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Principal, ControllerCreateNewCyclesTransferrerCanisterError> {
+pub async fn controller_create_new_safe_caller() -> Result<Principal, ControllerCreateNewCyclesTransferrerCanisterError> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    let new_cycles_transferrer_canister_id: Principal = match get_new_canister(
+    let new_safe_caller_id: Principal = match get_new_canister(
         None,
         3_000_000_000_000/*7_000_000_000_000*/
     ).await {
@@ -2075,8 +2078,8 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
     // on errors after here make sure to put the new_canister into the NEW_CANISTERS list
     
     // install code
-    if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
-        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
+    if with(&CTS_DATA, |cts_data| cts_data.safe_caller_canister_code.module().len() == 0 ) {
+        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_safe_caller_id); });
         return Err(ControllerCreateNewCyclesTransferrerCanisterError::CyclesTransferrerCanisterCodeNotFound);
     }
     
@@ -2085,19 +2088,19 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
         "install_code",
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
-            canister_id : new_cycles_transferrer_canister_id,
-            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canister_code.module() as *const Vec<u8> })},
-            arg : &encode_one(&CyclesTransferrerCanisterInit{
+            canister_id : new_safe_caller_id,
+            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.safe_caller_canister_code.module() as *const Vec<u8> })},
+            arg : &encode_one(&SafeCallerInit{
                 cts_id: id()
             }).unwrap() // unwrap or return Err(candiderror); 
         },)
     ).await {
         Ok(_) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.push(new_cycles_transferrer_canister_id); }); 
-            Ok(new_cycles_transferrer_canister_id)    
+            with_mut(&CTS_DATA, |cts_data| { cts_data.safe_callers.push(new_safe_caller_id); }); 
+            Ok(new_safe_caller_id)    
         },
         Err(install_code_call_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_safe_caller_id); });
             return Err(ControllerCreateNewCyclesTransferrerCanisterError::InstallCodeCallError((install_code_call_error.0 as u32, install_code_call_error.1)));
         }
     }
@@ -2108,7 +2111,7 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
 
 /*
 #[update]
-pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Principal>) {
+pub fn controller_take_away_safe_callers(take_away_ctcs: Vec<Principal>) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
@@ -2119,7 +2122,7 @@ pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Pri
                     ctcs.remove(take_away_ctc_i);
                 },
                 Err(_) => {
-                    trap(&format!("{:?} is not one of the cycles_transferrer canisters in the CTS", take_away_ctc)); // rollback 
+                    trap(&format!("{:?} is not one of the safe_caller canisters in the CTS", take_away_ctc)); // rollback 
                 }
             }
         }
@@ -2130,21 +2133,21 @@ pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Pri
 /*
 
 #[update]
-pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
+pub async fn controller_see_safe_caller_re_try_safe_caller_user_transfer_cycles_callbacks(safe_caller_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
+    if with(&CTS_DATA, |cts_data| { cts_data.safe_callers.contains(&safe_caller_id) == false }) {
+        trap(&format!("cts safe_callers does not contain: {:?}", safe_caller_id));
     }
     
     match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_see_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
+        safe_caller_id,
+        "cts_see_re_try_safe_caller_user_transfer_cycles_callbacks",
         ()
     ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
+        Ok((re_try_safe_caller_user_transfer_cycles_callbacks,)) => Ok(re_try_safe_caller_user_transfer_cycles_callbacks),
         Err(call_error) => Err((call_error.0 as u32, call_error.1))
     }
 
@@ -2152,21 +2155,21 @@ pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferre
 
 
 #[update]
-pub async fn controller_do_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
+pub async fn controller_do_safe_caller_re_try_safe_caller_user_transfer_cycles_callbacks(safe_caller_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id))
+    if with(&CTS_DATA, |cts_data| { cts_data.safe_callers.contains(&safe_caller_id) == false }) {
+        trap(&format!("cts safe_callers does not contain: {:?}", safe_caller_id))
     }
     
     match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
+        safe_caller_id,
+        "cts_re_try_safe_caller_user_transfer_cycles_callbacks",
         ()
     ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
+        Ok((re_try_safe_caller_user_transfer_cycles_callbacks,)) => Ok(re_try_safe_caller_user_transfer_cycles_callbacks),
         Err(call_error) => Err((call_error.0 as u32, call_error.1))
     }
 
@@ -2175,21 +2178,21 @@ pub async fn controller_do_cycles_transferrer_canister_re_try_cycles_transferrer
 
 
 #[update]
-pub async fn controller_drain_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
+pub async fn controller_drain_safe_caller_re_try_safe_caller_user_transfer_cycles_callbacks(safe_caller_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
+    if with(&CTS_DATA, |cts_data| { cts_data.safe_callers.contains(&safe_caller_id) == false }) {
+        trap(&format!("cts safe_callers does not contain: {:?}", safe_caller_id));
     }
     
     match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
+        safe_caller_id,
+        "cts_drain_re_try_safe_caller_user_transfer_cycles_callbacks",
         ()
     ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
+        Ok((re_try_safe_caller_user_transfer_cycles_callbacks,)) => Ok(re_try_safe_caller_user_transfer_cycles_callbacks),
         Err(call_error) => Err((call_error.0 as u32, call_error.1))
     }
 
@@ -2213,19 +2216,19 @@ pub enum ControllerUpgradeCTCCallErrorType {
 
 
 
-// we upgrade the ctcs one at a time because if one of them takes too long to stop, we dont want to wait for it to come back, we will stop_calls on the cycles_transferrer, wait an hour, uninstall, and reinstall
+// we upgrade the ctcs one at a time because if one of them takes too long to stop, we dont want to wait for it to come back, we will stop_calls on the safe_caller, wait an hour, uninstall, and reinstall
 #[update]
 pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Vec<u8>) -> Result<(), ControllerUpgradeCTCError> {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
 
-    if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
-        trap("CYCLES_TRANSFERRER_CANISTER_CODE.module().len() is 0.")
+    if with(&CTS_DATA, |cts_data| cts_data.safe_caller_canister_code.module().len() == 0 ) {
+        trap("safe_caller_canister_code.module().len() is 0.")
     }
     
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&upgrade_ctc) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", upgrade_ctc));
+    if with(&CTS_DATA, |cts_data| { cts_data.safe_callers.contains(&upgrade_ctc) == false }) {
+        trap(&format!("cts safe_callers does not contain: {:?}", upgrade_ctc));
     }
        
     match call::<(CanisterIdRecord,), ()>(
@@ -2236,7 +2239,7 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
         Ok(_) => {},
         Err(stop_canister_call_error) => {
                 
-            // set stop_calls_flag , wait an hour, then re-try the [re]maining re_try-cycles_transferrer_user_transfer_cycles_callbacks till 0 left, then uninstall the canister and install . 
+            // set stop_calls_flag , wait an hour, then re-try the [re]maining re_try-safe_caller_user_transfer_cycles_callbacks till 0 left, then uninstall the canister and install . 
 
             
             return Err((upgrade_ctc, ControllerUpgradeCTCCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
@@ -2249,7 +2252,7 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
         &encode_one(&ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::upgrade,
             canister_id : upgrade_ctc,
-            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canister_code.module() as *const Vec<u8> })},
+            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.safe_caller_canister_code.module() as *const Vec<u8> })},
             arg : &post_upgrade_arg,
         }).unwrap(),
         0
@@ -2750,9 +2753,9 @@ pub struct CTSMetrics {
     canisters_for_the_use_count: u64,
     cbsm_code_hash: Option<[u8; 32]>,
     cycles_bank_canister_code_hash: Option<[u8; 32]>,
-    cycles_transferrer_canister_code_hash: Option<[u8; 32]>,
+    safe_caller_canister_code_hash: Option<[u8; 32]>,
     cbsms_count: u64,
-    cycles_transferrer_canisters_count: u64,
+    safe_callers_count: u64,
     latest_known_cmc_rate: IcpXdrConversionRate,
     users_purchase_cycles_bank_count: u64,
     users_burn_icp_mint_cycles_count: u64,
@@ -2773,9 +2776,9 @@ pub fn controller_see_metrics() -> CTSMetrics {
             canisters_for_the_use_count: cts_data.canisters_for_the_use.len() as u64,
             cbsm_code_hash: if cts_data.cbs_map_canister_code.module().len() != 0 { Some(cts_data.cbs_map_canister_code.module_hash().clone()) } else { None },
             cycles_bank_canister_code_hash: if cts_data.cycles_bank_canister_code.module().len() != 0 { Some(cts_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
-            cycles_transferrer_canister_code_hash: if cts_data.cycles_transferrer_canister_code.module().len() != 0 { Some(cts_data.cycles_transferrer_canister_code.module_hash().clone()) } else { None },
+            safe_caller_canister_code_hash: if cts_data.safe_caller_canister_code.module().len() != 0 { Some(cts_data.safe_caller_canister_code.module_hash().clone()) } else { None },
             cbsms_count: cts_data.cbs_maps.len() as u64,
-            cycles_transferrer_canisters_count: cts_data.cycles_transferrer_canisters.len() as u64,
+            safe_callers_count: cts_data.safe_callers.len() as u64,
             latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
             users_purchase_cycles_bank_count: cts_data.users_purchase_cycles_bank.len() as u64,
             users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64
