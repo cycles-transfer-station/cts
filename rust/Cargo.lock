@@ -276,6 +276,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cycles_transferrer"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "futures",
+ "serde",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

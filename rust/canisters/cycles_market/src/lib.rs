@@ -1500,7 +1500,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
-    if usable_user_icp_balance < q.icp.saturating_add(q.icp_fee) {
+    if usable_user_icp_balance < IcpTokens::from_e8s(q.icp.e8s().saturating_add(q.icp_fee.e8s())) {
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_icp_balance_locks.remove(&user_id); });
         reply::<(TransferIcpBalanceResult,)>((Err(TransferIcpBalanceError::UserIcpBalanceTooLow{ user_icp_balance: usable_user_icp_balance }),));
         do_payouts().await;

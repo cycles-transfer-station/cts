@@ -442,6 +442,47 @@ pub mod cycles_market {
 
 
 
+pub mod cycles_transferrer {
+    use super::{Principal, CyclesTransferMemo, Cycles, candid, CandidType, Deserialize};
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransferrerCanisterInit {
+        pub cts_id: Principal
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransfer {
+        pub memo: CyclesTransferMemo,
+        pub original_caller: Option<Principal>
+    }
+    
+    #[derive(CandidType, Deserialize)]    
+    pub struct TransferCyclesQuest{
+        pub user_cycles_transfer_id: u128,
+        pub for_the_canister: Principal,
+        pub cycles: Cycles,
+        pub cycles_transfer_memo: CyclesTransferMemo
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum TransferCyclesError {
+        MsgCyclesTooLow{ transfer_cycles_fee: Cycles },
+        MaxOngoingCyclesTransfers,
+        CyclesTransferQuestCandidCodeError(String)
+    }
+    
+    #[derive(CandidType, Deserialize, Clone)]
+    pub struct TransferCyclesCallbackQuest {
+        pub user_cycles_transfer_id: u128,
+        pub opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+    }
+    
+}
+
+
+
+
+
 
 pub mod safe_caller {
     use super::{Principal, Cycles, CallResult, CandidType, Deserialize};
@@ -474,4 +515,10 @@ pub mod safe_caller {
     }
     
 }
+
+
+
+
+
+
 
