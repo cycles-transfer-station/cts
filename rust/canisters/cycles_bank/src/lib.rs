@@ -262,7 +262,7 @@ pub const CYCLES_MARKET_PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
 pub const CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE: Cycles = 50_000_000_000;
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
-const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 1u128;
+const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 10_000_000_000;
 const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 
 const USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE: usize = 500usize;
@@ -573,6 +573,11 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
 
 
 
+#[derive(CandidType, Deserialize)]
+pub struct CTSCyclesTransfer {
+    memo: CyclesTransferMemo,
+    original_caller: Option<Principal>
+}
 
 
 
@@ -934,7 +939,7 @@ pub enum UserCMCreateCyclesPositionError {
 
 
 #[update]
-pub async fn cycles_market_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
+pub async fn cm_create_cycles_position(q: cycles_market::CreateCyclesPositionQuest) -> Result<cycles_market::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1000,7 +1005,7 @@ pub enum UserCMCreateIcpPositionError {
 
 
 #[update]
-pub async fn cycles_market_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
+pub async fn cm_create_icp_position(q: cycles_market::CreateIcpPositionQuest) -> Result<cycles_market::CreateIcpPositionSuccess, UserCMCreateIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1071,7 +1076,7 @@ pub enum UserCMPurchaseCyclesPositionError {
 
 
 #[update]
-pub async fn cycles_market_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
+pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -> Result<cycles_market::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1141,7 +1146,7 @@ pub enum UserCMPurchaseIcpPositionError {
 
 
 #[update]
-pub async fn cycles_market_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
+pub async fn cm_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Result<cycles_market::PurchaseIcpPositionSuccess, UserCMPurchaseIcpPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1203,7 +1208,7 @@ pub enum UserCMVoidPositionError {
 
 
 #[update]
-pub async fn cycles_market_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+pub async fn cm_void_position(q: cycles_market::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1241,7 +1246,7 @@ pub enum UserCMSeeIcpLockError {
 }
 
 #[update]
-pub async fn cycles_market_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
+pub async fn cm_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1275,7 +1280,7 @@ pub enum UserCMTransferIcpBalanceError {
 }
 
 #[update]
-pub async fn cycles_market_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) -> Result<IcpBlockHeight, UserCMTransferIcpBalanceError> {
+pub async fn cm_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) -> Result<IcpBlockHeight, UserCMTransferIcpBalanceError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
