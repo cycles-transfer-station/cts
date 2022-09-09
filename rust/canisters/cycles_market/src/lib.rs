@@ -14,11 +14,18 @@ use cts_lib::{
         icptokens_to_cycles,
         principal_icp_subaccount,
         round_robin,
+        time_nanos,
+        time_nanos_u64,
+        time_seconds,
     },
     consts::{
         MiB,
         WASM_PAGE_SIZE_BYTES,
-        MANAGEMENT_CANISTER_ID
+        MANAGEMENT_CANISTER_ID,
+        NANOS_IN_A_SECOND,
+        SECONDS_IN_A_MINUTE,
+        SECONDS_IN_AN_HOUR,
+        SECONDS_IN_A_DAY
     },
     types::{
         Cycles,
@@ -49,7 +56,6 @@ use cts_lib::{
         api::{
             id as cycles_market_canister_id,
             trap,
-            time as time_u64,
             caller,
             call::{
                 call,
@@ -90,8 +96,6 @@ use cts_lib::{
         post_upgrade
     }
 };
-
-fn time() -> u128 { time_u64() as u128 }
 
 
 // on a cycles-payout, the cycles-market will try once to send the cycles with a cycles_transfer-method call and if it fails, the cycles-market will use the deposit_cycles management canister method and close the position.
@@ -234,7 +238,9 @@ pub const TRANSFER_ICP_BALANCE_FEE: Cycles = 50_000_000_000;
 
 pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
 
-pub const MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK: u128 = 1_000_000_000*60*60*10;
+pub const MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK: u128 = NANOS_IN_A_SECOND * SECONDS_IN_AN_HOUR * 10;
+pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_AN_HOUR * 1;
+
 
 pub const MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP: Cycles = 20_000_000_000_000;
 pub const MINIMUM_CYCLES_POSITION: Cycles = 5_000_000_000_000;
@@ -517,7 +523,7 @@ async fn do_cycles_payout(q: DoCyclesPayoutQuest) -> Result<DoCyclesPayoutSponse
                 Ok(sponse_bytes) => match decode_one::<Result<(), cycles_transferrer::TransferCyclesError>>(&sponse_bytes) {
                     Ok(cycles_transferrer_transfer_cycles_result) => match cycles_transferrer_transfer_cycles_result {
                         Ok(()) => {
-                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time_nanos());
                         },
                         Err(_cycles_transferrer_transfer_cycles_error) => {
                             cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
@@ -527,7 +533,7 @@ async fn do_cycles_payout(q: DoCyclesPayoutQuest) -> Result<DoCyclesPayoutSponse
                         if msg_cycles_refunded128() >= q.cycles {
                             cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = None;
                         } else {
-                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time());
+                            cycles_transferrer_transfer_cycles_call_success_timestamp_nanos = Some(time_nanos());
                         }    
                     }
                 },
@@ -585,7 +591,7 @@ async fn do_payouts() {
         while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
             let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
             if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
-                if time().saturating_sub(vcp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK {
+                if time_nanos().saturating_sub(vcp.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK {
                     std::mem::drop(vcp);
                     cm_data.void_cycles_positions.remove(i);
                     continue;
@@ -651,7 +657,7 @@ async fn do_payouts() {
                                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                                 from_subaccount: Some(principal_icp_subaccount(&cpp.purchaser)),
                                 to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&cpp.cycles_position_positor)),
-                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
+                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_nanos_u64()-NANOS_IN_A_SECOND as u64 })
                             }
                         )
                     )
@@ -698,7 +704,7 @@ async fn do_payouts() {
                                 fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
                                 from_subaccount: Some(principal_icp_subaccount(&ipp.icp_position_positor)),
                                 to: IcpId::new(&cycles_market_canister_id(), &principal_icp_subaccount(&ipp.purchaser)),
-                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
+                                created_at_time: Some(IcpTimestamp { timestamp_nanos: time_nanos_u64()-NANOS_IN_A_SECOND as u64 })
                             }
                         )
                     )
@@ -929,7 +935,7 @@ pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result
                         cycles:         cycles_position_lowest_xdr_permyriad_per_icp_rate.cycles,
                         cycles_payout_lock: false,
                         cycles_payout_data: CyclesPayoutData::new(),
-                        timestamp_nanos: time()
+                        timestamp_nanos: time_nanos()
                     }
                 );
                 Ok(())
@@ -958,7 +964,7 @@ pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result
                 cycles: q.cycles,
                 minimum_purchase: q.minimum_purchase,
                 xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
-                timestamp_nanos: time(),
+                timestamp_nanos: time_nanos(),
             }
         );
         id
@@ -1110,7 +1116,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
                 icp: q.icp,
                 minimum_purchase: q.minimum_purchase,
                 xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
-                timestamp_nanos: time(),
+                timestamp_nanos: time_nanos(),
             }
         );
         id
@@ -1181,7 +1187,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
         if cm_data.cycles_positions_purchases.len() >= MAX_CYCLES_POSITIONS_PURCHASES {
             let remove_cpp_id: PurchaseId = match cm_data.cycles_positions_purchases.iter().filter(
                 |cycles_position_purchase: &&CyclesPositionPurchase| {
-                    ( cycles_position_purchase.cycles_payout_data.is_complete() || ( cycles_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time().saturating_sub(cycles_position_purchase.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK ) ) && cycles_position_purchase.icp_payout == true 
+                    ( cycles_position_purchase.cycles_payout_data.is_complete() || ( cycles_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time_nanos().saturating_sub(cycles_position_purchase.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK ) ) && cycles_position_purchase.icp_payout == true 
                 }
             ).min_by_key(
                 |cycles_position_purchase: &&CyclesPositionPurchase| {
@@ -1235,7 +1241,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
                 id: cycles_position_purchase_id,
                 purchaser,
                 cycles: q.cycles,
-                timestamp_nanos: time(),
+                timestamp_nanos: time_nanos(),
                 cycles_payout_lock: false,
                 icp_payout_lock: false,
                 cycles_payout_data: CyclesPayoutData::new(),
@@ -1262,7 +1268,7 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
                         cycles:         cycles_position_for_the_void.cycles,
                         cycles_payout_lock: false,
                         cycles_payout_data: CyclesPayoutData::new(),
-                        timestamp_nanos: time()
+                        timestamp_nanos: time_nanos()
                     }
                 );
             }
@@ -1307,7 +1313,7 @@ pub async fn purchase_icp_position(q: PurchaseIcpPositionQuest) {
         if cm_data.icp_positions_purchases.len() >= MAX_ICP_POSITIONS_PURCHASES {
             let remove_ipp_id: PurchaseId = match cm_data.icp_positions_purchases.iter().filter(
                 |icp_position_purchase: &&IcpPositionPurchase| {
-                    ( icp_position_purchase.cycles_payout_data.is_complete() || ( icp_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time().saturating_sub(icp_position_purchase.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK ) ) && icp_position_purchase.icp_payout == true 
+                    ( icp_position_purchase.cycles_payout_data.is_complete() || ( icp_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time_nanos().saturating_sub(icp_position_purchase.cycles_payout_data.cycles_transferrer_transfer_cycles_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CYCLES_TRANSFERRER_TRANSFER_CYCLES_CALLBACK ) ) && icp_position_purchase.icp_payout == true 
                 }
             ).min_by_key(
                 |icp_position_purchase: &&IcpPositionPurchase| {
@@ -1358,7 +1364,7 @@ pub async fn purchase_icp_position(q: PurchaseIcpPositionQuest) {
                 id: icp_position_purchase_id,
                 purchaser,
                 icp: q.icp,
-                timestamp_nanos: time(),
+                timestamp_nanos: time_nanos(),
                 cycles_payout_lock: false,
                 icp_payout_lock: false,
                 cycles_payout_data: CyclesPayoutData::new(),
@@ -1405,6 +1411,9 @@ pub async fn void_position(q: VoidPositionQuest) {
             if cm_data.cycles_positions[cycles_position_i].positor != caller() {
                 return Err(VoidPositionError::WrongCaller);
             }
+            if time_seconds().saturating_sub(cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
+                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
+            }  
             if cm_data.void_cycles_positions.len() >= MAX_VOID_CYCLES_POSITIONS {
                 return Err(VoidPositionError::CyclesMarketIsBusy);
             }
@@ -1418,13 +1427,16 @@ pub async fn void_position(q: VoidPositionQuest) {
                     cycles:         cycles_position_for_the_void.cycles,
                     cycles_payout_lock: false,
                     cycles_payout_data: CyclesPayoutData::new(),
-                    timestamp_nanos: time()                
+                    timestamp_nanos: time_nanos()                
                 }
             );
             Ok(())
         } else if let Ok(icp_position_i) = cm_data.icp_positions.binary_search_by_key(&q.position_id, |icp_position| { icp_position.id }) {
             if cm_data.icp_positions[icp_position_i].positor != caller() {
                 return Err(VoidPositionError::WrongCaller);
+            }
+            if time_seconds().saturating_sub(cm_data.icp_positions[icp_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
+                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.icp_positions[icp_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
             }
             cm_data.icp_positions.remove(icp_position_i);
             Ok(())
@@ -1515,7 +1527,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
             fee: q.icp_fee,
             from_subaccount: Some(principal_icp_subaccount(&user_id)),
             to: q.to,
-            created_at_time: Some(IcpTimestamp { timestamp_nanos: time_u64()-1_000_000_000 })
+            created_at_time: Some(IcpTimestamp { timestamp_nanos: time_nanos_u64()-NANOS_IN_A_SECOND as u64 })
         }   
     ).await {
         Ok(icp_transfer_result) => match icp_transfer_result {

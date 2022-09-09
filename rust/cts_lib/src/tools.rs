@@ -1,13 +1,16 @@
 use sha2::Digest;
 use crate::{
-    ic_cdk::export::Principal,
+    ic_cdk::{
+        export::Principal
+    },
     ic_ledger_types::{
         IcpIdSub,
         IcpId,
         IcpTokens
     },
     consts::{
-        CYCLES_PER_XDR
+        CYCLES_PER_XDR,
+        NANOS_IN_A_SECOND
     },
     types::{
         XdrPerMyriadPerIcp
@@ -15,6 +18,11 @@ use crate::{
 };
 use std::thread::LocalKey;
 use std::cell::Cell;
+
+
+pub use ic_cdk::api::time as time_nanos_u64;
+pub fn time_nanos() -> u128 { time_nanos_u64() as u128 }
+pub fn time_seconds() -> u128 { time_nanos() / NANOS_IN_A_SECOND as u128 }
 
 
 

@@ -13,6 +13,12 @@ pub const KiB: usize = 1024;
 pub const MiB: usize = KiB * 1024;
 pub const GiB: usize = MiB * 1024;
 
+pub const NANOS_IN_A_SECOND: u128 = 1_000_000_000;
+pub const SECONDS_IN_A_MINUTE: u128 = 60; 
+pub const SECONDS_IN_AN_HOUR: u128 = SECONDS_IN_A_MINUTE * 60;
+pub const SECONDS_IN_A_DAY: u128 = SECONDS_IN_AN_HOUR * 24;
+
+
 pub const WASM_PAGE_SIZE_BYTES: usize = 65536; // 2^16 // 64KiB
 
 

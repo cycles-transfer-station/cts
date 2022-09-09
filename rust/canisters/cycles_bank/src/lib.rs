@@ -25,7 +25,6 @@ use cts_lib::{
         self,
         api::{
             id,
-            time as time_u64,
             trap,
             caller,
             canister_balance128,
@@ -98,11 +97,15 @@ use cts_lib::{
         KiB,
         MiB,
         GiB,
+        NANOS_IN_A_SECOND,
+        SECONDS_IN_A_DAY,
         WASM_PAGE_SIZE_BYTES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
         MANAGEMENT_CANISTER_ID,
     },
     tools::{
+        time_nanos,
+        time_seconds,
         localkey::{
             self,
             refcell::{
@@ -115,7 +118,6 @@ use cts_lib::{
     },
     global_allocator_counter::get_allocated_bytes_count
 };
-fn time() -> u128 { time_u64() as u128 }
 
 
 
@@ -275,9 +277,9 @@ const USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
 const USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE: usize = 500;
 
 
-const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = 1*60*60*24*30;
+const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = SECONDS_IN_A_DAY * 30;
 
-const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = 1_000_000_000*60*60*24*45;
+const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY * 45;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
@@ -308,7 +310,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
     
     with_mut(&CB_DATA, |cb_data| {
         *cb_data = CBData{
-            user_canister_creation_timestamp_nanos:                 time(),
+            user_canister_creation_timestamp_nanos:                 time_nanos(),
             cts_id:                                                 user_canister_init.cts_id,
             cbsm_id:                                                user_canister_init.cbsm_id,
             cycles_market_id:                                       user_canister_init.cycles_market_id, 
@@ -440,7 +442,7 @@ fn post_upgrade() {
 #[no_mangle]
 async fn canister_global_timer() {
     /*
-    if time()/1_000_000_000 > with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
+    if time_nanos()/NANOS_IN_A_SECOND > with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
         // call the cts-main for the user-canister-termination
         // the CTS will save the user_id, user_canister_id, and cycles_balance for a minimum of the 10-years.
         match call::<(cts::CyclesBankLifetimeTerminationQuest,), ()>(
@@ -539,7 +541,7 @@ fn ctsfuel_balance() -> CTSFuel {
     .saturating_sub(USER_CANISTER_BACKUP_CYCLES)
     .saturating_sub(
         with(&CB_DATA, |cb_data| { 
-            cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time()/1_000_000_000) 
+            cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
             cb_data.storage_size_mib * 2 // canister-memory-allocation in the mib
         })
@@ -635,7 +637,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
                 by_the_canister,
                 cycles: cycles_cept,
                 cycles_transfer_memo: truncate_cycles_transfer_memo(ct_memo),
-                timestamp_nanos: time()
+                timestamp_nanos: time_nanos()
             }
         );
     });
@@ -687,8 +689,8 @@ pub fn delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
         for delete_cycles_transfer_in_id in delete_cycles_transfers_in_ids.into_iter() {
             match cb_data.user_data.cycles_transfers_in.binary_search_by_key(&delete_cycles_transfer_in_id, |cycles_transfer_in| { cycles_transfer_in.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cycles_transfers_in[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cycles_transfer_in id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_in_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cycles_transfers_in[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cycles_transfer_in id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_in_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cycles_transfers_in.remove(i);
                 },
@@ -781,7 +783,7 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
                 cycles_sent: q.cycles,
                 cycles_refunded: None,   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
                 cycles_transfer_memo: q.cycles_transfer_memo.clone(),
-                timestamp_nanos: time(), // time sent
+                timestamp_nanos: time_nanos(), // time sent
                 opt_cycles_transfer_call_error: None,
                 fee_paid: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE as u64
             }
@@ -904,8 +906,8 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
         for delete_cycles_transfer_out_id in delete_cycles_transfers_out_ids.into_iter() {
             match cb_data.user_data.cycles_transfers_out.binary_search_by_key(&delete_cycles_transfer_out_id, |cycles_transfer_out| { cycles_transfer_out.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cycles_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cycles_transfer_out id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cycles_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cycles_transfer_out id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cycles_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cycles_transfers_out.remove(i);
                 },
@@ -972,7 +974,7 @@ pub async fn cm_create_cycles_position(q: cycles_market::CreateCyclesPositionQue
                             minimum_purchase: q.minimum_purchase,
                             xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
                             create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
-                            timestamp_nanos: time(),
+                            timestamp_nanos: time_nanos(),
                         }
                     );
                 });
@@ -1038,7 +1040,7 @@ pub async fn cm_create_icp_position(q: cycles_market::CreateIcpPositionQuest) ->
                             minimum_purchase: q.minimum_purchase,
                             xdr_permyriad_per_icp_rate: q.xdr_permyriad_per_icp_rate,
                             create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
-                            timestamp_nanos: time(),
+                            timestamp_nanos: time_nanos(),
                         }
                     );
                 });
@@ -1109,7 +1111,7 @@ pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -
                             id: cm_purchase_cycles_position_success.purchase_id,
                             cycles: q.cycles_market_purchase_cycles_position_quest.cycles,
                             purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
-                            timestamp_nanos: time(),
+                            timestamp_nanos: time_nanos(),
                         }
                     );
                 });
@@ -1179,7 +1181,7 @@ pub async fn cm_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Resu
                             id: cm_purchase_icp_position_success.purchase_id,
                             icp: q.cycles_market_purchase_icp_position_quest.icp,
                             purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
-                            timestamp_nanos: time(),
+                            timestamp_nanos: time_nanos(),
                         }
                     );
                 });
@@ -1312,7 +1314,7 @@ pub async fn cm_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) 
                             icp_fee: q.icp_fee,
                             to: q.to,
                             block_height: block_height as u128,
-                            timestamp_nanos: time(),
+                            timestamp_nanos: time_nanos(),
                             transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE as u64
                         }
                     );
@@ -1460,8 +1462,8 @@ pub fn delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
         for delete_cm_cycles_position_id in delete_cm_cycles_positions_ids.into_iter() {
             match cb_data.user_data.cm_cycles_positions.binary_search_by_key(&delete_cm_cycles_position_id, |cm_cycles_position| { cm_cycles_position.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cm_cycles_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cm_cycles_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_cycles_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_cycles_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cm_cycles_positions.remove(i);
                 },
@@ -1496,8 +1498,8 @@ pub fn delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
         for delete_cm_icp_position_id in delete_cm_icp_positions_ids.into_iter() {
             match cb_data.user_data.cm_icp_positions.binary_search_by_key(&delete_cm_icp_position_id, |cm_icp_position| { cm_icp_position.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cm_icp_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cm_icp_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cm_icp_positions.remove(i);
                 },
@@ -1533,8 +1535,8 @@ pub fn delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases
         for delete_cm_cycles_position_purchase_id in delete_cm_cycles_positions_purchases_ids.into_iter() {
             match cb_data.user_data.cm_cycles_positions_purchases.binary_search_by_key(&delete_cm_cycles_position_purchase_id, |cm_cycles_position_purchase| { cm_cycles_position_purchase.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cm_cycles_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cm_cycles_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_cycles_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_cycles_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cm_cycles_positions_purchases.remove(i);
                 },
@@ -1570,8 +1572,8 @@ pub fn delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: 
         for delete_cm_icp_position_purchase_id in delete_cm_icp_positions_purchases_ids.into_iter() {
             match cb_data.user_data.cm_icp_positions_purchases.binary_search_by_key(&delete_cm_icp_position_purchase_id, |cm_icp_position_purchase| { cm_icp_position_purchase.id }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cm_icp_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cm_icp_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cm_icp_positions_purchases.remove(i);
                 },
@@ -1605,8 +1607,8 @@ pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
         for delete_cm_icp_transfer_out_id in delete_cm_icp_transfers_out_ids.into_iter() {
             match cb_data.user_data.cm_icp_transfers_out.binary_search_by_key(&delete_cm_icp_transfer_out_id, |cm_icp_transfer_out| { cm_icp_transfer_out.block_height }) {
                 Ok(i) => {
-                    if time().saturating_sub(cb_data.user_data.cm_icp_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
-                        trap(&format!("cm_icp_transfer_out block_height: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/1_000_000_000/60/60/24));
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                        trap(&format!("cm_icp_transfer_out block_height: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
                     cb_data.user_data.cm_icp_transfers_out.remove(i);
                 },
@@ -1770,11 +1772,6 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
     
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
 
-    let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(1*60*60*24*30).unwrap_or_else(|| { trap("time is not support at the moment") });
-    if q.set_lifetime_termination_timestamp_seconds <  minimum_set_lifetime_termination_timestamp_seconds {
-        return Err(LengthenLifetimeError::MinimumSetLifetimeTerminationTimestampSeconds(minimum_set_lifetime_termination_timestamp_seconds));
-    }
-
     let lengthen_cost_cycles: Cycles = {
         q.set_lifetime_termination_timestamp_seconds - with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds })
         * with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) * 2 // canister-memory-allocation in the mib 
@@ -1783,6 +1780,11 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
     
     if lengthen_cost_cycles > cycles_balance() {
         return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), lengthen_cost_cycles });
+    }
+    
+    let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(MINIMUM_LENGTHEN_LIFETIME_SECONDS).unwrap_or_else(|| { trap("time is not support at the moment") });
+    if q.set_lifetime_termination_timestamp_seconds <  minimum_set_lifetime_termination_timestamp_seconds {
+        return Err(LengthenLifetimeError::MinimumSetLifetimeTerminationTimestampSeconds(minimum_set_lifetime_termination_timestamp_seconds));
     }
     
     // let id for the log
@@ -1843,7 +1845,7 @@ pub async fn user_change_storage_size_mib(q: UserChangeStorageSizeMibQuest) -> R
     
     let new_storage_size_mib_cost_cycles: Cycles = {
         ( q.new_storage_size_mib - with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
-        * with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_sub(time()/1_000_000_000).unwrap_or_else(|| { trap("user-contract-lifetime is with the termination.") })
+        * with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_sub(time_seconds()).unwrap_or_else(|| { trap("user-contract-lifetime is with the termination.") })
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
     };
     

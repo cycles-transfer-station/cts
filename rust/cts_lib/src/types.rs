@@ -411,6 +411,7 @@ pub mod cycles_market {
     #[derive(CandidType, Deserialize)]
     pub enum VoidPositionError {
         WrongCaller,
+        MinimumWaitTime{ minimum_wait_time_seconds: u128, position_creation_timestamp_seconds: u128 },
         CyclesMarketIsBusy,
         PositionNotFound,
     }
