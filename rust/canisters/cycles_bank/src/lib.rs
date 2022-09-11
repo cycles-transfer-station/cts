@@ -575,15 +575,6 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct CTSCyclesTransfer {
-    memo: CyclesTransferMemo,
-    original_caller: Option<Principal>
-}
-
-
-
-
 
 #[export_name = "canister_update cycles_transfer"]
 pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
@@ -1717,11 +1708,7 @@ pub fn metrics() -> UserUCMetrics {
 
 
 #[update]
-pub fn user_topup_ctsfuel_with_some_cycles() -> () {
-    if caller() != user_id() {
-        trap("caller must be the user for this method.");
-    }
-    
+pub fn topup_ctsfuel_with_some_cycles() -> () {
     msg_cycles_accept128(msg_cycles_available128());
 }
 
