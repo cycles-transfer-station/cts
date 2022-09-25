@@ -1641,7 +1641,7 @@ pub fn cycles_balance_canister_method() {  // -> Cycles
 #[derive(CandidType, Deserialize)]
 pub struct UserUCMetrics {
     cycles_balance: Cycles,
-    user_canister_ctsfuel_balance: CTSFuel,
+    ctsfuel_balance: CTSFuel,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
     cycles_transferrer_canisters: Vec<Principal>,
@@ -1675,7 +1675,7 @@ pub fn metrics() -> UserUCMetrics {
     with(&CB_DATA, |cb_data| {
         UserUCMetrics{
             cycles_balance: cb_data.user_data.cycles_balance,
-            user_canister_ctsfuel_balance: ctsfuel_balance(),
+            ctsfuel_balance: ctsfuel_balance(),
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,
             cycles_transferrer_canisters: cb_data.cycles_transferrer_canisters.clone(),
@@ -1807,7 +1807,7 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
 // ---------------------------
 
 #[derive(CandidType, Deserialize)]
-pub struct UserChangeStorageSizeMibQuest {
+pub struct UserChangeStorageSizeQuest {
     new_storage_size_mib: u128
 }
 
@@ -1819,7 +1819,7 @@ pub enum UserChangeStorageSizeMibError {
 }
 
 #[update]
-pub async fn user_change_storage_size_mib(q: UserChangeStorageSizeMibQuest) -> Result<(), UserChangeStorageSizeMibError> {
+pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), UserChangeStorageSizeMibError> {
     if caller() != user_id() {
         trap("caller must be the user for this method.");
     }
@@ -1978,7 +1978,7 @@ pub fn cts_re_store_cb_data_out_of_the_state_snapshot() {
 pub struct CTSUCMetrics {
     canister_cycles_balance: Cycles,
     cycles_balance: Cycles,
-    user_canister_ctsfuel_balance: CTSFuel,
+    ctsfuel_balance: CTSFuel,
     wasm_memory_size_bytes: u128,
     stable_memory_size_bytes: u64,
     storage_size_mib: u128,
@@ -2005,7 +2005,7 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
         CTSUCMetrics{
             canister_cycles_balance: canister_balance128(),
             cycles_balance: cb_data.user_data.cycles_balance,
-            user_canister_ctsfuel_balance: ctsfuel_balance(),
+            ctsfuel_balance: ctsfuel_balance(),
             wasm_memory_size_bytes: ( core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES ) as u128,
             stable_memory_size_bytes: stable64_size() * WASM_PAGE_SIZE_BYTES as u64,
             storage_size_mib: cb_data.storage_size_mib,
