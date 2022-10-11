@@ -272,7 +272,7 @@ pub async fn transfer_cycles() {
         trap(&format!("cycles_transfer call_perform error: {:?}", call_result.unwrap_err()));
     }
     
-    reply::<(Result<(), TransferCyclesError>,)>((Ok(()),)); // at the next commit point, the cts is replied-to without waiting for the cycles_transfer call to come back 
+    reply::<(Result<(), TransferCyclesError>,)>((Ok(()),)); // at the next commit point, the original_caller is replied-to without waiting for the cycles_transfer call to come back 
     
     let cycles_transfer_call_result: CallResult<Vec<u8>> = cycles_transfer_call_future.await;
     
@@ -309,7 +309,7 @@ async fn do_transfer_cycles_callback(original_caller_canister_id: Principal, tra
     let transfer_cycles_callback_quest_cb_result = candid::utils::encode_one(&transfer_cycles_callback_quest); // before the move into the closure.
     
     let g = || {
-        with_mut(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count = ctc_data.ongoing_cycles_transfers_count.checked_sub(1).unwrap_or(0); });
+        with_mut(&CTC_DATA, |ctc_data| { ctc_data.ongoing_cycles_transfers_count = ctc_data.ongoing_cycles_transfers_count.saturating_sub(1); });
     };
     
     let log_try = |transfer_cycles_callback_call_error: (RejectionCode, String), try_n: u32| {

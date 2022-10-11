@@ -252,7 +252,7 @@ pub const MAX_USERS_PURCHASE_CYCLES_BANK: usize = 5000; // the max number of ent
 pub const MAX_CBS_MAPS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
 pub const MAX_USERS_TRANSFER_ICP: usize = 2000;
-pub const CTS_TRANSFER_ICP_FEE: Cycles = 50_000_000_000; // taken as the icptokens by the conversion-rate
+pub const CTS_TRANSFER_ICP_FEE: Cycles = 30_000_000_000; // taken as the icptokens by the conversion-rate
 
 const MAX_USERS_BURN_ICP_MINT_CYCLES: usize = 1000;
 const MINIMUM_USER_BURN_ICP_MINT_CYCLES: IcpTokens = IcpTokens::from_e8s(3000000); // 0.03 icp
@@ -1406,7 +1406,7 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
             "cycles_transfer",
             &match encode_one(CyclesTransfer{
                 memo: CyclesTransferMemo::Blob(b"CTS-BURN-ICP-MINT-CYCLES".to_vec())
-            }) { 
+            }) {
                 Ok(b)=>b, 
                 Err(candid_error)=>{
                     burn_icp_mint_cycles_data.lock = false;

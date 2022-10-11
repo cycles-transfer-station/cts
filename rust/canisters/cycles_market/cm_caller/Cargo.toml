@@ -1,5 +1,5 @@
 [package]
-name = "cycles_market"
+name = "cm_caller"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,7 +9,8 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
-cts_lib = { path = "../../cts_lib" }
+cts_lib = { path = "../../../cts_lib" }
 candid = "0.7.16"
 serde = "1.0.137"
 futures = "0.3.23"
+serde_bytes = "0.11.6"

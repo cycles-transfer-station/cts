@@ -6,9 +6,9 @@ members = [
     "canisters/cts",
     "canisters/cbs_map",
     "canisters/cycles_bank",
-    "canisters/cycles_market",
     "canisters/cycles_transferrer",
-    "canisters/safe_caller",
+    "canisters/cycles_market/cycles_market",
+    "canisters/cycles_market/cm_caller",
 ]
 
 exclude = [
