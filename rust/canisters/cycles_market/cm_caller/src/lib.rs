@@ -48,16 +48,7 @@ use cts_lib::{
         cts::{
 
         },
-        cycles_transferrer::{
-            CyclesTransferrerCanisterInit,
-            CyclesTransfer,
-            TransferCyclesQuest,
-            TransferCyclesError,
-            TransferCyclesCallbackQuest
-        },
-        management_canister::{
-            CanisterIdRecord
-        }
+        cm_caller::*
     },
     tools::{
         localkey::{
@@ -82,39 +73,6 @@ use futures::task::Poll;
 
 
 type CyclesTransferRefund = Cycles;
-
-
-#[derive(CandidType, Deserialize)]
-pub struct CMCallerInit {
-    pub cycles_market_id: Principal,
-    pub cts_id: Principal
-}
-
-#[derive(CandidType, Deserialize)]    
-pub struct CMCallQuest{
-    pub cm_call_id: u128,
-    pub for_the_canister: Principal,
-    pub method: String,
-    #[serde(with = "serde_bytes")]
-    pub put_bytes: Vec<u8>,
-    pub cycles: Cycles,
-    pub cm_callback_method: String,
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub enum CMCallError {
-    MaxCalls,
-}
-
-
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct CMCallbackQuest {
-    pub cm_call_id: u128,
-    pub opt_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
-    // sponse_bytes? do i care? 
-}
 
 
 
@@ -259,7 +217,7 @@ pub async fn cm_call() {
     
     
     if with(&CMCALLER_DATA, |cmcaller_data| { cmcaller_data.ongoing_calls_count }) >= MAX_ONGOING_CALLS {
-        reply::<(Result<(), CMCallError>,)>((Err(CMCallError::MaxCalls),));    
+        reply::<(CMCallResult,)>((Err(CMCallError::MaxCalls),));    
         return;
     }
     
@@ -284,7 +242,7 @@ pub async fn cm_call() {
         trap(&format!("call_perform error: {:?}", call_result.unwrap_err()));
     }
     
-    reply::<(Result<(), CMCallError>,)>((Ok(()),)); 
+    reply::<(CMCallResult,)>((Ok(()),)); 
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
     

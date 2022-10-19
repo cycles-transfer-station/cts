@@ -483,7 +483,8 @@ Future<void> put_code_on_the_canister(String mode) async {
         
     Uint8List install_code_arg = c_forwards([
         Record.oftheMap({
-            'controllers': Vector.oftheList<PrincipalReference>([controller.principal.candid, controller2.principal.candid, controller3.principal.candid]) 
+            'controllers': Vector.oftheList<PrincipalReference>([controller.principal.candid, controller2.principal.candid, controller3.principal.candid]),
+            'cycles_market_id': Principal('mscqy-haaaa-aaaai-aahhq-cai')
         })
     ]);
     Uint8List upgrade_code_arg = c_forwards([

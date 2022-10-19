@@ -301,9 +301,51 @@ pub mod cycles_bank {
 }
 
 
+
+
+pub mod cycles_transferrer {
+    use super::{Principal, CyclesTransferMemo, Cycles, candid, CandidType, Deserialize};
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransferrerCanisterInit {
+        pub cts_id: Principal
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CyclesTransfer {
+        pub memo: CyclesTransferMemo,
+        pub original_caller: Option<Principal>
+    }
+    
+    #[derive(CandidType, Deserialize)]    
+    pub struct TransferCyclesQuest{
+        pub user_cycles_transfer_id: u128,
+        pub for_the_canister: Principal,
+        pub cycles: Cycles,
+        pub cycles_transfer_memo: CyclesTransferMemo
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum TransferCyclesError {
+        MsgCyclesTooLow{ transfer_cycles_fee: Cycles },
+        MaxOngoingCyclesTransfers,
+        CyclesTransferQuestCandidCodeError(String)
+    }
+    
+    #[derive(CandidType, Deserialize, Clone)]
+    pub struct TransferCyclesCallbackQuest {
+        pub user_cycles_transfer_id: u128,
+        pub opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+    }
+    
+}
+
+
+
 pub mod cycles_market {
     use super::{CandidType, Deserialize, Cycles, XdrPerMyriadPerIcp};
     use crate::ic_ledger_types::{IcpTokens, IcpBlockHeight, IcpTransferError, IcpId};
+    use ic_cdk::export::Principal;
     
     pub type PositionId = u128;
     pub type PurchaseId = u128;
@@ -313,7 +355,6 @@ pub mod cycles_market {
         pub cycles: Cycles,
         pub minimum_purchase: Cycles,
         pub xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
-        
     }
 
     #[derive(CandidType, Deserialize)]
@@ -438,50 +479,103 @@ pub mod cycles_market {
 
     pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceError>;
 
+    #[derive(CandidType, Deserialize)]
+    pub struct CMCyclesPositionVoidPositorMessageQuest {
+        pub position_id: PositionId,
+        // cycles in the call
+        pub timestamp_nanos: u128
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CMIcpPositionVoidPositorMessageQuest {
+        pub position_id: PositionId,
+        pub icptokens: IcpTokens,
+        pub timestamp_nanos: u128
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CMCyclesPositionPurchasePositorMessageQuest {
+        pub cycles_position_id: PositionId,
+        pub purchase_id: PurchaseId,
+        pub purchaser: Principal,
+        pub purchase_timestamp_nanos: u128,
+        pub cycles_purchase: Cycles,
+        pub cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+        pub icp_payment: IcpTokens,
+        pub icp_transfer_block_height: IcpBlockHeight,
+        pub icp_transfer_timestamp_nanos: u128,
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CMCyclesPositionPurchasePurchaserMessageQuest {
+        pub position_id: PositionId,
+        pub purchase_id: PurchaseId,
+        // cycles in the call
+        
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub struct CMIcpPositionPurchasePositorMessageQuest {
+        pub position_id: PositionId,
+        pub purchase_id: PurchaseId,
+        // cycles in the call
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CMMessagePurchaserIcpPositionPurchaseQuest {
+        pub icp_position_id: PositionId,
+        pub purchase_id: PurchaseId, 
+        pub positor: Principal,
+        pub purchase_timestamp_nanos: u128,
+        pub cycles_payment: Cycles,
+        pub icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+        pub icp_purchase: IcpTokens,
+        pub icp_transfer_block_height: IcpBlockHeight,
+        pub icp_transfer_timestamp_nanos: u128,
+    }
+    
+
+
 }
 
 
 
 
-pub mod cycles_transferrer {
-    use super::{Principal, CyclesTransferMemo, Cycles, candid, CandidType, Deserialize};
+pub mod cm_caller {
+    use super::{Principal, Cycles, CandidType, Deserialize};
     
     #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransferrerCanisterInit {
+    pub struct CMCallerInit {
+        pub cycles_market_id: Principal,
         pub cts_id: Principal
     }
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct CyclesTransfer {
-        pub memo: CyclesTransferMemo,
-        pub original_caller: Option<Principal>
-    }
-    
+
     #[derive(CandidType, Deserialize)]    
-    pub struct TransferCyclesQuest{
-        pub user_cycles_transfer_id: u128,
+    pub struct CMCallQuest{
+        pub cm_call_id: u128,
         pub for_the_canister: Principal,
+        pub method: String,
+        #[serde(with = "serde_bytes")]
+        pub put_bytes: Vec<u8>,
         pub cycles: Cycles,
-        pub cycles_transfer_memo: CyclesTransferMemo
+        pub cm_callback_method: String,
     }
-    
+
     #[derive(CandidType, Deserialize)]
-    pub enum TransferCyclesError {
-        MsgCyclesTooLow{ transfer_cycles_fee: Cycles },
-        MaxOngoingCyclesTransfers,
-        CyclesTransferQuestCandidCodeError(String)
+    pub enum CMCallError {
+        MaxCalls,
     }
     
+    pub type CMCallResult = Result<(), CMCallError>;
+
     #[derive(CandidType, Deserialize, Clone)]
-    pub struct TransferCyclesCallbackQuest {
-        pub user_cycles_transfer_id: u128,
-        pub opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+    pub struct CMCallbackQuest {
+        pub cm_call_id: u128,
+        pub opt_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
+        // sponse_bytes? do i care? CallResult
     }
-    
+
 }
-
-
-
 
 
 
