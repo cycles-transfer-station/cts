@@ -91,7 +91,15 @@ use cts_lib::{
             LengthenLifetimeQuest
         },
         management_canister,
-        cycles_market,
+        cycles_market::{
+            self,
+            CMCyclesPositionPurchasePositorMessageQuest,
+            CMCyclesPositionPurchasePurchaserMessageQuest,
+            CMIcpPositionPurchasePositorMessageQuest,
+            CMIcpPositionPurchasePurchaserMessageQuest,
+            CMVoidCyclesPositionPositorMessageQuest,
+            CMVoidIcpPositionPositorMessageQuest,
+        },
     },
     consts::{
         KiB,
@@ -105,6 +113,7 @@ use cts_lib::{
     },
     tools::{
         time_nanos,
+        time_nanos_u64,
         time_seconds,
         localkey::{
             self,
@@ -195,6 +204,64 @@ struct CMIcpTransferOut{
     transfer_icp_balance_fee: u64
 }
 
+#[derive(CandidType, Deserialize)]
+struct CMMessageCyclesPositionPurchasePositorLog{
+    timestamp_nanos: u64,
+    cm_message_cycles_position_purchase_positor_quest: CMCyclesPositionPurchasePositorMessageQuest 
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageCyclesPositionPurchasePurchaserLog{
+    timestamp_nanos: u64,
+    cm_message_cycles_position_purchase_purchaser_quest: CMCyclesPositionPurchasePurchaserMessageQuest
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageIcpPositionPurchasePositorLog{
+    timestamp_nanos: u64,
+    cm_message_icp_position_purchase_positor_quest: CMIcpPositionPurchasePositorMessageQuest
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageIcpPositionPurchasePurchaserLog{
+    timestamp_nanos: u64,
+    cm_message_icp_position_purchase_purchaser_quest: CMIcpPositionPurchasePurchaserMessageQuest
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageVoidCyclesPositionPositorLog{
+    timestamp_nanos: u64,
+    cm_message_void_cycles_position_positor_quest: CMVoidCyclesPositionPositorMessageQuest
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageVoidIcpPositionPositorLog{
+    timestamp_nanos: u64,
+    cm_message_void_icp_position_positor_quest: CMVoidIcpPositionPositorMessageQuest
+}
+
+#[derive(CandidType, Deserialize)]
+struct CMMessageLogs{
+    cm_message_cycles_position_purchase_positor_logs: Vec<CMMessageCyclesPositionPurchasePositorLog>,
+    cm_message_cycles_position_purchase_purchaser_logs: Vec<CMMessageCyclesPositionPurchasePurchaserLog>,
+    cm_message_icp_position_purchase_positor_logs: Vec<CMMessageIcpPositionPurchasePositorLog>,
+    cm_message_icp_position_purchase_purchaser_logs: Vec<CMMessageIcpPositionPurchasePurchaserLog>,
+    cm_message_void_cycles_position_positor_logs: Vec<CMMessageVoidCyclesPositionPositorLog>,
+    cm_message_void_icp_position_positor_logs: Vec<CMMessageVoidIcpPositionPositorLog>,    
+}
+impl CMMessageLogs {
+    fn new() -> Self {
+        Self{
+            cm_message_cycles_position_purchase_positor_logs: Vec::new(),
+            cm_message_cycles_position_purchase_purchaser_logs: Vec::new(),
+            cm_message_icp_position_purchase_positor_logs: Vec::new(),
+            cm_message_icp_position_purchase_purchaser_logs: Vec::new(),
+            cm_message_void_cycles_position_positor_logs: Vec::new(),
+            cm_message_void_icp_position_positor_logs: Vec::new(),                
+        }
+    }
+}
+
 
 #[derive(CandidType, Deserialize)]
 struct UserData {
@@ -205,7 +272,8 @@ struct UserData {
     cm_icp_positions: Vec<CMIcpPosition>,
     cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
     cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
-    cm_icp_transfers_out: Vec<CMIcpTransferOut>
+    cm_icp_transfers_out: Vec<CMIcpTransferOut>,
+    cm_message_logs: CMMessageLogs
 }
 
 impl UserData {
@@ -219,6 +287,7 @@ impl UserData {
             cm_cycles_positions_purchases: Vec::new(),
             cm_icp_positions_purchases: Vec::new(),    
             cm_icp_transfers_out: Vec::new(),
+            cm_message_logs: CMMessageLogs::new()
         }
     }
 }
@@ -231,6 +300,7 @@ struct CBData {
     cts_id: Principal,
     cbsm_id: Principal,
     cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
     user_id: Principal,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
@@ -246,6 +316,7 @@ impl CBData {
             cts_id: Principal::from_slice(&[]),
             cbsm_id: Principal::from_slice(&[]),
             cycles_market_id: Principal::from_slice(&[]),
+            cycles_market_cmcaller: Principal::from_slice(&[]),
             user_id: Principal::from_slice(&[]),
             storage_size_mib: 0,       // memory-allocation/2 // is with the set in the canister_init // in the mib // starting at a 50mib-storage with a 1-year-user_canister_lifetime with a 5T-cycles-ctsfuel-balance at a cost: 10T-CYCLES   // this value is half of the user-canister-memory_allocation. for the upgrades.  
             lifetime_termination_timestamp_seconds: 0,
@@ -275,6 +346,15 @@ const USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE: usize = 500;
 const USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
 const USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
 const USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE: usize = 500;
+
+
+const USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
+const USER_DOWNLOAD_CM_MESSAGE_VOID_ICP_POSITION_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
+
 
 
 const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = SECONDS_IN_A_DAY * 30;
@@ -314,6 +394,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
             cts_id:                                                 user_canister_init.cts_id,
             cbsm_id:                                                user_canister_init.cbsm_id,
             cycles_market_id:                                       user_canister_init.cycles_market_id, 
+            cycles_market_cmcaller:                                 user_canister_init.cycles_market_cmcaller,
             user_id:                                                user_canister_init.user_id,
             storage_size_mib:                                       user_canister_init.storage_size_mib,
             lifetime_termination_timestamp_seconds:                 user_canister_init.lifetime_termination_timestamp_seconds,
@@ -921,6 +1002,8 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
 
 
 
+
+
 #[derive(CandidType, Deserialize)]
 pub enum UserCMCreateCyclesPositionError {
     CTSFuelTooLow,
@@ -1325,7 +1408,121 @@ pub async fn cm_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) 
 
 
 
-// ----------
+// -------------------------------
+
+
+#[update]
+pub fn cm_message_cycles_position_purchase_positor(q: CMCyclesPositionPurchasePositorMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    } 
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.push(
+            CMMessageCyclesPositionPurchasePositorLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_cycles_position_purchase_positor_quest: q
+            }
+        );
+    });    
+
+}
+
+#[update]
+pub fn cm_message_cycles_position_purchase_purchaser(q: CMCyclesPositionPurchasePurchaserMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.push(
+            CMMessageCyclesPositionPurchasePurchaserLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_cycles_position_purchase_purchaser_quest: q
+            }
+        );
+    });    
+
+}
+
+#[update]
+pub fn cm_message_icp_position_purchase_positor(q: CMIcpPositionPurchasePositorMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    } 
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.push(
+            CMMessageIcpPositionPurchasePositorLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_icp_position_purchase_positor_quest: q
+            }
+        );
+    });
+    
+}
+
+#[update]
+pub fn cm_message_icp_position_purchase_purchaser(q: CMIcpPositionPurchasePurchaserMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    } 
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.push(
+            CMMessageIcpPositionPurchasePurchaserLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_icp_position_purchase_purchaser_quest: q
+            }
+        );
+    });
+    
+}
+
+#[update]
+pub fn cm_message_void_cycles_position_positor(q: CMVoidCyclesPositionPositorMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    } 
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.push(
+            CMMessageVoidCyclesPositionPositorLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_void_cycles_position_positor_quest: q
+            }
+        );
+    });
+
+}
+
+#[update]
+pub fn cm_message_void_icp_position_positor(q: CMVoidIcpPositionPositorMessageQuest) {
+    if with(&CB_DATA, |cb_data| { [cb_data.cycles_market_id, cb_data.cycles_market_cmcaller].contains(&caller()) }) == false {
+        trap("this method is for the CYCLES-MARKET.");
+    } 
+
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.push(
+            CMMessageVoidIcpPositionPositorLog{
+                timestamp_nanos: time_nanos_u64(),
+                cm_message_void_icp_position_positor_quest: q
+            }
+        );
+    });
+
+
+}
+
+
+
+
+
+
+
+
+
+// -------------------------------
 
 
 
@@ -1429,6 +1626,130 @@ pub fn download_cm_icp_transfers_out() {
     });
 }
 
+
+
+// -----------------
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_cycles_position_purchase_positor_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageCyclesPositionPurchasePositorLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_cycles_position_purchase_purchaser_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageCyclesPositionPurchasePurchaserLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_icp_position_purchase_positor_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageIcpPositionPurchasePositorLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_icp_position_purchase_purchaser_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageIcpPositionPurchasePurchaserLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_void_cycles_position_positor_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageVoidCyclesPositionPositorLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_void_icp_position_positor_logs() {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    
+    with(&CB_DATA, |cb_data| {
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
+        reply::<(Option<&[CMMessageVoidIcpPositionPositorLog]>,)>((cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_VOID_ICP_POSITION_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+    });
+}
 
 
 // -----------------------------

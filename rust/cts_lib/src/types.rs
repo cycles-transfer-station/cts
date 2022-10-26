@@ -288,6 +288,7 @@ pub mod cycles_bank {
         pub cts_id: Principal,
         pub cbsm_id: Principal, 
         pub cycles_market_id: Principal, 
+        pub cycles_market_cmcaller: Principal,
         pub storage_size_mib: u128,                         
         pub lifetime_termination_timestamp_seconds: u128,
         pub cycles_transferrer_canisters: Vec<Principal>
@@ -480,14 +481,14 @@ pub mod cycles_market {
     pub type TransferIcpBalanceResult = Result<IcpBlockHeight, TransferIcpBalanceError>;
 
     #[derive(CandidType, Deserialize)]
-    pub struct CMCyclesPositionVoidPositorMessageQuest {
+    pub struct CMVoidCyclesPositionPositorMessageQuest {
         pub position_id: PositionId,
         // cycles in the call
         pub timestamp_nanos: u128
     }
 
     #[derive(CandidType, Deserialize)]
-    pub struct CMIcpPositionVoidPositorMessageQuest {
+    pub struct CMVoidIcpPositionPositorMessageQuest {
         pub position_id: PositionId,
         pub icptokens: IcpTokens,
         pub timestamp_nanos: u128
@@ -522,7 +523,7 @@ pub mod cycles_market {
     }
     
     #[derive(CandidType, Deserialize)]
-    pub struct CMMessagePurchaserIcpPositionPurchaseQuest {
+    pub struct CMIcpPositionPurchasePurchaserMessageQuest {
         pub icp_position_id: PositionId,
         pub purchase_id: PurchaseId, 
         pub positor: Principal,

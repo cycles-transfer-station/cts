@@ -191,6 +191,7 @@ use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_ha
 pub struct CTSData {
     controllers: Vec<Principal>,
     cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
     cycles_bank_canister_code: CanisterCode,
     cbs_map_canister_code: CanisterCode,
     cycles_transferrer_canister_code: CanisterCode,
@@ -211,6 +212,7 @@ impl CTSData {
         Self {
             controllers: Vec::new(),
             cycles_market_id: Principal::from_slice(&[]),
+            cycles_market_cmcaller: Principal::from_slice(&[]),
             cycles_bank_canister_code: CanisterCode::new(Vec::new()),
             cbs_map_canister_code: CanisterCode::new(Vec::new()),
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
@@ -286,7 +288,8 @@ thread_local! {
 #[derive(CandidType, Deserialize)]
 struct CTSInit {
     controllers: Vec<Principal>,
-    cycles_market_id: Principal
+    cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
 } 
 
 #[init]
@@ -294,6 +297,7 @@ fn init(cts_init: CTSInit) {
     with_mut(&CTS_DATA, |cts_data| { 
         cts_data.controllers = cts_init.controllers; 
         cts_data.cycles_market_id = cts_init.cycles_market_id;
+        cts_data.cycles_market_cmcaller = cts_init.cycles_market_cmcaller;
     });
 } 
 
@@ -926,6 +930,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                         cts_id: id(), 
                         cbsm_id: purchase_cycles_bank_data.cbs_map.unwrap(),
                         cycles_market_id: cts_data.cycles_market_id,
+                        cycles_market_cmcaller: cts_data.cycles_market_cmcaller,
                         user_id: user_id,
                         storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                         lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
