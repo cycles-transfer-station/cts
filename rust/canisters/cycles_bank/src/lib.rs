@@ -206,37 +206,40 @@ struct CMIcpTransferOut{
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePositorLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
     cm_message_cycles_position_purchase_positor_quest: CMCyclesPositionPurchasePositorMessageQuest 
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePurchaserLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
+    cycles_purchase: Cycles,
     cm_message_cycles_position_purchase_purchaser_quest: CMCyclesPositionPurchasePurchaserMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageIcpPositionPurchasePositorLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
+    cycles_payment: Cycles,
     cm_message_icp_position_purchase_positor_quest: CMIcpPositionPurchasePositorMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageIcpPositionPurchasePurchaserLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
     cm_message_icp_position_purchase_purchaser_quest: CMIcpPositionPurchasePurchaserMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageVoidCyclesPositionPositorLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
+    void_cycles: Cycles,
     cm_message_void_cycles_position_positor_quest: CMVoidCyclesPositionPositorMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageVoidIcpPositionPositorLog{
-    timestamp_nanos: u64,
+    timestamp_nanos: u128,
     cm_message_void_icp_position_positor_quest: CMVoidIcpPositionPositorMessageQuest
 }
 
@@ -1420,7 +1423,7 @@ pub fn cm_message_cycles_position_purchase_positor(q: CMCyclesPositionPurchasePo
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.push(
             CMMessageCyclesPositionPurchasePositorLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
                 cm_message_cycles_position_purchase_positor_quest: q
             }
         );
@@ -1434,10 +1437,13 @@ pub fn cm_message_cycles_position_purchase_purchaser(q: CMCyclesPositionPurchase
         trap("this method is for the CYCLES-MARKET.");
     }
     
+    let cycles_purchase: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.push(
             CMMessageCyclesPositionPurchasePurchaserLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
+                cycles_purchase,
                 cm_message_cycles_position_purchase_purchaser_quest: q
             }
         );
@@ -1451,10 +1457,13 @@ pub fn cm_message_icp_position_purchase_positor(q: CMIcpPositionPurchasePositorM
         trap("this method is for the CYCLES-MARKET.");
     } 
     
+    let cycles_payment: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.push(
             CMMessageIcpPositionPurchasePositorLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
+                cycles_payment,
                 cm_message_icp_position_purchase_positor_quest: q
             }
         );
@@ -1471,7 +1480,7 @@ pub fn cm_message_icp_position_purchase_purchaser(q: CMIcpPositionPurchasePurcha
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.push(
             CMMessageIcpPositionPurchasePurchaserLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
                 cm_message_icp_position_purchase_purchaser_quest: q
             }
         );
@@ -1485,10 +1494,13 @@ pub fn cm_message_void_cycles_position_positor(q: CMVoidCyclesPositionPositorMes
         trap("this method is for the CYCLES-MARKET.");
     } 
     
+    let void_cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.push(
             CMMessageVoidCyclesPositionPositorLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
+                void_cycles,
                 cm_message_void_cycles_position_positor_quest: q
             }
         );
@@ -1505,7 +1517,7 @@ pub fn cm_message_void_icp_position_positor(q: CMVoidIcpPositionPositorMessageQu
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.push(
             CMMessageVoidIcpPositionPositorLog{
-                timestamp_nanos: time_nanos_u64(),
+                timestamp_nanos: time_nanos(),
                 cm_message_void_icp_position_positor_quest: q
             }
         );
