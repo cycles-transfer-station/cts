@@ -490,7 +490,7 @@ pub mod cycles_market {
     #[derive(CandidType, Deserialize)]
     pub struct CMVoidIcpPositionPositorMessageQuest {
         pub position_id: PositionId,
-        pub icptokens: IcpTokens,
+        pub void_icp: IcpTokens,
         pub timestamp_nanos: u128
     }
 
@@ -509,16 +509,23 @@ pub mod cycles_market {
     
     #[derive(CandidType, Deserialize)]
     pub struct CMCyclesPositionPurchasePurchaserMessageQuest {
-        pub position_id: PositionId,
+        pub cycles_position_id: PositionId,
+        pub cycles_position_positor: Principal,
+        pub cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
         pub purchase_id: PurchaseId,
+        pub purchase_timestamp_nanos: u128,
         // cycles in the call
-        
+        pub icp_payment: IcpTokens,
     }
 
     #[derive(CandidType, Deserialize)]
     pub struct CMIcpPositionPurchasePositorMessageQuest {
-        pub position_id: PositionId,
+        pub icp_position_id: PositionId,
+        pub icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+        pub purchaser: Principal,
         pub purchase_id: PurchaseId,
+        pub icp_purchase: IcpTokens,
+        pub purchase_timestamp_nanos: u128,
         // cycles in the call
     }
     

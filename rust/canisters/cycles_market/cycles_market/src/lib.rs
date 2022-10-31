@@ -264,8 +264,12 @@ impl CyclesPayoutDataTrait for CyclesPositionPurchase {
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMCyclesPositionPurchasePurchaserMessageQuest {
-                position_id: self.cycles_position_id,
+                cycles_position_id: self.cycles_position_id,
+                cycles_position_positor: self.cycles_position_positor,
+                cycles_position_xdr_permyriad_per_icp_rate: self.cycles_position_xdr_permyriad_per_icp_rate,
                 purchase_id: self.id,
+                purchase_timestamp_nanos: self.timestamp_nanos,
+                icp_payment: cycles_to_icptokens(self.cycles, self.cycles_position_xdr_permyriad_per_icp_rate),
             }
         ) 
     }
@@ -329,8 +333,12 @@ impl CyclesPayoutDataTrait for IcpPositionPurchase {
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMIcpPositionPurchasePositorMessageQuest{
-                position_id: self.icp_position_id,
-                purchase_id: self.id
+                icp_position_id: self.icp_position_id,
+                icp_position_xdr_permyriad_per_icp_rate: self.icp_position_xdr_permyriad_per_icp_rate,
+                purchase_id: self.id,
+                purchaser: self.purchaser,
+                icp_purchase: self.icp,
+                purchase_timestamp_nanos: self.timestamp_nanos,
             }
         )
     }
@@ -431,7 +439,7 @@ impl IcpPayoutDataTrait for VoidIcpPosition {
         encode_one(
             CMVoidIcpPositionPositorMessageQuest {
                 position_id: self.position_id,
-                icptokens: self.icp(),
+                void_icp: self.icp(),
                 timestamp_nanos: self.timestamp_nanos
             }
         )
