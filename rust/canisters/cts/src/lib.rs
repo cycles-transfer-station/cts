@@ -380,6 +380,8 @@ fn post_upgrade() {
     
     re_store_cts_data_candid_bytes(cts_upgrade_data_candid_bytes);
     
+    // ------
+    
 } 
 
 
@@ -1943,7 +1945,7 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal
             async {
                 match call::<(&CanisterCode,), ()>(
                     *call_umc,
-                    "cts_put_cycles_bank_canister_code",
+                    "cts_put_user_canister_code",
                     (unsafe{&*with(&CTS_DATA, |cts_data| { &(cts_data.cycles_bank_canister_code) as *const CanisterCode })},)
                 ).await {
                     Ok(_) => {},
@@ -2289,7 +2291,7 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
 
 
 
-// ----- NEW_USERS-METHODS --------------------------
+// ----- PURCHASE_CYCLES_BANK-METHODS --------------------------
 
 #[export_name = "canister_query controller_see_users_purchase_cycles_bank"]
 pub fn controller_see_users_purchase_cycles_bank() {
