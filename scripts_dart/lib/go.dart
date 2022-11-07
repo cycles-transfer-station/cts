@@ -31,27 +31,51 @@ Caller temp_icp_holder = CallerEd25519(
 );
 
 
+Map thp4z_controllers_json = jsonDecode(utf8.decode(File('../../.c').readAsBytesSync()));
+
+Caller thp4z_controller = CallerEd25519(
+    public_key: Uint8List.fromList(thp4z_controllers_json['c']!['pub']!.cast<int>()),
+    private_key: Uint8List.fromList(thp4z_controllers_json['c']!['-']!.cast<int>()),
+);
+
+Caller thp4z_controller2 = CallerEd25519(
+    public_key: Uint8List.fromList(thp4z_controllers_json['c2']!['pub']!.cast<int>()),
+    private_key: Uint8List.fromList(thp4z_controllers_json['c2']!['-']!.cast<int>()),
+);
+
+Caller thp4z_controller3 = CallerEd25519(
+    public_key: Uint8List.fromList(thp4z_controllers_json['c3']!['pub']!.cast<int>()),
+    private_key: Uint8List.fromList(thp4z_controllers_json['c3']!['-']!.cast<int>()),
+);
+
+
+ 
+
+final Canister cts = Canister(Principal('thp4z-laaaa-aaaam-qaaea-cai'));
+final Canister cts_cycles_transferrer_1 = Canister(Principal('sok3f-uyaaa-aaaah-qanvq-cai'));
+final Canister cts_cycles_transferrer_2 = Canister(Principal('ps5k4-oaaaa-aaaah-aao4a-cai'));
+final Canister cycles_market = Canister(Principal('woddh-aqaaa-aaaal-aazqq-cai'));
+final Canister cycles_market_cmcaller = Canister(Principal('hjgka-ziaaa-aaaam-qaeoa-cai'));
 
 
 
-//Canister cts_main = Canister(Principal('thp4z-laaaa-aaaam-qaaea-cai'));
+final Canister test_cts = Canister(Principal('bayhi-7yaaa-aaaai-qahca-cai'));
+final Canister test_cts_cycles_transferrer_1 = Canister(Principal('ha4iv-6iaaa-aaaah-aapjq-cai'));
+final Canister test_cycles_market = Canister(Principal('mscqy-haaaa-aaaai-aahhq-cai'));
+final Canister test_cycles_market_cmcaller = Canister(Principal('sqotk-taaaa-aaaak-qaroa-cai'));
 
-Canister canister = Canister(Principal('bayhi-7yaaa-aaaai-qahca-cai'));
 
-//Canister canister2 = Canister(Principal('hjgka-ziaaa-aaaam-qaeoa-cai')); // controller is the cts
 
-Canister canister2 = Canister(Principal('mscqy-haaaa-aaaai-aahhq-cai'));
 
-Canister canister3 = Canister(Principal('ha4iv-6iaaa-aaaah-aapjq-cai'));
+final Canister controller_cycles_bank = Canister(Principal('aaaaa-aa'));
 
-Canister controller3_user_canister = Canister(Principal('sqotk-taaaa-aaaak-qaroa-cai'));
 
-//woddh-aqaaa-aaaal-aazqq-cai
-//2ch7a-wqaaa-aaaai-qnh3q-cai
-//2fgzu-3iaaa-aaaai-qnh3a-cai
 
-Canister test_canister_1 = Canister(Principal('woddh-aqaaa-aaaal-aazqq-cai'));
+Canister test_canister_1 = Canister(Principal('2fgzu-3iaaa-aaaai-qnh3a-cai'));
 Canister test_canister_2 = Canister(Principal('2ch7a-wqaaa-aaaai-qnh3q-cai'));
+
+
+
 
 
 
@@ -80,6 +104,10 @@ Future<void> main(List<String> arguments) async {
 
     else if (first_command == 'put_code_on_the_canister') {
         await put_code_on_the_canister(arguments[1]);
+    }
+    
+    else if (first_command == 'uninstall_canister_code') {
+        await uninstall_canister_code();
     }
 
     else if (first_command == 'create_canister') {
@@ -142,28 +170,6 @@ Future<void> main(List<String> arguments) async {
 
 
 
-
-
-
-
-
-
-
-
- 
-
-
-
-
-
-    else if (first_command == 'call_canister_see_balance') {
-        bool cts_balance = false;
-        if (arguments.length >= 2 && arguments[1] == 'cts') {
-            cts_balance = true;
-        }
-        await call_canister_see_balance(cts_balance);
-    }
-
     else if (first_command == 'call_canister_topup_balance') {
         await call_canister_topup_balance();
     }
@@ -206,13 +212,17 @@ Future<void> main(List<String> arguments) async {
     else if (first_command == 'call_canister_controller_see_cycles_transferrer_canisters') {
         await call_canister_controller_see_cycles_transferrer_canisters();
     }
+    
+    else if (first_command == 'controller_put_cycles_transferrer_canisters') {
+        await controller_put_cycles_transferrer_canisters();
+    }
 
     else if (first_command == 'call_canister_controller_create_new_cycles_transferrer_canister') {
         await call_canister_controller_create_new_cycles_transferrer_canister();
     }
 
-    else if (first_command == 'controller_see_users_map_canisters') {
-        await controller_see_users_map_canisters();
+    else if (first_command == 'controller_see_cbsms') {
+        await controller_see_cbsms();
     }
 
     else if (first_command == 'controller_see_stable_size') {
@@ -282,7 +292,7 @@ Future<void> main(List<String> arguments) async {
     }
 
     else if (first_command == 'controller_upgrade_ucs_on_a_umc') {
-        await controller_upgrade_ucs_on_a_umc();
+        await controller_upgrade_ucs_on_a_umc(Principal(arguments[1]));
     }
 
     else if (first_command == 'controller_put_uc_code_onto_the_umcs') {
@@ -297,6 +307,15 @@ Future<void> main(List<String> arguments) async {
         await controller_take_away_cycles_transferrer_canisters(arguments[1].split(',').map<Principal>((String ps)=>Principal(ps)).toList());
     }
 
+    else if (first_command == 'controller_complete_users_purchase_cycles_bank') {
+        List<Principal>? ps;
+        if (arguments.length >= 2) {
+            ps = arguments[1].split(',').map<Principal>((String ps)=>Principal(ps)).toList();
+        } 
+        await controller_complete_users_purchase_cycles_bank(ps);
+    }
+
+    
 
 
 
@@ -320,20 +339,20 @@ Future<void> main(List<String> arguments) async {
 
         // print(c_forwards([Nat(BigInt.from(5))]));
 
-        // print('cts: ${canister.principal.bytes}');
+        // print('cts: ${cts.principal.bytes}');
         
         //print(await common.transfer_icp(controller3, '9d67f85f54646c79a6e693b477bb0d2d161cb73e441bb885cebee568c2f4efc8', 1.0));
-        //await common.top_up_canister(controller3, 3.0, canister.principal);
+        //await common.top_up_canister(controller3, 3.0, cts.principal);
         
         /*
         for (Principal p in [
             controller.principal,
             controller2.principal,
             controller3.principal,
-            canister.principal,
-            canister2.principal,
+            cts.principal,
+            cts.principal,
             canister3.principal,
-            controller3_user_canister.principal
+            controller_cycles_bank.principal
         ]) {
             print(p);
             print(p.icp_id());
@@ -399,12 +418,19 @@ Future<void> main(List<String> arguments) async {
         //print(await cts_main.controllers());
 
         //print(await test_canister_2.controllers());
-
+        
+        /*
         String ticph_icp_id = temp_icp_holder.principal.icp_id(); 
         print(ticph_icp_id);
         print(await common.check_icp_balance(ticph_icp_id));
-
-
+        */
+        
+        //print(cts);
+        //print(await cts.controllers());
+        //print(controller);
+        
+        print(await test_cycles_market_cmcaller.controllers());
+    
     }
 
 
@@ -450,18 +476,19 @@ Future<void> canister_status() async {
 
 Future<void> top_up_canister(double top_up_icp) async {
     print(await common.check_icp_balance(controller.principal.icp_id()));
-    await common.top_up_canister(controller, top_up_icp, canister.principal);
+    await common.top_up_canister(controller, top_up_icp, cts.principal);
     print(await common.check_icp_balance(controller.principal.icp_id()));
 
 }
 
 Future<void> put_code_on_the_canister(String mode) async {
-    Principal put_code_on_the_canister_id = canister.principal;
+
+    Principal put_code_on_the_canister_id = test_cts.principal;
     
     print('you are about to $mode code onto the canister: ${put_code_on_the_canister_id}\ntype: "$mode" to continue.');
     if (stdin.readLineSync() != mode) {
         throw Exception('$mode confirmation fail.');
-    } 
+    }
 
 
     print('stop_canister');
@@ -483,8 +510,21 @@ Future<void> put_code_on_the_canister(String mode) async {
         
     Uint8List install_code_arg = c_forwards([
         Record.oftheMap({
-            'controllers': Vector.oftheList<PrincipalReference>([controller.principal.candid, controller2.principal.candid, controller3.principal.candid]),
-            'cycles_market_id': Principal('mscqy-haaaa-aaaai-aahhq-cai')
+            /*
+            'controllers': Vector.oftheList<PrincipalReference>([controller.principal.candid, controller2.principal.candid, controller3.principal.candid, thp4z_controller.principal, thp4z_controller2.principal, thp4z_controller3.principal]),
+            'cycles_market_id': cycles_market.principal,
+            'cycles_market_cmcaller': cycles_market_cmcaller.principal
+            */
+            
+            //'cts_id': test_cts.principal,
+            //'cm_caller': test_cycles_market_cmcaller.principal,
+            
+            'cts_id': test_cts.principal
+            
+            /*
+            'cycles_market_id': test_cycles_market.principal,
+            'cts_id': test_cts.principal
+            */
         })
     ]);
     Uint8List upgrade_code_arg = c_forwards([
@@ -514,11 +554,34 @@ Future<void> put_code_on_the_canister(String mode) async {
     print(start_canister_sponse);
     List<CandidType> start_canister_cs = c_backwards(start_canister_sponse);
     print(start_canister_cs);
-
-    
-    
-    
+   
 }
+
+
+Future<void> uninstall_canister_code() async {
+    
+    Principal uninstall_canister_id = cts_cycles_transferrer_1.principal; 
+    
+    print('you are about to uninstall_code onto the canister: ${uninstall_canister_id}\ntype: "confirm" to continue.');
+    if (stdin.readLineSync() != 'confirm') {
+        throw Exception('confirmation fail.');
+    } 
+
+    Uint8List sponse = await common.management.call(
+        calltype: CallType.call,
+        method_name: 'uninstall_code',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'canister_id': uninstall_canister_id
+            })
+        ])
+    );
+    print(sponse);
+    print(c_backwards(sponse));
+}
+
+
 
 Future<void> change_canister_settings() async {
     Uint8List change_canister_settings_sponse = await common.management.call(
@@ -527,14 +590,17 @@ Future<void> change_canister_settings() async {
         method_name: 'update_settings',
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': canister.principal.candid,
+                'canister_id': cts_cycles_transferrer_1.principal,
                 'settings': Record.oftheMap({
                     // freezing_threshold : opt nat,
                     'controllers' : Option(value: Vector.oftheList<PrincipalReference>([
                         controller.principal.candid,
                         controller2.principal.candid,
                         controller3.principal.candid,
-
+                        thp4z_controller.principal,
+                        thp4z_controller2.principal,
+                        thp4z_controller3.principal,
+                        cts.principal,
                     ])),
                     // memory_allocation : opt nat,
                     // compute_allocation : opt nat,
@@ -556,7 +622,7 @@ Future<void> change_canister_settings() async {
 
 
 Future<void> call_canister_new_user() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'new_user',
         caller: controller3,
@@ -570,7 +636,7 @@ Future<void> call_canister_new_user() async {
 
 
 Future<void> call_canister_find_user_canister() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'find_user_canister',
         caller: controller3,
@@ -584,7 +650,7 @@ Future<void> call_canister_find_user_canister() async {
 
 
 Future<void> call_user_canister_user_cycles_balance() async {
-    Uint8List sponse = await controller3_user_canister.call(
+    Uint8List sponse = await controller_cycles_bank.call(
         calltype: CallType.call,
         method_name: 'user_cycles_balance',
         caller: controller3,
@@ -596,7 +662,7 @@ Future<void> call_user_canister_user_cycles_balance() async {
 
 
 Future<void> call_user_canister_user_icp_balance() async {
-    Uint8List sponse = await controller3_user_canister.call(
+    Uint8List sponse = await controller_cycles_bank.call(
         calltype: CallType.call,
         method_name: 'user_icp_balance',
         caller: controller3,
@@ -608,7 +674,7 @@ Future<void> call_user_canister_user_icp_balance() async {
 
 
 Future<void> call_user_canister_user_download_cycles_transfers_in(int chunk_i) async {
-    Uint8List sponse = await controller3_user_canister.call(
+    Uint8List sponse = await controller_cycles_bank.call(
         calltype: CallType.call,
         method_name: 'user_download_cycles_transfers_in',
         caller: controller3,
@@ -637,7 +703,7 @@ Future<void> call_user_canister_user_download_cycles_transfers_in(int chunk_i) a
 
 Future<void> call_user_canister_user_transfer_cycles() async {
 
-    Uint8List sponse = await controller3_user_canister.call(
+    Uint8List sponse = await controller_cycles_bank.call(
         calltype: CallType.call,
         method_name: 'user_transfer_cycles',
         caller: controller3,
@@ -645,7 +711,7 @@ Future<void> call_user_canister_user_transfer_cycles() async {
             // sending cycles for my self, out then in
             Record.oftheMap({
                 'cycles': Nat(BigInt.from(3)),
-                'canister_id': canister.principal.candid,
+                'canister_id': cts.principal.candid,
                 'cycles_transfer_memo': Variant.oftheMap({
                     'Blob': Blob(get_user_subaccount_bytes())
                 })
@@ -658,7 +724,7 @@ Future<void> call_user_canister_user_transfer_cycles() async {
 }
 
 Future<void> call_user_canister_user_download_cycles_transfers_out(int chunk_i) async {
-    Uint8List sponse = await controller3_user_canister.call(
+    Uint8List sponse = await controller_cycles_bank.call(
         calltype: CallType.call,
         method_name: 'user_download_cycles_transfers_out',
         caller: controller3,
@@ -714,26 +780,9 @@ Future<void> call_user_canister_user_download_cycles_transfers_out(int chunk_i) 
 
 
 
-Future<void> call_canister_see_balance([bool cts = false]) async {
-    Uint8List sponse = await canister.call(
-        calltype: CallType.call,
-        method_name: cts ? 'controller_see_balance' : 'see_balance',
-        caller: controller,
-    );
-    List<CandidType> cs = c_backwards(sponse); 
-    print(cs);
-    print({
-        'Ok': {
-            'cycles_balance': ((cs[0] as Variant)['Ok'] as Record)['cycles_balance'],
-            'icp_balance' : ((((cs[0] as Variant)['Ok'] as Record)['icp_balance'] as Record)['e8s'] as Nat64).value / BigInt.from(100000000)
-        }
-    });
-
-
-}
 
 Future<void> call_canister_topup_balance() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'topup_balance',
         caller: controller3,
@@ -752,7 +801,7 @@ Future<void> call_canister_topup_balance() async {
 }
 
 Future<void> call_canister_convert_icp_balance_for_the_cycles_with_the_cmc_rate(double icp) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'convert_icp_balance_for_the_cycles_with_the_cmc_rate',
         caller: controller,
@@ -773,7 +822,7 @@ Future<void> call_canister_convert_icp_balance_for_the_cycles_with_the_cmc_rate(
 
 
 Future<void> call_canister_collect_balance(Uint8List params) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'collect_balance',
         caller: controller,
@@ -790,7 +839,7 @@ Future<void> purchase_cycles_bank(String cycles_or_icp_string) async {
         throw Exception('cycles or icp');
     }
     
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'purchase_cycles_bank',
         caller: controller,
@@ -811,7 +860,7 @@ Future<void> purchase_cycles_bank(String cycles_or_icp_string) async {
 
 
 Future<void> see_cycles_transfer_purchases(Nat page) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'see_cycles_transfer_purchases',
         caller: controller,
@@ -827,7 +876,7 @@ Future<void> see_cycles_transfer_purchases(Nat page) async {
 
 
 Future<void> see_cycles_bank_purchases(Nat page) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'see_cycles_bank_purchases',
         caller: controller,
@@ -868,7 +917,7 @@ Future<void> see_cycles_bank_purchases(Nat page) async {
 
 
 Future<void> call_canister_see_fees() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'see_fees',    
     );
@@ -897,7 +946,7 @@ Future<void> call_canister_see_fees() async {
 
 
 Future<void> call_canister_controller_see_new_canisters() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_new_canisters',
         caller: controller,
@@ -908,7 +957,7 @@ Future<void> call_canister_controller_see_new_canisters() async {
 
 
 Future<void> controller_put_new_canisters(Iterable<PrincipalReference> principals) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_new_canisters',
         caller: controller,
@@ -919,8 +968,26 @@ Future<void> controller_put_new_canisters(Iterable<PrincipalReference> principal
 }
 
 
+
+Future<void> controller_put_cycles_transferrer_canisters() async {
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_put_cycles_transferrer_canisters',
+        caller: controller,
+        put_bytes: c_forwards([
+            Vector.oftheList<PrincipalReference>([
+                test_cts_cycles_transferrer_1.principal,
+            ])
+        ])
+    );
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs); 
+} 
+
+
+
 Future<void> call_canister_controller_see_cycles_transferrer_canisters() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_cycles_transferrer_canisters',
         caller: controller,
@@ -931,7 +998,7 @@ Future<void> call_canister_controller_see_cycles_transferrer_canisters() async {
 
 
 Future<void> call_canister_controller_create_new_cycles_transferrer_canister() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_create_new_cycles_transferrer_canister',
         caller: controller,
@@ -942,10 +1009,10 @@ Future<void> call_canister_controller_create_new_cycles_transferrer_canister() a
 
 
 
-Future<void> controller_see_users_map_canisters() async {
-    Uint8List sponse = await canister.call(
+Future<void> controller_see_cbsms() async {
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
-        method_name: 'controller_see_users_map_canisters',
+        method_name: 'controller_see_cbsms',
         caller: controller,
     );
     List<CandidType> cs = c_backwards(sponse);
@@ -955,7 +1022,7 @@ Future<void> controller_see_users_map_canisters() async {
 
 
 Future<void> controller_see_stable_size() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_stable_size',
         caller: controller,
@@ -968,7 +1035,7 @@ Future<void> controller_see_stable_size() async {
 
 
 Future<void> controller_see_new_canister_status(Principal new_canister_principal) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_new_canister_status',
         caller: controller,
@@ -981,9 +1048,9 @@ Future<void> controller_see_new_canister_status(Principal new_canister_principal
 
 
 Future<void> controller_put_umc_code() async {
-    Uint8List umc_code_module = File('../rust/target/wasm32-unknown-unknown/release/users_map_canister-o.wasm').readAsBytesSync();
+    Uint8List umc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cbs_map-o.wasm').readAsBytesSync();
 
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_umc_code',
         caller: controller,
@@ -1001,11 +1068,11 @@ Future<void> controller_put_umc_code() async {
 
 
 Future<void> controller_put_user_canister_code() async {
-    Uint8List uc_code_module = File('../rust/target/wasm32-unknown-unknown/release/user_canister-o.wasm').readAsBytesSync();
+    Uint8List uc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cycles_bank-o.wasm').readAsBytesSync();
 
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
-        method_name: 'controller_put_user_canister_code',
+        method_name: 'controller_put_cycles_bank_canister_code',
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
@@ -1024,7 +1091,7 @@ Future<void> controller_put_user_canister_code() async {
 Future<void> controller_put_ctc_code() async {
     Uint8List ctc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cycles_transferrer-o.wasm').readAsBytesSync();
 
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_ctc_code',
         caller: controller,
@@ -1045,7 +1112,7 @@ Future<void> controller_put_ctc_code() async {
 
 
 Future<void> controller_deposit_cycles(Nat cycles, Principal topup_canister) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_deposit_cycles',
         caller: controller,
@@ -1061,9 +1128,30 @@ Future<void> controller_deposit_cycles(Nat cycles, Principal topup_canister) asy
 }
 
 
+Future<void> controller_complete_users_purchase_cycles_bank(List<Principal>? ps) async {
+    Uint8List sponse = await cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_complete_users_purchase_cycles_bank',
+        caller: controller,
+        put_bytes: c_forwards([
+            Option(value: ps != null ? Vector.oftheList(ps) : null, value_type: Vector(values_type: PrincipalReference(isTypeStance: true), isTypeStance: true))
+        ])
+    );
+    print(sponse);
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+
+}
+
+
+
+
+
+
+
 
 Future<void> controller_see_metrics() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_metrics',
         caller: controller,        
@@ -1100,7 +1188,7 @@ Future<void> controller_see_metrics() async {
 
 Future<void> set_test_canisters_code(String mode) async {
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1112,7 +1200,7 @@ Future<void> set_test_canisters_code(String mode) async {
                     Record.oftheMap({ 
                         'canister_id': test_canister_1.principal.candid,//Principal('woddh-aqaaa-aaaal-aazqq-cai'/*'woddh-aqaaa-aaaal-aazqq-cai', 2ch7a-wqaaa-aaaai-qnh3q-cai*/).candid,
                         'settings': Record.oftheMap({
-                            'controllers': Vector.oftheList([controller.principal.candid, canister.principal.candid])
+                            'controllers': Vector.oftheList([controller.principal.candid, cts.principal.candid])
                         })
                     
                     }),
@@ -1121,7 +1209,7 @@ Future<void> set_test_canisters_code(String mode) async {
             })
         ])
     );
-    sponse = await canister.call(
+    sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1133,7 +1221,7 @@ Future<void> set_test_canisters_code(String mode) async {
                     Record.oftheMap({ 
                         'canister_id': test_canister_2.principal.candid,//Principal('woddh-aqaaa-aaaal-aazqq-cai'/*'woddh-aqaaa-aaaal-aazqq-cai', 2ch7a-wqaaa-aaaai-qnh3q-cai*/).candid,
                         'settings': Record.oftheMap({
-                            'controllers': Vector.oftheList([controller.principal.candid, canister.principal.candid])
+                            'controllers': Vector.oftheList([controller.principal.candid, cts.principal.candid])
                         })
                     
                     }),
@@ -1193,7 +1281,7 @@ Future<void> run_cycles_transfer_test_canisters() async {
 
 Future<void> controller_cts_call_canister() async {
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1215,7 +1303,7 @@ Future<void> controller_cts_call_canister() async {
     );
     */
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1234,7 +1322,7 @@ Future<void> controller_cts_call_canister() async {
     );
     */
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1249,7 +1337,7 @@ Future<void> controller_cts_call_canister() async {
     );
     */
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1264,7 +1352,7 @@ Future<void> controller_cts_call_canister() async {
     );
     */
     /*
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
@@ -1292,22 +1380,37 @@ Future<void> controller_cts_call_canister() async {
         ])
     );
     */
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
-                'callee': canister.principal.candid,
-                'method_name': Text('cycles_transfer'),
-                'arg_raw': Blob(c_forwards([
-                    Record.oftheMap({
-                        'memo': Variant.oftheMap({
-                            'Blob': Blob(get_user_subaccount_bytes())
-                        })
-                    })
-                ])),
-                'cycles': Nat(BigInt.from(14))
+                'callee': common.management.principal,
+                'method_name': Text('update_settings'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        Record.oftheMap({
+                            'canister_id': test_cycles_market_cmcaller.principal,
+                            'settings': Record.oftheMap({
+                                // freezing_threshold : opt nat,
+                                'controllers' : Option(value: Vector.oftheList<PrincipalReference>([
+                                    controller.principal.candid,
+                                    controller2.principal.candid,
+                                    controller3.principal.candid,
+                                    thp4z_controller.principal,
+                                    thp4z_controller2.principal,
+                                    thp4z_controller3.principal,
+                                    test_cts.principal,
+                                    test_cycles_market.principal
+                                ])),
+                                // memory_allocation : opt nat,
+                                // compute_allocation : opt nat,
+                            }) 
+                        }) 
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
             })
         ])
     );
@@ -1324,7 +1427,7 @@ Future<void> controller_cts_call_canister() async {
 
 
 Future<void> controller_see_new_users() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_new_users',
         caller: controller,
@@ -1340,7 +1443,7 @@ Future<void> controller_download_state_snapshot_change_state_snapshot_and_put_st
     List<int> cts_data_candid_bytes = [];
     int chunk_i = 0;
     while (true) {
-        Uint8List sponse = await canister.call(
+        Uint8List sponse = await cts.call(
             calltype: CallType.call,
             method_name: 'controller_download_state_snapshot',
             caller: controller,
@@ -1376,7 +1479,7 @@ Future<void> controller_download_state_snapshot_change_state_snapshot_and_put_st
     Uint8List new_cts_data_candid_bytes = c_forwards([cts_data]);
     print('new_cts_data_candid_bytes length: ${new_cts_data_candid_bytes.length}');
 
-    print(c_backwards(await canister.call(
+    print(c_backwards(await cts.call(
         calltype: CallType.call,
         method_name: 'controller_clear_state_snapshot',
         caller: controller,
@@ -1391,7 +1494,7 @@ Future<void> controller_download_state_snapshot_change_state_snapshot_and_put_st
             chunk_end_i = new_cts_data_candid_bytes.length;
         }
         print('chunk: $i, len: ${chunk_end_i - chunk_start_i}');
-        Uint8List sponse = await canister.call(
+        Uint8List sponse = await cts.call(
             calltype: CallType.call,
             method_name: 'controller_append_state_snapshot_candid_bytes',
             caller: controller,
@@ -1408,7 +1511,7 @@ Future<void> controller_download_state_snapshot_change_state_snapshot_and_put_st
 
 
 Future<void> controller_create_state_snapshot() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_create_state_snapshot',
         caller: controller,
@@ -1422,7 +1525,7 @@ Future<void> controller_create_state_snapshot() async {
 
 
 Future<void> controller_re_store_cts_data_out_of_the_state_snapshot() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_re_store_cts_data_out_of_the_state_snapshot',
         caller: controller,
@@ -1436,7 +1539,7 @@ Future<void> controller_re_store_cts_data_out_of_the_state_snapshot() async {
 
 
 Future<void> controller_upgrade_umcs(Vector<PrincipalReference>? opt_umcs) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_upgrade_umcs',
         caller: controller,
@@ -1452,13 +1555,13 @@ Future<void> controller_upgrade_umcs(Vector<PrincipalReference>? opt_umcs) async
 }
 
 
-Future<void> controller_upgrade_ucs_on_a_umc() async {
-    Uint8List sponse = await canister.call(
+Future<void> controller_upgrade_ucs_on_a_umc(Principal umc) async {
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_upgrade_ucs_on_a_umc',
         caller: controller,
         put_bytes: c_forwards([
-            Principal('2fgzu-3iaaa-aaaai-qnh3a-cai').candid,
+            umc,
             Option(value:null, value_type: Vector(isTypeStance: true, values_type: PrincipalReference(isTypeStance:true))),
             Blob()
         ])
@@ -1471,7 +1574,7 @@ Future<void> controller_upgrade_ucs_on_a_umc() async {
 
 
 Future<void> controller_put_uc_code_onto_the_umcs() async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_uc_code_onto_the_umcs',
         caller: controller,
@@ -1487,7 +1590,7 @@ Future<void> controller_put_uc_code_onto_the_umcs() async {
 
 
 Future<void> controller_upgrade_ctc(Principal ctc) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_upgrade_ctc',
         caller: controller,
@@ -1504,7 +1607,7 @@ Future<void> controller_upgrade_ctc(Principal ctc) async {
 
 
 Future<void> controller_take_away_cycles_transferrer_canisters(List<Principal> ctcs) async {
-    Uint8List sponse = await canister.call(
+    Uint8List sponse = await cts.call(
         calltype: CallType.call,
         method_name: 'controller_take_away_cycles_transferrer_canisters',
         caller: controller,
@@ -1548,7 +1651,7 @@ Future<void> controller_take_away_cycles_transferrer_canisters(List<Principal> c
 Future<void> call_canister() async {
     late List<CandidType> cs;
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_size',
 
@@ -1556,7 +1659,7 @@ Future<void> call_canister() async {
     // print(cs);
 
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_grow',
     //     put_bytes: c_forwards([
@@ -1566,14 +1669,14 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_size',
     // ));
     // print(cs);
 
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_write',
     //     put_bytes: c_forwards([
@@ -1584,13 +1687,13 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_size',
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_bytes',
     // ));
@@ -1598,7 +1701,7 @@ Future<void> call_canister() async {
     // // print(b.bytes);
     // print(b.length);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_stable_read',
     //     put_bytes: c_forwards([
@@ -1609,7 +1712,7 @@ Future<void> call_canister() async {
     // ));
     // print((cs[0] as Blob).bytes);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_clear_file_hashes',
     //     put_bytes: c_forwards([])
@@ -1619,7 +1722,7 @@ Future<void> call_canister() async {
 
 
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'upload_frontcode_file_chunks',
     //     put_bytes: c_forwards([
@@ -1633,7 +1736,7 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'upload_frontcode_file_chunks',
     //     put_bytes: c_forwards([
@@ -1647,7 +1750,7 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_get_file_hashes',
     // ));
@@ -1657,7 +1760,7 @@ Future<void> call_canister() async {
     // }
 
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'upload_frontcode_file_chunks',
     //     put_bytes: c_forwards([
@@ -1667,14 +1770,14 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     calltype: CallType.call,
     //     method_name: 'public_get_file_hashes',
     //     put_bytes: c_forwards([])
     // ));
     // print(cs);
 
-    cs = c_backwards(await canister.call(
+    cs = c_backwards(await cts.call(
         caller: controller,
         calltype: CallType.call,
         method_name: 'cycles_balance',
@@ -1682,7 +1785,7 @@ Future<void> call_canister() async {
     ));
     print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     caller: controller,
     //     calltype: CallType.call,
     //     method_name: 'sync_controllers',
@@ -1690,7 +1793,7 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     caller: controller,
     //     calltype: CallType.call,
     //     method_name: 'total_pages',
@@ -1698,12 +1801,12 @@ Future<void> call_canister() async {
     // ));
     // print(cs);
 
-    cs = c_backwards(await canister.call(
+    cs = c_backwards(await cts.call(
         caller: controller,
         calltype: CallType.call,
         method_name: 'transfer_cycles',
         put_bytes: c_forwards([
-            canister2.principal.candid,
+            cts.principal.candid,
             Nat64(BigInt.from(3)),
             Record.oftheMap({
                 'memo': Variant.oftheMap({
@@ -1714,7 +1817,7 @@ Future<void> call_canister() async {
     ));
     print(cs);
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     caller: controller,
     //     calltype: CallType.call,
     //     method_name: 'total_pages',
@@ -1723,7 +1826,7 @@ Future<void> call_canister() async {
     // print(cs);
 
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     caller: controller,
     //     calltype: CallType.call,
     //     method_name: 'transfers',
@@ -1743,7 +1846,7 @@ Future<void> call_canister() async {
     // }
     
     
-    cs = c_backwards(await canister.call(
+    cs = c_backwards(await cts.call(
         caller: controller,
         calltype: CallType.call,
         method_name: 'transfers',
@@ -1762,7 +1865,7 @@ Future<void> call_canister() async {
 
     }
 
-    cs = c_backwards(await canister2.call(
+    cs = c_backwards(await cts.call(
         caller: controller2,
         calltype: CallType.call,
         method_name: 'transfers',
@@ -1781,7 +1884,7 @@ Future<void> call_canister() async {
 
     }
 
-    // cs = c_backwards(await canister.call(
+    // cs = c_backwards(await cts.call(
     //     caller: controller,
     //     calltype: CallType.call,
     //     method_name: 'cycles_balance',
@@ -1790,7 +1893,7 @@ Future<void> call_canister() async {
     // print(cs);
 
 
-    cs = c_backwards(await canister2.call(
+    cs = c_backwards(await cts.call(
         caller: controller2,
         calltype: CallType.call,
         method_name: 'see_icp_xdr_conversion_rate',
@@ -1812,11 +1915,11 @@ Future<void> put_canister_controllers() async {
         method_name: 'update_settings',
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': canister.principal.candid,
+                'canister_id': cts.principal.candid,
                 'settings' : Record.oftheMap({
                     'controllers': Vector.oftheList<PrincipalReference>([
                         controller.principal.candid,
-                        canister.principal.candid
+                        cts.principal.candid
                     ])
                 })
             })
@@ -1830,11 +1933,11 @@ Future<void> put_canister_controllers() async {
         method_name: 'update_settings',
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': canister2.principal.candid,
+                'canister_id': cts.principal.candid,
                 'settings' : Record.oftheMap({
                     'controllers': Vector.oftheList<PrincipalReference>([
                         controller2.principal.candid,
-                        canister2.principal.candid
+                        cts.principal.candid
                     ])
                 })
             })
@@ -1848,22 +1951,22 @@ Future<void> put_canister_controllers() async {
 
 
 Future<void> put_frontcode_build_web() async {
-    Canister put_frontcode_on_the_canister = canister;
+    Canister put_frontcode_on_the_canister = test_cts;
     print('putting frontcode on the canister: ${put_frontcode_on_the_canister.principal}');
     print('confirm y/n');
     String confirm = stdin.readLineSync()!;
     if (confirm != 'y') { throw Exception('void-confirm'); }
-    Directory build_web_dir = Directory('../frontcode/build/web/');
-    await for (FileSystemEntity fse in build_web_dir.list(recursive: true, followLinks: false)) {
+    String build_web_dir_string = '../../frontcode/build/web';
+    await for (FileSystemEntity fse in Directory(build_web_dir_string).list(recursive: true, followLinks: false)) {
         print(fse.path);
-        if ( await FileSystemEntity.isFile(fse.path) && !fse.path.contains('/canvaskit.wasm') ) {
+        if ( await FileSystemEntity.isFile(fse.path) && !fse.path.contains('/canvaskit.wasm') && (fse.path.contains('main.dart.js') || fse.path.contains('main.dart.js')) ) {
             String content_type = '';
             if (fse.path.substring(fse.path.length-5) == '.wasm') { content_type = 'application/wasm'; }
             List<CandidType> cs = c_backwards(await put_frontcode_on_the_canister.call(
                 calltype: CallType.call,
                 method_name: 'controller_upload_frontcode_file_chunks',
                 put_bytes: c_forwards([
-                    Text( fse.path.contains('/index.html') ? '/' : fse.path.replaceFirst('../frontcode/build/web', '')),
+                    Text( fse.path.contains('/index.html') ? '/' : fse.path.replaceFirst(build_web_dir_string, '')),
                     Record.oftheMap({
                         'content_type': Text(content_type),
                         'content_encoding': Text('gzip'),
@@ -1874,7 +1977,6 @@ Future<void> put_frontcode_build_web() async {
             ));
             print(cs);
 
-
         }
     }
 }
@@ -1883,7 +1985,7 @@ Future<void> put_frontcode_build_web() async {
 
 
 Future<void> clear_frontcode_files() async {
-    Canister clear_frontcode_on_the_canister = canister;
+    Canister clear_frontcode_on_the_canister = cts;
     print('clear frontcode on the canister: ${clear_frontcode_on_the_canister.principal}');
     print('confirm y/n');
     String confirm = stdin.readLineSync()!;

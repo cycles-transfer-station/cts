@@ -20,3 +20,6 @@ ic-wasm target/wasm32-unknown-unknown/release/cycles_market.wasm -o target/wasm3
 
 ic-wasm target/wasm32-unknown-unknown/release/cm_caller.wasm -o target/wasm32-unknown-unknown/release/cm_caller-o.wasm shrink
 
+
+
+ls -al target/wasm32-unknown-unknown/release/
