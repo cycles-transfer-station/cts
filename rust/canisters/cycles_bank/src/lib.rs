@@ -178,6 +178,7 @@ struct CMIcpPosition{
 struct CMCyclesPositionPurchase{
     cycles_position_id: cycles_market::PositionId,
     cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    cycles_position_positor: Principal,
     id: cycles_market::PurchaseId,
     cycles: Cycles,
     purchase_position_fee: u64,
@@ -188,6 +189,7 @@ struct CMCyclesPositionPurchase{
 struct CMIcpPositionPurchase{
     icp_position_id: cycles_market::PositionId,
     icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
+    icp_position_positor: Principal,
     id: cycles_market::PurchaseId,
     icp: IcpTokens,
     purchase_position_fee: u64,
@@ -449,6 +451,12 @@ fn create_cb_data_candid_bytes() -> Vec<u8> {
         cb_data.user_data.cm_cycles_positions_purchases.shrink_to_fit();
         cb_data.user_data.cm_icp_positions_purchases.shrink_to_fit();
         cb_data.user_data.cm_icp_transfers_out.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.shrink_to_fit();
+        cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.shrink_to_fit();
     });
     
     let mut cb_data_candid_bytes: Vec<u8> = with(&CB_DATA, |cb_data| { encode_one(cb_data).unwrap() });
@@ -516,6 +524,8 @@ fn post_upgrade() {
     stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut uc_upgrade_data_candid_bytes);
     
     re_store_cb_data_candid_bytes(uc_upgrade_data_candid_bytes);
+    
+    // ---------
     
 }
 
@@ -610,6 +620,18 @@ fn calculate_current_storage_usage() -> u128 {
             cb_data.user_data.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
             +
             cb_data.user_data.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
+            +
+            cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
+            +
+            cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePurchaserLog>()
+            +
+            cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePositorLog>()
+            +
+            cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePurchaserLog>()
+            +
+            cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidCyclesPositionPositorLog>()
+            +
+            cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidIcpPositionPositorLog>()
         })
     ) as u128
 }
@@ -1141,7 +1163,8 @@ pub async fn cm_create_icp_position(q: cycles_market::CreateIcpPositionQuest) ->
 #[derive(CandidType, Deserialize)]
 pub struct UserCMPurchaseCyclesPositionQuest {
     cycles_market_purchase_cycles_position_quest: cycles_market::PurchaseCyclesPositionQuest,
-    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp // for the user_canister-log
+    cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp, // for the user_canister-log
+    cycles_position_positor: Principal,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -1185,6 +1208,7 @@ pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -
                         CMCyclesPositionPurchase{
                             cycles_position_id: q.cycles_market_purchase_cycles_position_quest.cycles_position_id,
                             cycles_position_xdr_permyriad_per_icp_rate: q.cycles_position_xdr_permyriad_per_icp_rate,
+                            cycles_position_positor: q.cycles_position_positor,
                             id: cm_purchase_cycles_position_success.purchase_id,
                             cycles: q.cycles_market_purchase_cycles_position_quest.cycles,
                             purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
@@ -1211,7 +1235,8 @@ pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -
 #[derive(CandidType, Deserialize)]
 pub struct UserCMPurchaseIcpPositionQuest {
     cycles_market_purchase_icp_position_quest: cycles_market::PurchaseIcpPositionQuest,
-    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp // for the user_canister-log
+    icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp, // for the user_canister-log
+    icp_position_positor: Principal,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -1255,6 +1280,7 @@ pub async fn cm_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Resu
                         CMIcpPositionPurchase{
                             icp_position_id: q.cycles_market_purchase_icp_position_quest.icp_position_id,
                             icp_position_xdr_permyriad_per_icp_rate: q.icp_position_xdr_permyriad_per_icp_rate,
+                            icp_position_positor: q.icp_position_positor,
                             id: cm_purchase_icp_position_success.purchase_id,
                             icp: q.cycles_market_purchase_icp_position_quest.icp,
                             purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
@@ -1996,6 +2022,18 @@ pub struct UserUCMetrics {
     download_cm_cycles_positions_purchases_chunk_size: u128,
     download_cm_icp_positions_purchases_chunk_size: u128,
     download_cm_icp_transfers_out_chunk_size: u128,
+    cm_message_cycles_position_purchase_positor_logs_len: u128,
+    cm_message_cycles_position_purchase_purchaser_logs_len: u128,
+    cm_message_icp_position_purchase_positor_logs_len: u128,
+    cm_message_icp_position_purchase_purchaser_logs_len: u128,
+    cm_message_void_cycles_position_positor_logs_len: u128,
+    cm_message_void_icp_position_positor_logs_len: u128,
+    download_cm_message_cycles_position_purchase_positor_logs_chunk_size: u128,
+    download_cm_message_cycles_position_purchase_purchaser_logs_chunk_size: u128,
+    download_cm_message_icp_position_purchase_positor_logs_chunk_size: u128,
+    download_cm_message_icp_position_purchase_purchaser_logs_chunk_size: u128,
+    download_cm_message_void_cycles_position_positor_logs_chunk_size: u128,
+    download_cm_message_void_icp_position_positor_logs_chunk_size: u128,
 }
 
 
@@ -2030,6 +2068,18 @@ pub fn metrics() -> UserUCMetrics {
             download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
             download_cm_icp_positions_purchases_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
             download_cm_icp_transfers_out_chunk_size: USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE as u128,
+            cm_message_cycles_position_purchase_positor_logs_len: cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() as u128,
+            cm_message_cycles_position_purchase_purchaser_logs_len: cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() as u128,
+            cm_message_icp_position_purchase_positor_logs_len: cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.len() as u128,
+            cm_message_icp_position_purchase_purchaser_logs_len: cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.len() as u128,
+            cm_message_void_cycles_position_positor_logs_len: cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() as u128,
+            cm_message_void_icp_position_positor_logs_len: cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.len() as u128,
+            download_cm_message_cycles_position_purchase_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE as u128,
+            download_cm_message_cycles_position_purchase_purchaser_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE as u128,
+            download_cm_message_icp_position_purchase_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE as u128,
+            download_cm_message_icp_position_purchase_purchaser_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE as u128,
+            download_cm_message_void_cycles_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
+            download_cm_message_void_icp_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_ICP_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
         }
     })
 }
