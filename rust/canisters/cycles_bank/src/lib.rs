@@ -533,28 +533,6 @@ fn post_upgrade() {
 
 // ---------------------------------------------------------------------------------
 
-#[no_mangle]
-async fn canister_global_timer() {
-    /*
-    if time_nanos()/NANOS_IN_A_SECOND > with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) - 30/*30 seconds slippage somewhere*/ {
-        // call the cts-main for the user-canister-termination
-        // the CTS will save the user_id, user_canister_id, and cycles_balance for a minimum of the 10-years.
-        match call::<(cts::CyclesBankLifetimeTerminationQuest,), ()>(
-            cts_id(),
-            "user_canister_lifetime_termination",
-            (cts::CyclesBankLifetimeTerminationQuest{
-                user_id: user_id(),
-                cycles_balance: cycles_balance()
-            },),
-        ).await {
-            Ok(_) => {},
-            Err(call_error) => {
-                set_global_timer(100); // re-try in the 100-seconds
-            }
-        }
-    }
-    */
-}
 
 
 // ---------------------------------------------------------------------------------
