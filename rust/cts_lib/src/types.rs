@@ -372,6 +372,8 @@ pub mod cycles_market {
     pub struct CreateCyclesPositionSuccess {
         pub position_id: PositionId,
     }
+    
+    pub type CreateCyclesPositionResult = Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>;
 
     #[derive(CandidType, Deserialize)]
     pub struct CreateIcpPositionQuest {
@@ -397,6 +399,8 @@ pub mod cycles_market {
     pub struct CreateIcpPositionSuccess {
         pub position_id: PositionId
     }
+        
+    pub type CreateIcpPositionResult = Result<CreateIcpPositionSuccess, CreateIcpPositionError>;
 
     #[derive(CandidType, Deserialize)]
     pub struct PurchaseCyclesPositionQuest {

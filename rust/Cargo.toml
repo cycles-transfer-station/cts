@@ -19,7 +19,9 @@ exclude = [
 
 [profile.release]
 lto = true
-opt-level = 'z'
-#codegen-units = 1 
-
+opt-level = 'z'          
+codegen-units = 1 
+split-debuginfo= "packed"
+strip = "debuginfo"
+debug = false
 
