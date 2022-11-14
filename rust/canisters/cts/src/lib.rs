@@ -45,7 +45,7 @@ use cts_lib::{
         cbs_map::{
             CBSMUserData,
             CBSMUpgradeCBError,
-            CBSMUpgradeCBCallErrorType
+            CBSMUpgradeCBErrorKind
         },
         cycles_bank::{
             CyclesBankInit,
@@ -61,6 +61,9 @@ use cts_lib::{
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
         ICP_LEDGER_CREATE_CANISTER_MEMO,
+        CTS_TRANSFER_ICP_FEE_ICP_MEMO,
+        CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO
+
     },
     tools::{
         sha256,
@@ -167,7 +170,7 @@ use tools::{
     get_new_canister,
     GetNewCanisterError,
     IcpXdrConversionRate,
-    take_user_icp_ledger,
+    transfer_user_icp_ledger,
     CmcNotifyError,
     CmcNotifyCreateCanisterQuest,
     PutNewUserIntoACBSMError,
@@ -1123,7 +1126,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     } else {
         
         if purchase_cycles_bank_data.collect_icp == false {
-            match take_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_CYCLES_BANK_COST_CYCLES - NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()), ICP_LEDGER_TRANSFER_DEFAULT_FEE).await {
+            match transfer_user_icp_ledger(&user_id, cycles_to_icptokens(NEW_CYCLES_BANK_COST_CYCLES - NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()), ICP_LEDGER_TRANSFER_DEFAULT_FEE, CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO).await {
                 Ok(icp_transfer_result) => match icp_transfer_result {
                     Ok(_block_height) => {
                         purchase_cycles_bank_data.collect_icp = true;
@@ -1702,7 +1705,7 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
     }
     
     if transfer_icp_data.cts_fee_taken == false {
-        match take_user_icp_ledger(&user_id, transfer_icp_data.cts_transfer_icp_fee.unwrap(), transfer_icp_data.transfer_icp_quest.icp_fee).await {
+        match transfer_user_icp_ledger(&user_id, transfer_icp_data.cts_transfer_icp_fee.unwrap(), transfer_icp_data.transfer_icp_quest.icp_fee, CTS_TRANSFER_ICP_FEE_ICP_MEMO).await {
             Ok(icp_transfer_result) => match icp_transfer_result {
                 Ok(_block_height) => {
                     transfer_icp_data.cts_fee_taken = true;
@@ -2763,6 +2766,7 @@ pub struct CTSMetrics {
     latest_known_cmc_rate: IcpXdrConversionRate,
     users_purchase_cycles_bank_count: u64,
     users_burn_icp_mint_cycles_count: u64,
+    users_transfer_icp_count: u64,
 }
 
 
@@ -2785,8 +2789,8 @@ pub fn controller_see_metrics() -> CTSMetrics {
             cycles_transferrer_canisters_count: cts_data.cycles_transferrer_canisters.len() as u64,
             latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
             users_purchase_cycles_bank_count: cts_data.users_purchase_cycles_bank.len() as u64,
-            users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64
-            
+            users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64,
+            users_transfer_icp_count: cts_data.users_transfer_icp.len() as u64
         }
     })
 }

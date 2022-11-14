@@ -259,13 +259,14 @@ pub mod cbs_map {
     }
 
     
-    pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBCallErrorType, (u32, String));
+    pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBErrorKind);
 
     #[derive(CandidType, Deserialize, Clone, Debug)]
-    pub enum CBSMUpgradeCBCallErrorType {
-        StopCanisterCallError,
-        UpgradeCodeCallError{wasm_module_hash: [u8; 32]},
-        StartCanisterCallError
+    pub enum CBSMUpgradeCBErrorKind {
+        StopCanisterCallError(u32, String),
+        UpgradeCodeCallError{wasm_module_hash: [u8; 32], call_error: (u32, String)},
+        UpgradeCodeCallCandidError{candid_error: String},
+        StartCanisterCallError(u32, String)
     }
     
 

@@ -34,7 +34,6 @@ use cts_lib::{
         MANAGEMENT_CANISTER_ID,
         ICP_LEDGER_CREATE_CANISTER_MEMO,
         ICP_LEDGER_TOP_UP_CANISTER_MEMO,
-        ICP_CTS_TAKE_FEE_MEMO,
         NETWORK_CANISTER_CREATION_FEE_CYCLES
         
     },
@@ -110,11 +109,11 @@ pub async fn check_user_icp_ledger_balance(user_id: &Principal) -> CallResult<Ic
 
 
 
-pub async fn take_user_icp_ledger(user_id: &Principal, icp: IcpTokens, icp_fee: IcpTokens) -> CallResult<IcpTransferResult> {
+pub async fn transfer_user_icp_ledger(user_id: &Principal, icp: IcpTokens, icp_fee: IcpTokens, memo: IcpMemo) -> CallResult<IcpTransferResult> {
     icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
-            memo: ICP_CTS_TAKE_FEE_MEMO,
+            memo: memo,
             amount: icp,
             fee: icp_fee,
             from_subaccount: Some(principal_icp_subaccount(user_id)),

@@ -58,7 +58,7 @@ use cts_lib::{
             CBSMUserData,
             PutNewUserError,
             CBSMUpgradeCBError,
-            CBSMUpgradeCBCallErrorType
+            CBSMUpgradeCBErrorKind
         },
         cycles_bank,
         management_canister::{
@@ -99,6 +99,27 @@ impl CBSMData {
         }
     }
 }
+
+
+#[derive(CandidType, Deserialize)]
+struct OldCBSMData {
+    cts_id: Principal,
+    users_map: UsersMap,
+    cycles_bank_canister_code: CanisterCode,
+    cycles_bank_canister_upgrade_fails: Vec<OldCBSMUpgradeCBError>,
+}
+
+type OldCBSMUpgradeCBError = (Principal, OldCBSMUpgradeCBCallErrorType, (u32, String));
+
+#[derive(CandidType, Deserialize)]
+enum OldCBSMUpgradeCBCallErrorType {
+    StopCanisterCallError,
+    UpgradeCodeCallError{wasm_module_hash: [u8; 32]},
+    StartCanisterCallError
+}
+
+
+
 
 
 
@@ -145,15 +166,27 @@ fn re_store_cbsm_data_candid_bytes(cbsm_data_candid_bytes: Vec<u8>) {
     let cbsm_data: CBSMData = match decode_one::<CBSMData>(&cbsm_data_candid_bytes) {
         Ok(cbsm_data) => cbsm_data,
         Err(_) => {
-            trap("error decode of the CBSMData");
-            /*
-            let old_cbsm_data: OldUMCData = decode_one::<OldUMCData>(&cbsm_data_candid_bytes).unwrap();
+            //trap("error decode of the CBSMData");
+            
+            let old_cbsm_data: OldCBSMData = decode_one::<OldCBSMData>(&cbsm_data_candid_bytes).unwrap();
             let cbsm_data: CBSMData = CBSMData{
                 cts_id: old_cbsm_data.cts_id,
-                .......
+                users_map: old_cbsm_data.users_map,
+                cycles_bank_canister_code: old_cbsm_data.cycles_bank_canister_code,
+                cycles_bank_canister_upgrade_fails: old_cbsm_data.cycles_bank_canister_upgrade_fails.into_iter().map(
+                    |old_e: (Principal, OldCBSMUpgradeCBCallErrorType, (u32, String))| {
+                        (
+                            old_e.0, 
+                            match old_e.1 {
+                                OldCBSMUpgradeCBCallErrorType::StopCanisterCallError => CBSMUpgradeCBErrorKind::StopCanisterCallError(old_e.2.0, old_e.2.1),
+                                OldCBSMUpgradeCBCallErrorType::UpgradeCodeCallError{wasm_module_hash} => CBSMUpgradeCBErrorKind::UpgradeCodeCallError{wasm_module_hash, call_error: (old_e.2.0, old_e.2.1)},
+                                OldCBSMUpgradeCBCallErrorType::StartCanisterCallError => CBSMUpgradeCBErrorKind::StartCanisterCallError(old_e.2.0, old_e.2.1),
+                            }
+                        )
+                    }
+                ).collect::<Vec<CBSMUpgradeCBError>>(),
             };
-            cbsm_data
-            */
+            cbsm_data            
         }
     };
 
@@ -369,7 +402,7 @@ pub fn cts_download_state_snapshot() {
     }
     let chunk_size: usize = 1 * MiB as usize;
     with(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
+        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
         reply::<(Option<&[u8]>,)>((state_snapshot_cbsm_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
     });
 }
@@ -482,19 +515,19 @@ pub async fn cts_upgrade_ucs_chunk() {
             }
             q_upgrade_ucs_good_check_map.into_iter().map(|(q_upgrade_uc, with_the_user_id): (Principal, Option<Principal>)| { (with_the_user_id.unwrap(), q_upgrade_uc) }).collect::<Vec<(Principal, Principal)>>()
         } else {
-            let mut upgrade_ucs: Vec<(Principal, Principal)> = Vec::new();
+            let mut upgrade_ucs_gather: Vec<(Principal, Principal)> = Vec::new();
             with(&CBSM_DATA, |cbsm_data| { 
                 let current_uc_code_module_hash: [u8; 32] = cbsm_data.cycles_bank_canister_code.module_hash().clone();
                 for (user_id, umc_user_data) in cbsm_data.users_map.iter() {
-                    if upgrade_ucs.len() >= CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE {
+                    if upgrade_ucs_gather.len() >= CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE {
                         break;
                     }
                     if umc_user_data.cycles_bank_latest_known_module_hash != current_uc_code_module_hash {
-                        upgrade_ucs.push((user_id.clone(), umc_user_data.cycles_bank_canister_id.clone()));
+                        upgrade_ucs_gather.push((user_id.clone(), umc_user_data.cycles_bank_canister_id.clone()));
                     }
                 }
             });
-            upgrade_ucs
+            upgrade_ucs_gather
         }
     };    
     
@@ -518,25 +551,34 @@ pub async fn cts_upgrade_ucs_chunk() {
                 ).await {
                     Ok(_) => {},
                     Err(stop_canister_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
+                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::StopCanisterCallError(stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
                     }
                 }
+                
+                let install_code_quest_b: Vec<u8> = match with(&CBSM_DATA, |cbsm_data| {
+                    encode_one(&ManagementCanisterInstallCodeQuest{
+                        mode : ManagementCanisterInstallCodeMode::upgrade,
+                        canister_id : upgrade_uc,
+                        wasm_module : &(cbsm_data.cycles_bank_canister_code.module()),
+                        arg : &post_upgrade_arg,
+                    }) 
+                }) {
+                    Ok(b) => b,
+                    Err(candid_error) => {
+                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::UpgradeCodeCallCandidError{candid_error: format!("{:?}", candid_error)}));
+                    }
+                }; 
                 
                 let user_canister_code_module_hash: [u8; 32] = with(&CBSM_DATA, |cbsm_data| { cbsm_data.cycles_bank_canister_code.module_hash().clone() });
                 match call_raw128(
                     MANAGEMENT_CANISTER_ID,
                     "install_code",
-                    &encode_one(&ManagementCanisterInstallCodeQuest{
-                        mode : ManagementCanisterInstallCodeMode::upgrade,
-                        canister_id : upgrade_uc,
-                        wasm_module : unsafe{&*with(&CBSM_DATA, |cbsm_data| { cbsm_data.cycles_bank_canister_code.module() as *const Vec<u8> })},
-                        arg : &post_upgrade_arg,
-                    }).unwrap(),
+                    &install_code_quest_b,
                     0
                 ).await {
                     Ok(_) => {},
                     Err(upgrade_code_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBCallErrorType::UpgradeCodeCallError{wasm_module_hash: user_canister_code_module_hash}, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
+                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::UpgradeCodeCallError{wasm_module_hash: user_canister_code_module_hash, call_error: (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)}));
                     }
                 }
                 
@@ -547,7 +589,7 @@ pub async fn cts_upgrade_ucs_chunk() {
                 ).await {
                     Ok(_) => {},
                     Err(start_canister_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBCallErrorType::StartCanisterCallError, (start_canister_call_error.0 as u32, start_canister_call_error.1))); 
+                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::StartCanisterCallError(start_canister_call_error.0 as u32, start_canister_call_error.1))); 
                     }
                 }
                 

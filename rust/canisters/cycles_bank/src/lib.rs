@@ -366,6 +366,8 @@ const USER_DOWNLOAD_CM_MESSAGE_VOID_ICP_POSITION_POSITOR_LOGS_CHUNK_SIZE: usize 
 
 const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = SECONDS_IN_A_DAY * 30;
 
+const MINIMUM_CYCLES_FOR_THE_CTSFUEL: Cycles = 10_000_000_000;
+
 const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY * 45;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
@@ -626,12 +628,14 @@ fn ctsfuel_balance() -> CTSFuel {
         with(&CB_DATA, |cb_data| { 
             cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
-            cb_data.storage_size_mib * 2 // canister-memory-allocation in the mib
+            cb_data.storage_size_mib * 2 * MiB as u128 // canister-memory-allocation in the mib
+            
+            //+ stable64_size() as u128 * WASM_PAGE_SIZE_BYTES as u128
         })
         *
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
         /
-        1024/*network storage charge per MiB per second*/
+        GiB as u128 /*network storage charge per byte per second*/
     )
 }
 
@@ -2195,6 +2199,7 @@ pub fn topup_ctsfuel_with_some_cycles() -> () {
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCyclesBalanceForTheCTSFuelError {
+    MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: Cycles },
     CyclesBalanceTooLow { cycles_balance: Cycles }
 }
 
@@ -2205,6 +2210,10 @@ pub fn cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<
     }
     
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
+    
+    if cycles_for_the_ctsfuel < MINIMUM_CYCLES_FOR_THE_CTSFUEL {
+        return Err(UserCyclesBalanceForTheCTSFuelError::MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: MINIMUM_CYCLES_FOR_THE_CTSFUEL });
+    }
     
     if cycles_balance() < cycles_for_the_ctsfuel {
         return Err(UserCyclesBalanceForTheCTSFuelError::CyclesBalanceTooLow{ cycles_balance: cycles_balance() });        
@@ -2239,19 +2248,19 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
     
     if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
 
+    let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(MINIMUM_LENGTHEN_LIFETIME_SECONDS).unwrap_or_else(|| { trap("time is not support at the moment") });
+    if q.set_lifetime_termination_timestamp_seconds < minimum_set_lifetime_termination_timestamp_seconds {
+        return Err(LengthenLifetimeError::MinimumSetLifetimeTerminationTimestampSeconds(minimum_set_lifetime_termination_timestamp_seconds));
+    }
+
     let lengthen_cost_cycles: Cycles = {
-        q.set_lifetime_termination_timestamp_seconds - with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds })
+        ( q.set_lifetime_termination_timestamp_seconds - with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) )
         * with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) * 2 // canister-memory-allocation in the mib 
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
     };
     
     if lengthen_cost_cycles > cycles_balance() {
         return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), lengthen_cost_cycles });
-    }
-    
-    let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(MINIMUM_LENGTHEN_LIFETIME_SECONDS).unwrap_or_else(|| { trap("time is not support at the moment") });
-    if q.set_lifetime_termination_timestamp_seconds <  minimum_set_lifetime_termination_timestamp_seconds {
-        return Err(LengthenLifetimeError::MinimumSetLifetimeTerminationTimestampSeconds(minimum_set_lifetime_termination_timestamp_seconds));
     }
     
     // let id for the log
