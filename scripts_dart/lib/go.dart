@@ -229,10 +229,6 @@ Future<void> main(List<String> arguments) async {
         await controller_see_stable_size();
     }
 
-    else if (first_command == 'controller_see_new_canister_status') {
-        await controller_see_new_canister_status(Principal(arguments[1]));
-    }
-
     else if (first_command == 'controller_put_umc_code') {
         await controller_put_umc_code();
     }
@@ -266,6 +262,37 @@ Future<void> main(List<String> arguments) async {
     else if (first_command == 'controller_cts_call_canister') {
         await controller_cts_call_canister();
     }
+    
+    else if (first_command == 'cbsm_cts_see_user_canister_upgrade_fails') {
+        await cbsm_cts_see_user_canister_upgrade_fails(Principal(arguments[1]));
+    }
+    
+    else if (first_command == 'cbsm_cts_clear_user_canister_upgrade_fails') {
+        await cbsm_cts_clear_user_canister_upgrade_fails(Principal(arguments[1]));
+    }
+    
+    else if (first_command == 'cbsm_find_user') {
+        await cbsm_find_user(cbsm: Principal(arguments[1]), user: Principal(arguments[2]));
+    }
+    
+    else if (first_command == 'cbsm_cts_see_uc_code_module_hash') {
+        await cbsm_cts_see_uc_code_module_hash(Principal(arguments[1]));
+    }
+    
+    else if (first_command == 'controller_cts_call_canister_download_canister_data') {
+        await controller_cts_call_canister_download_canister_data(Principal(arguments[1]));
+    } 
+    
+    else if (first_command == 'controller_cts_call_canister_start_canister') {
+        await controller_cts_call_canister_start_canister(Principal(arguments[1]));
+    } 
+    
+    else if (first_command == 'controller_cts_call_canister_canister_status') {
+        await controller_cts_call_canister_canister_status(Principal(arguments[1]));
+    } 
+    
+    
+    
     
     else if (first_command == 'controller_see_new_users') {
         await controller_see_new_users();
@@ -429,8 +456,50 @@ Future<void> main(List<String> arguments) async {
         //print(await cts.controllers());
         //print(controller);
         
-        print(await test_cycles_market_cmcaller.controllers());
+        
+        print('cts: ${cts}');
+        //print('cts-controllers: ${await cts.controllers()}');
+        print('cts-module_hash: ${await cts.module_hash()}');
+        print('cts_cycles_transferrer_1: ${cts_cycles_transferrer_1}\n\tmodule_hash ${await cts_cycles_transferrer_1.module_hash()}');
+        print('cts_cycles_transferrer_2: ${cts_cycles_transferrer_2}\n\tmodule_hash ${await cts_cycles_transferrer_2.module_hash()}');
+        print('cycles_market: ${cycles_market}\n\tmodule_hash ${await cycles_market.module_hash()}');
+        print('cycles_market_cmcaller: ${cycles_market_cmcaller}\n\tmodule_hash ${await cycles_market_cmcaller.module_hash()}');        
+        
+        print('test_cts: ${test_cts}');
+//        print('test_cts-controllers: ${await test_cts.controllers()}');
+        print('test_cts-module_hash: ${await test_cts.module_hash()}');
+        print('test_cts_cycles_transferrer_1: ${test_cts_cycles_transferrer_1}\n\tmodule_hash ${await test_cts_cycles_transferrer_1.module_hash()}');
+        print('test_cycles_market: ${test_cycles_market}\n\tmodule_hash ${await test_cycles_market.module_hash()}');
+        print('test_cycles_market_cmcaller: ${test_cycles_market_cmcaller}\n\tmodule_hash ${await test_cycles_market_cmcaller.module_hash()}');        
+        
+        Principal test_cbsm = Principal('34oen-caaaa-aaaai-qntlq-cai');
+        print('test_cbsm: ${test_cbsm}');
+        print('test_cbsm wasm_hash: ${await Canister(test_cbsm).module_hash()}');
+     
+        Principal test_cycles_bank = Principal('mq76c-siaaa-aaaao-aarvq-cai');
+        print('test_cycles_bank: ${test_cycles_bank}\nmodule_hash: ${await Canister(test_cycles_bank).module_hash()}');
+        
+        Principal test_cycles_bank_2 = Principal('lwwnf-oiaaa-aaaal-qbhea-cai');
+        print('test_cycles_bank_2: ${test_cycles_bank_2}\nmodule_hash: ${await Canister(test_cycles_bank_2).module_hash()}');
+       
+        
+        List<String> module_paths = [
+            '../rust/target/wasm32-unknown-unknown/release/cts.wasm',
+            '../rust/target/wasm32-unknown-unknown/release/cbs_map.wasm',
+            '../rust/target/wasm32-unknown-unknown/release/cycles_bank.wasm',
+            '../rust/target/wasm32-unknown-unknown/release/cycles_market.wasm',
+            '../rust/target/wasm32-unknown-unknown/release/cycles_transferrer.wasm',
+            '../rust/target/wasm32-unknown-unknown/release/cm_caller.wasm',
+        ];
+        for (String path in module_paths) {
+            print('$path : module_hash: ${sha256.convert(File(path).readAsBytesSync()).bytes}');
+        }
     
+        
+        
+        
+        
+        
     }
 
 
@@ -498,7 +567,7 @@ Future<void> put_code_on_the_canister(String mode) async {
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': put_code_on_the_canister_id.candid
+                'canister_id': put_code_on_the_canister_id
             })
         ])
     );
@@ -534,7 +603,7 @@ Future<void> put_code_on_the_canister(String mode) async {
     await common.put_code_on_the_canister(
         controller,
         put_code_on_the_canister_id,
-        File('../rust/target/wasm32-unknown-unknown/release/cts-o.wasm').readAsBytesSync(),
+        File('../rust/target/wasm32-unknown-unknown/release/cts.wasm').readAsBytesSync(),
         mode,
         ['install', 'reinstall'].contains(mode) ? install_code_arg : upgrade_code_arg
     );
@@ -1034,23 +1103,11 @@ Future<void> controller_see_stable_size() async {
 
 
 
-Future<void> controller_see_new_canister_status(Principal new_canister_principal) async {
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_see_new_canister_status',
-        caller: controller,
-        put_bytes: c_forwards([new_canister_principal.candid])
-    );
-    print(sponse);
-    List<CandidType> cs = c_backwards(sponse);
-    print(cs);
-}
-
 
 Future<void> controller_put_umc_code() async {
-    Uint8List umc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cbs_map-o.wasm').readAsBytesSync();
+    Uint8List umc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cbs_map.wasm').readAsBytesSync();
 
-    Uint8List sponse = await cts.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_umc_code',
         caller: controller,
@@ -1068,9 +1125,9 @@ Future<void> controller_put_umc_code() async {
 
 
 Future<void> controller_put_user_canister_code() async {
-    Uint8List uc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cycles_bank-o.wasm').readAsBytesSync();
-
-    Uint8List sponse = await cts.call(
+    Uint8List uc_code_module = File('../rust/target/wasm32-unknown-unknown/release/cycles_bank.wasm').readAsBytesSync();
+    print(sha256.convert(uc_code_module).bytes);
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_put_cycles_bank_canister_code',
         caller: controller,
@@ -1151,7 +1208,7 @@ Future<void> controller_complete_users_purchase_cycles_bank(List<Principal>? ps)
 
 
 Future<void> controller_see_metrics() async {
-    Uint8List sponse = await cts.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_see_metrics',
         caller: controller,        
@@ -1166,14 +1223,14 @@ Future<void> controller_see_metrics() async {
         'stable_size',
         'cycles_balance',
         'new_canisters_count',
-        'users_map_canisters_count',
+        'cbsms_count',
         'cycles_transferrer_canisters_count',
-        'user_canister_code_hash',
-        'users_map_canister_code_hash',
+        'cycles_bank_canister_code_hash',
+        'cbsm_code_hash',
         'cycles_transferrer_canister_code_hash',
         'latest_known_cmc_rate',
-        'new_users_count',
-        'cycles_transfers_count',
+        'users_purchase_cycles_bank_count',
+        'users_burn_icp_mint_cycles_count',
         
 
     ]) {
@@ -1386,28 +1443,11 @@ Future<void> controller_cts_call_canister() async {
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
-                'callee': common.management.principal,
-                'method_name': Text('update_settings'),
+                'callee': Principal('34oen-caaaa-aaaai-qntlq-cai'),
+                'method_name': Text('cts_see_uc_code_module_hash'),
                 'arg_raw': Blob(
                     c_forwards([
-                        Record.oftheMap({
-                            'canister_id': test_cycles_market_cmcaller.principal,
-                            'settings': Record.oftheMap({
-                                // freezing_threshold : opt nat,
-                                'controllers' : Option(value: Vector.oftheList<PrincipalReference>([
-                                    controller.principal.candid,
-                                    controller2.principal.candid,
-                                    controller3.principal.candid,
-                                    thp4z_controller.principal,
-                                    thp4z_controller2.principal,
-                                    thp4z_controller3.principal,
-                                    test_cts.principal,
-                                    test_cycles_market.principal
-                                ])),
-                                // memory_allocation : opt nat,
-                                // compute_allocation : opt nat,
-                            }) 
-                        }) 
+                    
                     ])
                 ),
                 'cycles': Nat(BigInt.from(0))
@@ -1422,6 +1462,274 @@ Future<void> controller_cts_call_canister() async {
     }
     
 }
+
+
+Future<void> cbsm_cts_see_user_canister_upgrade_fails(Principal cbsm) async {   
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': cbsm,
+                'method_name': Text('cts_see_user_canister_upgrade_fails'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        Nat64(BigInt.from(0))
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    print(sponse);
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    if ((cs[0] as Variant).containsKey('Ok')) {
+        print(c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes));
+    }
+
+}
+
+Future<void> cbsm_cts_clear_user_canister_upgrade_fails(Principal cbsm) async {   
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': cbsm,
+                'method_name': Text('cts_clear_user_canister_upgrade_fails'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    print(sponse);
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    if ((cs[0] as Variant).containsKey('Ok')) {
+        print(c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes));
+    }
+
+}
+
+
+
+
+Future<void> cbsm_find_user({ required Principal cbsm, required Principal user}) async {   
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': cbsm,
+                'method_name': Text('find_user'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        user
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    print(sponse);
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    if ((cs[0] as Variant).containsKey('Ok')) {
+        print(c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes));
+    }
+
+}
+
+
+Future<void> cbsm_cts_see_uc_code_module_hash(Principal cbsm) async {
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': cbsm,
+                'method_name': Text('cts_see_uc_code_module_hash'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    print(sponse);
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    if ((cs[0] as Variant).containsKey('Ok')) {
+        print(c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes));
+    }
+}
+
+
+Future<void> controller_cts_call_canister_download_canister_data(Principal canister) async {
+    Uint8List canister_data = Uint8List.fromList([]);
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': canister,
+                'method_name': Text('cts_create_state_snapshot'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    List<CandidType> canister_sponse_cs = c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes);
+    final int canister_data_len = (canister_sponse_cs[0] as Nat64).value.toInt();
+    
+    for(int i = 0; true; i=i+1) {
+        Uint8List sponse = await test_cts.call(
+            calltype: CallType.call,
+            method_name: 'controller_call_canister',
+            caller: controller,
+            put_bytes: c_forwards([
+                Record.oftheMap({
+                    'callee': canister,
+                    'method_name': Text('cts_download_state_snapshot'),
+                    'arg_raw': Blob(
+                        c_forwards([
+                            Nat(BigInt.from(i))
+                        ])
+                    ),
+                    'cycles': Nat(BigInt.from(0))
+                })
+            ])
+        );
+        List<CandidType> cs = c_backwards(sponse);
+        print(cs);
+        List<CandidType> canister_sponse_cs = c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes);
+        if ((canister_sponse_cs[0] as Option).value == null) {
+            break;
+        } else {
+            print(canister_sponse_cs);
+            canister_data.addAll(Blob.oftheVector(((canister_sponse_cs[0] as Option).value as Vector).cast_vector<Nat8>()).bytes);
+        }
+    }
+    if (canister_data.length != canister_data_len) {
+        throw Exception('wrong length of the data download');
+    }
+    print(canister_data.length);
+    print(
+"""final List<int> data = ${canister_data};"""
+    );
+    
+    
+    
+    
+}
+
+
+Future<void> controller_cts_call_canister_start_canister(Principal canister) async {
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': common.management.principal,
+                'method_name': Text('start_canister'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        Record.oftheMap({
+                            'canister_id': canister
+                        }) 
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    List<CandidType> canister_sponse_cs = c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes);
+    print(canister_sponse_cs);
+}
+
+
+Future<void> controller_cts_call_canister_canister_status(Principal canister) async {
+    Uint8List sponse = await test_cts.call(
+        calltype: CallType.call,
+        method_name: 'controller_call_canister',
+        caller: controller,
+        put_bytes: c_forwards([
+            Record.oftheMap({
+                'callee': common.management.principal,
+                'method_name': Text('canister_status'),
+                'arg_raw': Blob(
+                    c_forwards([
+                        Record.oftheMap({
+                            'canister_id': canister
+                        }) 
+                    ])
+                ),
+                'cycles': Nat(BigInt.from(0))
+            })
+        ])
+    );
+    List<CandidType> cs = c_backwards(sponse);
+    print(cs);
+    List<CandidType> canister_sponse_cs = c_backwards(((cs[0] as Variant)['Ok'] as Blob).bytes);
+    print(canister_sponse_cs);
+    
+    Record status_record = (canister_sponse_cs[0] as Record);
+    
+    for(String f in [
+        'module_hash',
+        'memory_size',
+        'cycles',
+        'idle_cycles_burned_per_day',
+    ]) {
+        print('$f: ${status_record[f]}');
+    }
+    
+    late String status;
+    for (String s in ['running', 'stopping', 'stopped']) {
+        if (candid_text_hash(s) == (status_record['status'] as Variant).keys.first) {
+            status = s;
+        }
+    }
+    print('status: ${status}');
+    
+    Record settings = status_record['settings'] as Record;
+    for (String f in [
+        'controllers', 
+        'compute_allocation',
+        'memory_allocation',
+        'freezing_threshold'
+    ]) {
+        print('$f: ${settings[f]}');
+    }
+    
+}
+
+
+
+
+
+
 
 
 
@@ -1539,7 +1847,7 @@ Future<void> controller_re_store_cts_data_out_of_the_state_snapshot() async {
 
 
 Future<void> controller_upgrade_umcs(Vector<PrincipalReference>? opt_umcs) async {
-    Uint8List sponse = await cts.call(
+    Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_upgrade_umcs',
         caller: controller,
@@ -1562,8 +1870,8 @@ Future<void> controller_upgrade_ucs_on_a_umc(Principal umc) async {
         caller: controller,
         put_bytes: c_forwards([
             umc,
-            Option(value:null, value_type: Vector(isTypeStance: true, values_type: PrincipalReference(isTypeStance:true))),
-            Blob()
+            Option<Vector<PrincipalReference>>(value:null, value_type: Vector(isTypeStance: true, values_type: PrincipalReference(isTypeStance:true))),
+            Blob([])
         ])
     );
     print(sponse);
@@ -1579,7 +1887,7 @@ Future<void> controller_put_uc_code_onto_the_umcs() async {
         method_name: 'controller_put_uc_code_onto_the_umcs',
         caller: controller,
         put_bytes: c_forwards([
-            Option(value:null, value_type: Vector(isTypeStance: true, values_type: PrincipalReference(isTypeStance:true))),
+            Option<Vector<PrincipalReference>>(value:null, value_type: Vector(isTypeStance: true, values_type: PrincipalReference(isTypeStance:true))),
         ])
     );
     print(sponse);
