@@ -368,6 +368,8 @@ const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = SECONDS_IN_A_DAY * 30;
 
 const MINIMUM_CYCLES_FOR_THE_CTSFUEL: Cycles = 10_000_000_000;
 
+const MAXIMUM_STORAGE_SIZE_MiB: u128 = 1024;
+
 const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY * 45;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
@@ -629,8 +631,6 @@ fn ctsfuel_balance() -> CTSFuel {
             cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
             cb_data.storage_size_mib * 2 * MiB as u128 // canister-memory-allocation in the mib
-            
-            //+ stable64_size() as u128 * WASM_PAGE_SIZE_BYTES as u128
         })
         *
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
@@ -2303,6 +2303,7 @@ pub struct UserChangeStorageSizeQuest {
 #[derive(CandidType, Deserialize)]
 pub enum UserChangeStorageSizeMibError {
     NewStorageSizeMibTooLow{ minimum_new_storage_size_mib: u128 },
+    NewStorageSizeMibTooHigh{ maximum_new_storage_size_mib: u128 },
     CyclesBalanceTooLow{ cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
     ManagementCanisterUpdateSettingsCallError((u32, String))
 }
@@ -2315,9 +2316,13 @@ pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), Us
     
     let minimum_new_storage_size_mib: u128 = with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) + 10; 
     
-    if minimum_new_storage_size_mib > q.new_storage_size_mib {
+    if q.new_storage_size_mib < minimum_new_storage_size_mib  {
         return Err(UserChangeStorageSizeMibError::NewStorageSizeMibTooLow{ minimum_new_storage_size_mib }); 
     };
+    
+    if q.new_storage_size_mib > MAXIMUM_STORAGE_SIZE_MiB {
+        return Err(UserChangeStorageSizeMibError::NewStorageSizeMibTooHigh{ maximum_new_storage_size_mib: MAXIMUM_STORAGE_SIZE_MiB });     
+    }
     
     let new_storage_size_mib_cost_cycles: Cycles = {
         ( q.new_storage_size_mib - with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
