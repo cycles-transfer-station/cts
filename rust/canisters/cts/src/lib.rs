@@ -20,6 +20,7 @@ use std::{
 use futures::task::Poll;
 
 use cts_lib::{
+    self,
     types::{
         Cycles,
         CTSFuel,
@@ -236,11 +237,11 @@ impl CTSData {
 
     
 
-pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 10_000_000_000_000; //10T-cycles for a new-cycles_bank. lifetime: 1-year, storage-size: 50mib/*100mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
+pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 15_000_000_000_000; //15T-cycles for a new-cycles_bank. lifetime: 1-year, storage-size: 50mib/*160mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
 pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year.
 pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 5_000_000_000_000; // 5T-cycles.
 pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 50; // 50-mib
-pub const NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB: u128 = NEW_CYCLES_BANK_STORAGE_SIZE_MiB * 2;
+pub const NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB: u128 = cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(NEW_CYCLES_BANK_STORAGE_SIZE_MiB);
 pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 1_400_000_000_000;
 pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
     NETWORK_CANISTER_CREATION_FEE_CYCLES

@@ -21,6 +21,7 @@ use std::{
     cell::{RefCell,Cell}
 };
 use cts_lib::{
+    self,
     ic_cdk::{
         self,
         api::{
@@ -630,7 +631,7 @@ fn ctsfuel_balance() -> CTSFuel {
         with(&CB_DATA, |cb_data| { 
             cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
-            cb_data.storage_size_mib * 2 * MiB as u128 // canister-memory-allocation in the mib
+            cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(cb_data.storage_size_mib) * MiB as u128 // canister-memory-allocation in the mib
         })
         *
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
@@ -2255,7 +2256,7 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
 
     let lengthen_cost_cycles: Cycles = {
         ( q.set_lifetime_termination_timestamp_seconds - with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) )
-        * with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) * 2 // canister-memory-allocation in the mib 
+        * cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(with(&CB_DATA, |cb_data| { cb_data.storage_size_mib })) // canister-memory-allocation in the mib 
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
     };
     
@@ -2325,7 +2326,7 @@ pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), Us
     }
     
     let new_storage_size_mib_cost_cycles: Cycles = {
-        ( q.new_storage_size_mib - with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) ) * 2 // grow canister-memory-allocation in the mib 
+        ( cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(q.new_storage_size_mib) - cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(with(&CB_DATA, |cb_data| { cb_data.storage_size_mib })) ) // grow canister-memory-allocation in the mib 
         * with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_sub(time_seconds()).unwrap_or_else(|| { trap("user-contract-lifetime is with the termination.") })
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
     };
@@ -2347,7 +2348,7 @@ pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), Us
             settings: management_canister::ManagementCanisterOptionalCanisterSettings{
                 controllers : None,
                 compute_allocation : None,
-                memory_allocation : Some((q.new_storage_size_mib * 2 * MiB as u128).into()),
+                memory_allocation : Some((cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(q.new_storage_size_mib) * MiB as u128).into()),
                 freezing_threshold : None,
             }
         },)
