@@ -499,7 +499,7 @@ pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_AN_HOUR * 1
 
 
 pub const MINIMUM_CYCLES_POSITION_FOR_A_CYCLES_POSITION_BUMP: Cycles = 20_000_000_000_000;
-pub const MINIMUM_CYCLES_POSITION: Cycles = 5_000_000_000_000;
+pub const MINIMUM_CYCLES_POSITION: Cycles = 1_000_000_000_000;
 
 pub const MINIMUM_ICP_POSITION_FOR_AN_ICP_POSITION_BUMP: IcpTokens = IcpTokens::from_e8s(200000000);
 pub const MINIMUM_ICP_POSITION: IcpTokens = IcpTokens::from_e8s(50000000);
@@ -1219,7 +1219,7 @@ pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result
         return;
     }
 
-    if q.minimum_purchase < MINIMUM_CYCLES_POSITION {
+    if q.cycles < MINIMUM_CYCLES_POSITION {
         reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumCyclesPosition(MINIMUM_CYCLES_POSITION)),));
         do_payouts().await;
         return;
@@ -1348,7 +1348,7 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
         return;
     }
 
-    if q.minimum_purchase < MINIMUM_ICP_POSITION {
+    if q.icp < MINIMUM_ICP_POSITION {
         reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::MinimumIcpPosition(MINIMUM_ICP_POSITION)),));
         do_payouts().await;
         return;
@@ -1927,7 +1927,7 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
         }
     };
     
-    let user_icp_balance_in_the_lock: IcpTokens = with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &caller()) });
+    let user_icp_balance_in_the_lock: IcpTokens = with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &user_id) });
     
     let usable_user_icp_balance: IcpTokens = IcpTokens::from_e8s(user_icp_ledger_balance.e8s().saturating_sub(user_icp_balance_in_the_lock.e8s()));
     
@@ -2053,51 +2053,6 @@ pub async fn trigger_payouts() {
 
 // -------------------------------------------------------------
 
-/*
-#[update(manual_reply = true)]
-pub async fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::TransferCyclesCallbackQuest) -> () {
-    if with(&CM_DATA, |cm_data| { cm_data.cycles_transferrers.contains(&caller()) }) == false {
-        trap("caller must be one of the CTS-cycles-transferrer-canisters for this method.");
-    }
-    
-    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(vcp_void_cycles_positions_i/*: usize*/) = cm_data.void_cycles_positions.binary_search_by_key(&q.user_cycles_transfer_id, |vcp| { vcp.position_id }) {
-            if cycles_transfer_refund == 0 {
-                cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
-            } else {
-                cm_data.void_cycles_positions[vcp_void_cycles_positions_i]
-                    .cycles_payout_data
-                    .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
-            }
-        } else if let Ok(cycles_position_purchase_cycles_positions_purchases_i) = cm_data.cycles_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |cycles_position_purchase| { cycles_position_purchase.id }) {
-            cm_data.cycles_positions_purchases[cycles_position_purchase_cycles_positions_purchases_i]
-                .cycles_payout_data
-                .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
-            
-        } else if let Ok(icp_position_purchase_icp_positions_purchases_i) = cm_data.icp_positions_purchases.binary_search_by_key(&q.user_cycles_transfer_id, |icp_position_purchase| { icp_position_purchase.id }) {
-            cm_data.icp_positions_purchases[icp_position_purchase_icp_positions_purchases_i]
-                .cycles_payout_data
-                .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_cycles_transfer_call_error));
-        }        
-    });
-    
-    reply::<()>(());
-    do_payouts().await;
-    return;
-    
-} 
-*/
-
-/*
-const CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER: &'static str = "cm_message_cycles_position_purchase_purchaser_cmcaller_callback";
-const CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR: &'static str = "cm_message_cycles_position_purchase_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_ICP_POSITION_PURCHASE_PURCHASER: &'static str = "cm_message_icp_position_purchase_purchaser_cmcaller_callback";
-const CMCALLER_CALLBACK_ICP_POSITION_PURCHASE_POSITOR: &'static str = "cm_message_icp_position_purchase_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_VOID_CYCLES_POSITION_POSITOR: &'static str = "cm_message_void_cycles_position_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_VOID_ICP_POSITION_POSITOR: &'static str = "cm_message_void_icp_position_positor_cmcaller_callback";
-*/
 
 #[update(manual_reply = true)]
 pub async fn cm_message_cycles_position_purchase_purchaser_cmcaller_callback(q: CMCallbackQuest) -> () {
