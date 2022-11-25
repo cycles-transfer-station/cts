@@ -6,6 +6,7 @@ import 'package:ic_tools/common.dart' as common;
 import 'package:ic_tools/candid.dart';
 import 'package:ic_tools/tools.dart';
 import 'package:crypto/crypto.dart';
+import 'package:collection/collection.dart';
 
 
 Map controllers_json = jsonDecode(utf8.decode(File('../../controllers_and_canisters.json').readAsBytesSync()));
@@ -343,7 +344,9 @@ Future<void> main(List<String> arguments) async {
     }
 
     
-
+    else if (first_command == 'see_module_hashes') {
+        await see_module_hashes();
+    }
 
 
     
@@ -457,47 +460,7 @@ Future<void> main(List<String> arguments) async {
         //print(controller);
         
         
-        print('cts: ${cts}');
-        //print('cts-controllers: ${await cts.controllers()}');
-        print('cts-module_hash: ${await cts.module_hash()}');
-        print('cts_cycles_transferrer_1: ${cts_cycles_transferrer_1}\n\tmodule_hash ${await cts_cycles_transferrer_1.module_hash()}');
-        print('cts_cycles_transferrer_2: ${cts_cycles_transferrer_2}\n\tmodule_hash ${await cts_cycles_transferrer_2.module_hash()}');
-        print('cycles_market: ${cycles_market}\n\tmodule_hash ${await cycles_market.module_hash()}');
-        print('cycles_market_cmcaller: ${cycles_market_cmcaller}\n\tmodule_hash ${await cycles_market_cmcaller.module_hash()}');        
-        
-        print('test_cts: ${test_cts}');
-//        print('test_cts-controllers: ${await test_cts.controllers()}');
-        print('test_cts-module_hash: ${await test_cts.module_hash()}');
-        print('test_cts_cycles_transferrer_1: ${test_cts_cycles_transferrer_1}\n\tmodule_hash ${await test_cts_cycles_transferrer_1.module_hash()}');
-        print('test_cycles_market: ${test_cycles_market}\n\tmodule_hash ${await test_cycles_market.module_hash()}');
-        print('test_cycles_market_cmcaller: ${test_cycles_market_cmcaller}\n\tmodule_hash ${await test_cycles_market_cmcaller.module_hash()}');        
-        
-        Principal test_cbsm = Principal('34oen-caaaa-aaaai-qntlq-cai');
-        print('test_cbsm: ${test_cbsm}');
-        print('test_cbsm wasm_hash: ${await Canister(test_cbsm).module_hash()}');
-     
-        Principal test_cycles_bank = Principal('mq76c-siaaa-aaaao-aarvq-cai');
-        print('test_cycles_bank: ${test_cycles_bank}\nmodule_hash: ${await Canister(test_cycles_bank).module_hash()}');
-        
-        Principal test_cycles_bank_2 = Principal('lwwnf-oiaaa-aaaal-qbhea-cai');
-        print('test_cycles_bank_2: ${test_cycles_bank_2}\nmodule_hash: ${await Canister(test_cycles_bank_2).module_hash()}');
-       
-        
-        List<String> module_paths = [
-            '../rust/target/wasm32-unknown-unknown/release/cts.wasm',
-            '../rust/target/wasm32-unknown-unknown/release/cbs_map.wasm',
-            '../rust/target/wasm32-unknown-unknown/release/cycles_bank.wasm',
-            '../rust/target/wasm32-unknown-unknown/release/cycles_market.wasm',
-            '../rust/target/wasm32-unknown-unknown/release/cycles_transferrer.wasm',
-            '../rust/target/wasm32-unknown-unknown/release/cm_caller.wasm',
-        ];
-        for (String path in module_paths) {
-            print('$path : module_hash: ${sha256.convert(File(path).readAsBytesSync()).bytes}');
-        }
     
-        
-        
-        
         
         
     }
@@ -510,6 +473,48 @@ Future<void> main(List<String> arguments) async {
 
     else {
         throw Exception('"$first_command" is not a known command.');
+    }
+
+}
+
+
+Future<void> see_module_hashes() async {
+    print('cts: ${cts}');
+    //print('cts-controllers: ${await cts.controllers()}');
+    print('cts-module_hash: ${await cts.module_hash()}');
+    print('cts_cycles_transferrer_1: ${cts_cycles_transferrer_1}\n\tmodule_hash ${await cts_cycles_transferrer_1.module_hash()}');
+    print('cts_cycles_transferrer_2: ${cts_cycles_transferrer_2}\n\tmodule_hash ${await cts_cycles_transferrer_2.module_hash()}');
+    print('cycles_market: ${cycles_market}\n\tmodule_hash ${await cycles_market.module_hash()}');
+    print('cycles_market_cmcaller: ${cycles_market_cmcaller}\n\tmodule_hash ${await cycles_market_cmcaller.module_hash()}');        
+    
+    print('test_cts: ${test_cts}');
+//        print('test_cts-controllers: ${await test_cts.controllers()}');
+    print('test_cts-module_hash: ${await test_cts.module_hash()}');
+    print('test_cts_cycles_transferrer_1: ${test_cts_cycles_transferrer_1}\n\tmodule_hash ${await test_cts_cycles_transferrer_1.module_hash()}');
+    print('test_cycles_market: ${test_cycles_market}\n\tmodule_hash ${await test_cycles_market.module_hash()}');
+    print('test_cycles_market_cmcaller: ${test_cycles_market_cmcaller}\n\tmodule_hash ${await test_cycles_market_cmcaller.module_hash()}');        
+    
+    Principal test_cbsm = Principal('34oen-caaaa-aaaai-qntlq-cai');
+    print('test_cbsm: ${test_cbsm}');
+    print('test_cbsm wasm_hash: ${await Canister(test_cbsm).module_hash()}');
+ 
+    Principal test_cycles_bank = Principal('mq76c-siaaa-aaaao-aarvq-cai');
+    print('test_cycles_bank: ${test_cycles_bank}\nmodule_hash: ${await Canister(test_cycles_bank).module_hash()}');
+    
+    Principal test_cycles_bank_2 = Principal('lwwnf-oiaaa-aaaal-qbhea-cai');
+    print('test_cycles_bank_2: ${test_cycles_bank_2}\nmodule_hash: ${await Canister(test_cycles_bank_2).module_hash()}');
+   
+    
+    List<String> module_paths = [
+        '../rust/target/wasm32-unknown-unknown/release/cts.wasm',
+        '../rust/target/wasm32-unknown-unknown/release/cbs_map.wasm',
+        '../rust/target/wasm32-unknown-unknown/release/cycles_bank.wasm',
+        '../rust/target/wasm32-unknown-unknown/release/cycles_market.wasm',
+        '../rust/target/wasm32-unknown-unknown/release/cycles_transferrer.wasm',
+        '../rust/target/wasm32-unknown-unknown/release/cm_caller.wasm',
+    ];
+    for (String path in module_paths) {
+        print('$path : module_hash: ${sha256.convert(File(path).readAsBytesSync()).bytes}');
     }
 
 }
@@ -585,10 +590,10 @@ Future<void> put_code_on_the_canister(String mode) async {
             'cycles_market_cmcaller': cycles_market_cmcaller.principal
             */
             
-            //'cts_id': test_cts.principal,
-            //'cm_caller': test_cycles_market_cmcaller.principal,
+            'cts_id': test_cts.principal,
+            'cm_caller': test_cycles_market_cmcaller.principal,
             
-            'cts_id': test_cts.principal
+            //'cts_id': test_cts.principal
             
             /*
             'cycles_market_id': test_cycles_market.principal,
@@ -616,7 +621,7 @@ Future<void> put_code_on_the_canister(String mode) async {
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
-                'canister_id': put_code_on_the_canister_id.candid
+                'canister_id': put_code_on_the_canister_id
             })
         ])
     );
@@ -1337,117 +1342,33 @@ Future<void> run_cycles_transfer_test_canisters() async {
 
 
 Future<void> controller_cts_call_canister() async {
-    /*
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_call_canister',
-        caller: controller,
-        put_bytes: c_forwards([
-            Record.oftheMap({
-                'callee': common.management.principal.candid,
-                'method_name': Text('install_code'),
-                'arg_raw': Blob(c_forwards([
-                    Record.oftheMap({ 
-                        'mode' : Variant.oftheMap({'upgrade': Null()}),
-                        'canister_id': Principal(/*'mscqy-haaaa-aaaai-aahhq-cai'*/'woddh-aqaaa-aaaal-aazqq-cai').candid,
-                        'wasm_module' : Blob(File('../rust/target/wasm32-unknown-unknown/release/user_canister-o.wasm').readAsBytesSync()),
-                        'arg' : Blob(),
-                    }),
-                ])),
-                'cycles': Nat(0)
-            })
-        ])
-    );
-    */
-    /*
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_call_canister',
-        caller: controller,
-        put_bytes: c_forwards([
-            Record.oftheMap({
-                'callee': common.management.principal.candid,
-                'method_name': Text('canister_status'),
-                'arg_raw': Blob(c_forwards([
-                    Record.oftheMap({ 
-                        'canister_id': Principal('mscqy-haaaa-aaaai-aahhq-cai'/*'woddh-aqaaa-aaaal-aazqq-cai'*/).candid
-                    }),
-                ])),
-                'cycles': Nat(0)
-            })
-        ])
-    );
-    */
-    /*
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_call_canister',
-        caller: controller,
-        put_bytes: c_forwards([
-            Record.oftheMap({
-                'callee': Principal('mscqy-haaaa-aaaai-aahhq-cai').candid,
-                'method_name': Text('cts_clear_user_canister_upgrade_fails'),
-                'arg_raw': Blob(c_forwards([])),
-                'cycles': Nat(0)
-            })
-        ])
-    );
-    */
-    /*
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_call_canister',
-        caller: controller,
-        put_bytes: c_forwards([
-            Record.oftheMap({
-                'callee': Principal('mscqy-haaaa-aaaai-aahhq-cai').candid,
-                'method_name': Text('cts_see_metrics'),
-                'arg_raw': Blob(c_forwards([])),
-                'cycles': Nat(0)
-            })
-        ])
-    );
-    */
-    /*
-    Uint8List sponse = await cts.call(
-        calltype: CallType.call,
-        method_name: 'controller_call_canister',
-        caller: controller,
-        put_bytes: c_forwards([
-            Record.oftheMap({
-                'callee': Principal('mscqy-haaaa-aaaai-aahhq-cai').candid,
-                'method_name': Text('cts_call_canister'),
-                'arg_raw': Blob(c_forwards([
-                    Record.oftheMap({
-                        'callee': common.management.principal.candid,
-                        'method_name': Text('install_code'),
-                        'arg_raw': Blob(c_forwards([
-                            Record.oftheMap({ 
-                                'mode' : Variant.oftheMap({'upgrade': Null()}),
-                                'canister_id': Principal(/*'mscqy-haaaa-aaaai-aahhq-cai'*/'woddh-aqaaa-aaaal-aazqq-cai').candid,
-                                'wasm_module' : Blob(File('../rust/target/wasm32-unknown-unknown/release/user_canister-o.wasm').readAsBytesSync()),
-                                'arg' : Blob(),
-                            }),
-                        ])),
-                        'cycles': Nat(0)
-                    })    
-                ])),
-                'cycles': Nat(0)
-            })
-        ])
-    );
-    */
     Uint8List sponse = await test_cts.call(
         calltype: CallType.call,
         method_name: 'controller_call_canister',
         caller: controller,
         put_bytes: c_forwards([
             Record.oftheMap({
-                'callee': Principal('34oen-caaaa-aaaai-qntlq-cai'),
-                'method_name': Text('cts_see_uc_code_module_hash'),
+                'callee': common.management.principal,
+                'method_name': Text('install_code'),
                 'arg_raw': Blob(
                     c_forwards([
-                    
+                        Record.oftheMap({
+                            'canister_id': Principal('mq76c-siaaa-aaaao-aarvq-cai'),
+                            'mode' : Variant.oftheMap({'install': Null()}),
+                            'wasm_module' : Blob(File('../rust/target/wasm32-unknown-unknown/release/cycles_bank.wasm').readAsBytesSync()),
+                            'arg' : Blob(c_forwards([
+                                Record.oftheMap({
+                                    'user_id': Principal('l6nkv-qht26-p4eeg-fp3xv-nfo4y-4yxeh-gxmp3-y7p3a-y7eks-dlihm-xae'),
+                                    'cts_id': Principal('bayhi-7yaaa-aaaai-qahca-cai'),
+                                    'cbsm_id': Principal('34oen-caaaa-aaaai-qntlq-cai'), 
+                                    'cycles_market_id': test_cycles_market.principal, 
+                                    'cycles_market_cmcaller': test_cycles_market_cmcaller.principal,
+                                    'storage_size_mib': Nat(BigInt.from(50)),                         
+                                    'lifetime_termination_timestamp_seconds': Nat(BigInt.from(1699117580)),
+                                    'cycles_transferrer_canisters': Vector.oftheList([test_cts_cycles_transferrer_1.principal])
+                                })
+                            ])),
+                        })
                     ])
                 ),
                 'cycles': Nat(BigInt.from(0))
@@ -2265,35 +2186,73 @@ Future<void> put_frontcode_build_web() async {
     String confirm = stdin.readLineSync()!;
     if (confirm != 'y') { throw Exception('void-confirm'); }
     String build_web_dir_string = '../../frontcode/build/web';
+    
+    List<Future> upload_files_futures = [];
+    
     await for (FileSystemEntity fse in Directory(build_web_dir_string).list(recursive: true, followLinks: false)) {
         print(fse.path);
-        if ( await FileSystemEntity.isFile(fse.path) && !fse.path.contains('/canvaskit.wasm') && (fse.path.contains('main.dart.js') || fse.path.contains('main.dart.js')) ) {
+        if ( 
+            await FileSystemEntity.isFile(fse.path) 
+            //&& !fse.path.contains('/canvaskit.wasm') 
+            //&& (fse.path.contains('main.dart.js') || fse.path.contains('main.dart.js'))
+        ) {
+            String filename = fse.path.contains('/index.html') ? '/' : fse.path.replaceFirst(build_web_dir_string, '');
+            
             String content_type = '';
             if (fse.path.substring(fse.path.length-5) == '.wasm') { content_type = 'application/wasm'; }
-            List<CandidType> cs = c_backwards(await put_frontcode_on_the_canister.call(
-                calltype: CallType.call,
-                method_name: 'controller_upload_frontcode_file_chunks',
-                put_bytes: c_forwards([
-                    Text( fse.path.contains('/index.html') ? '/' : fse.path.replaceFirst(build_web_dir_string, '')),
-                    Record.oftheMap({
-                        'content_type': Text(content_type),
-                        'content_encoding': Text('gzip'),
-                        'content': Blob(gzip.encode(File(fse.path).readAsBytesSync()))
-                    })
-                ]),
-                caller: controller
-            ));
-            print(cs);
+            
+            List<int> file_bytes = gzip.encode(File(fse.path).readAsBytesSync());
+            Iterable<List<int>> file_bytes_chunks = file_bytes.slices(1024*1024 + 1024*512);
+            
+            upload_files_futures.add(Future(()async{
+                List<CandidType> cs = c_backwards(await put_frontcode_on_the_canister.call(
+                    calltype: CallType.call,
+                    method_name: 'controller_upload_file',
+                    caller: controller,
+                    put_bytes: c_forwards([
+                        Record.oftheMap({
+                            'filename': Text(filename),
+                            'first_chunk': Blob(file_bytes_chunks.first),
+                            'chunks': Nat32(file_bytes_chunks.length),
+                            'content_type': Text(content_type),
+                            'content_encoding': Text('gzip'),
+                        }),
+                    ])
+                ));
+                print('$filename: $cs');
+                
+                if (file_bytes_chunks.length > 1) {
+                    List<Future> upload_chunks_futures = [];
+                    for (int i = 1; i<file_bytes_chunks.length; i++) {
+                        upload_chunks_futures.add(Future(()async{
+                            List<CandidType> cschunk = c_backwards(await put_frontcode_on_the_canister.call(
+                                calltype: CallType.call,
+                                method_name: 'controller_upload_file_chunks',
+                                caller: controller,
+                                put_bytes: c_forwards([
+                                    Text(filename),
+                                    Nat32(i),
+                                    Blob(file_bytes_chunks.elementAt(i)),
+                                ])
+                            ));
+                            print('$filename : $i -> $cschunk');
+                        }));
+                    }
+                    await Future.wait(upload_chunks_futures);
+                }
+            }));
 
         }
     }
+    
+    await Future.wait(upload_files_futures);
 }
 
 
 
 
 Future<void> clear_frontcode_files() async {
-    Canister clear_frontcode_on_the_canister = cts;
+    Canister clear_frontcode_on_the_canister = test_cts;
     print('clear frontcode on the canister: ${clear_frontcode_on_the_canister.principal}');
     print('confirm y/n');
     String confirm = stdin.readLineSync()!;
@@ -2303,7 +2262,7 @@ Future<void> clear_frontcode_files() async {
     
     List<CandidType> cs = c_backwards(await clear_frontcode_on_the_canister.call(
         calltype: CallType.call,
-        method_name: 'controller_clear_frontcode_files',
+        method_name: 'controller_clear_files',
         caller: controller
     ));
     print(cs);
