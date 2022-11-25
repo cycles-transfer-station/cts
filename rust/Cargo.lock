@@ -250,9 +250,11 @@ dependencies = [
  "candid",
  "cts_lib",
  "futures",
+ "num-traits",
  "serde",
  "serde_bytes",
  "serde_cbor",
+ "sha2 0.9.9",
 ]
 
 [[package]]

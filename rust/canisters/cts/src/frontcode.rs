@@ -4,7 +4,7 @@ use std::borrow::{BorrowMut, Borrow};
 use cts_lib::{
     ic_cdk_macros::{update, query},
     ic_cdk::{
-        export::candid::{CandidType, Deserialize, Func},
+        export::candid::{CandidType, Deserialize, Func, Nat},
         api::{data_certificate, set_certified_data}
     },
     ic_certified_map::{self, RbTree, HashTree, AsHashTree},
@@ -15,6 +15,7 @@ use cts_lib::{
 };
 
 use serde::Serialize;
+use serde_bytes::ByteBuf;
 
 use crate::FRONTCODE_FILES_HASHES;
 
@@ -25,27 +26,13 @@ const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 pub struct File {
     pub content_type: String,
     pub content_encoding: String,
-    #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>
+    pub content_chunks: Vec<ByteBuf>
 }
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
 
 
 
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct Token {}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub enum StreamingStrategy {
-    Callback { callback: Func, token: Token},
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct StreamingCallbackHttpResponse {
-    pub body: Vec<u8>,
-    pub token: Option<Token>,
-}
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct HttpRequest {
@@ -60,11 +47,38 @@ pub struct HttpRequest {
 pub struct HttpResponse<'a> {
     pub status_code: u16,
     pub headers: Vec<(String, String)>,
-    pub body: &'a Vec<u8>,
-    pub streaming_strategy: Option<StreamingStrategy>,
+    pub body: &'a ByteBuf,
+    pub streaming_strategy: Option<StreamStrategy<'a>>,
 }
 
+#[derive(Clone, Debug, CandidType)]
+pub enum StreamStrategy<'a> {
+    Callback { callback: Func, token: StreamCallbackToken<'a>},
+}
 
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct StreamCallbackToken<'a> {
+    pub key: &'a str,
+    pub content_encoding: &'a str,
+    pub index: Nat,
+    // We don't care about the sha, we just want to be backward compatible.
+    pub sha256: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Debug, CandidType, Deserialize)]
+pub struct StreamCallbackTokenBackwards {
+    pub key: String,
+    pub content_encoding: String,
+    pub index: Nat,
+    // We don't care about the sha, we just want to be backward compatible.
+    pub sha256: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Debug, CandidType)]
+pub struct StreamCallbackHttpResponse<'a> {
+    pub body: &'a ByteBuf,
+    pub token: Option<StreamCallbackToken<'a>>,
+}
 
 
 
@@ -78,8 +92,7 @@ pub fn set_root_hash(tree: &FilesHashes) {
 
 
 pub fn make_file_certificate_header(file_name: &str) -> (String, String) {
-    let certificate: Vec<u8> = data_certificate().unwrap();
-    // let file_hashes: FileHashes = get_file_hashes();
+    let certificate: Vec<u8> = data_certificate().unwrap_or(vec![]);
     with(&FRONTCODE_FILES_HASHES, |ffhs| {
         let witness: HashTree = ffhs.witness(file_name.as_bytes());
         let tree: HashTree = ic_certified_map::labeled(LABEL_ASSETS, witness);
@@ -97,4 +110,20 @@ pub fn make_file_certificate_header(file_name: &str) -> (String, String) {
 }
 
 
-
+pub fn create_opt_stream_callback_token<'a>(file_name: &'a str, file: &'a File, chunk_i: usize) -> Option<StreamCallbackToken<'a>> {
+    if file.content_chunks.len() > chunk_i + 1 {
+        Some(StreamCallbackToken{
+            key: file_name,
+            content_encoding: &file.content_encoding,
+            index: Nat::from(chunk_i + 1),
+            sha256: {
+                with(&FRONTCODE_FILES_HASHES, |ffhs| {
+                    ffhs.get(file_name.as_bytes())
+                    .map(|hash| { hash.clone() })
+                })  
+            }
+        })
+    } else {
+        None
+    }
+}

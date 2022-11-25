@@ -19,6 +19,10 @@ use std::{
 };
 use futures::task::Poll;
 
+use serde_bytes::ByteBuf;
+use num_traits::cast::ToPrimitive;
+use sha2::Digest;
+
 use cts_lib::{
     self,
     types::{
@@ -122,6 +126,8 @@ use cts_lib::{
                 self,
                 CandidType,
                 Deserialize,
+                Nat,
+                Func,
                 utils::{
                     encode_one, 
                     decode_one
@@ -187,7 +193,19 @@ use tools::{
 };
 
 mod frontcode;
-use frontcode::{File, Files, FilesHashes, HttpRequest, HttpResponse, set_root_hash, make_file_certificate_header};
+use frontcode::{
+    File, 
+    Files, 
+    FilesHashes, 
+    HttpRequest, 
+    HttpResponse, 
+    set_root_hash, 
+    make_file_certificate_header,
+    create_opt_stream_callback_token,
+    StreamStrategy,
+    StreamCallbackTokenBackwards,
+    StreamCallbackHttpResponse,
+};
 
 
 
@@ -234,8 +252,36 @@ impl CTSData {
     }
 }
 
+/*
+#[derive(CandidType, Deserialize)]
+pub struct OldCTSData {
+    controllers: Vec<Principal>,
+    cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
+    cycles_bank_canister_code: CanisterCode,
+    cbs_map_canister_code: CanisterCode,
+    cycles_transferrer_canister_code: CanisterCode,
+    frontcode_files: HashMap<String, OldFile>,
+    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
+    cbs_maps: Vec<Principal>,
+    create_new_cbs_map_lock: bool,
+    cycles_transferrer_canisters: Vec<Principal>,
+    cycles_transferrer_canisters_round_robin_counter: u32,
+    canisters_for_the_use: HashSet<Principal>,
+    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
+    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
+    users_transfer_icp: HashMap<Principal, TransferIcpData>
 
-    
+}
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct OldFile {
+    pub content_type: String,
+    pub content_encoding: String,
+    pub content: Vec<u8>
+}
+*/
+ 
 
 pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 15_000_000_000_000; //15T-cycles for a new-cycles_bank. lifetime: 1-year, storage-size: 50mib/*160mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
 pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year.
@@ -328,13 +374,38 @@ fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
     
     let mut cts_data: CTSData = match decode_one::<CTSData>(&cts_data_candid_bytes) {
         Ok(cts_data) => cts_data,
-        Err(_) => {
-            trap("error decode of the CTSData");
+        Err(e) => {
+            trap(&format!("error decode of the CTSData: {:?}", e));
             /*
             let old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_data_candid_bytes).unwrap();
             let cts_data: CTSData = CTSData{
-                controllers: old_cts_data.controllers
-                ........
+                controllers: old_cts_data.controllers,
+                cycles_market_id: old_cts_data.cycles_market_id,
+                cycles_market_cmcaller: old_cts_data.cycles_market_cmcaller,
+                cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
+                cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
+                cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
+                frontcode_files: old_cts_data.frontcode_files.into_iter()
+                    .map(|(filename, old_file): (String, OldFile)| {
+                        (   
+                            filename, 
+                            File{
+                                content_type: old_file.content_type,
+                                content_encoding: old_file.content_encoding,
+                                content_chunks: vec![ByteBuf::from(old_file.content)]
+                            }
+                        )    
+                    })
+                    .collect::<HashMap<String, File>>(),
+                frontcode_files_hashes: old_cts_data.frontcode_files_hashes,
+                cbs_maps: old_cts_data.cbs_maps,
+                create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
+                cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
+                cycles_transferrer_canisters_round_robin_counter: old_cts_data.cycles_transferrer_canisters_round_robin_counter,
+                canisters_for_the_use: old_cts_data.canisters_for_the_use,
+                users_purchase_cycles_bank: old_cts_data.users_purchase_cycles_bank,
+                users_burn_icp_mint_cycles: old_cts_data.users_burn_icp_mint_cycles,
+                users_transfer_icp: old_cts_data.users_transfer_icp
             };
             cts_data
             */
@@ -2802,30 +2873,102 @@ pub fn controller_see_metrics() -> CTSMetrics {
 
 // ---------------------------- :FRONTCODE. -----------------------------------
 
+#[derive(CandidType, Deserialize)]
+pub struct UploadFile {
+    pub filename: String,
+    pub content_type: String,
+    pub content_encoding: String,
+    pub first_chunk: ByteBuf,
+    pub chunks: u32
+}
 
 #[update]
-pub fn controller_upload_frontcode_file_chunks(file_path: String, file: File) -> () {
+pub fn controller_upload_file(q: UploadFile) {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
     
-    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-        ffhs.insert(file_path.clone(), sha256(&file.content));
-        set_root_hash(ffhs);
+    if q.chunks == 0 {
+        trap("there must be at least 1 chunk.");
+    }
+    
+    if q.chunks == 1 {
+        with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+            ffhs.insert(
+                q.filename.clone(), 
+                sha256(&q.first_chunk)
+            );
+            set_root_hash(ffhs);
+        });
+    }
+
+    with_mut(&CTS_DATA, |cts_data| {        
+        cts_data.frontcode_files.insert(
+            q.filename, 
+            File{
+                content_type: q.content_type,
+                content_encoding: q.content_encoding,
+                content_chunks: {
+                    let mut v: Vec<ByteBuf> = vec![ByteBuf::new(); q.chunks.try_into().unwrap()];
+                    v[0] = q.first_chunk;
+                    v
+                }
+            }
+        ); 
     });
+
+}
+
+#[update]
+pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: ByteBuf) -> () {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
     
     with_mut(&CTS_DATA, |cts_data| {
-        cts_data.frontcode_files.insert(file_path, file); 
+        match cts_data.frontcode_files.get_mut(&file_path) {
+            Some(file) => {
+                file.content_chunks[chunk_i as usize] = chunk;
+                
+                let mut is_upload_complete: bool = true;
+                for c in file.content_chunks.iter() {
+                    if c.len() == 0 {
+                        is_upload_complete = false;
+                        break;
+                    }
+                }
+                if is_upload_complete == true {
+                    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+                        ffhs.insert(
+                            file_path.clone(), 
+                            {
+                                let mut hasher: sha2::Sha256 = sha2::Sha256::new();
+                                for chunk in file.content_chunks.iter() {
+                                    hasher.update(chunk);    
+                                }
+                                hasher.finalize().into()
+                            }
+                        );
+                        set_root_hash(ffhs);
+                    });
+                }
+            },
+            None => {
+                trap("file not found. call the controller_upload_file method to upload a new file.");
+            }
+        }
     });
+    
+    
+    
 }
 
 
 #[update]
-pub fn controller_clear_frontcode_files() {
+pub fn controller_clear_files() {
     if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
         trap("Caller must be a controller for this method.")
     }
-    
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files = Files::new();
@@ -2836,6 +2979,23 @@ pub fn controller_clear_frontcode_files() {
         set_root_hash(ffhs);
     });
 }
+
+#[update]
+pub fn controller_clear_file(filename: String) {
+    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
+        trap("Caller must be a controller for this method.")
+    }
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        cts_data.frontcode_files.remove(&filename);
+    });
+
+    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
+        ffhs.delete(filename.as_bytes());
+        set_root_hash(ffhs);
+    });
+}
+
 
 
 #[query]
@@ -2870,7 +3030,7 @@ pub fn http_request() {
                     (HttpResponse {
                         status_code: 404,
                         headers: vec![],
-                        body: &vec![],
+                        body: &ByteBuf::from(vec![]),
                         streaming_strategy: None
                     },)
                 );        
@@ -2884,8 +3044,18 @@ pub fn http_request() {
                             ("content-type".to_string(), file.content_type.clone()),
                             ("content-encoding".to_string(), file.content_encoding.clone())
                         ],
-                        body: &file.content,//.to_vec(),
-                        streaming_strategy: None
+                        body: &file.content_chunks[0],
+                        streaming_strategy: if let Some(stream_callback_token) = create_opt_stream_callback_token(&file_name, file, 0) {
+                            Some(StreamStrategy::Callback{ 
+                                callback: Func{
+                                    principal: ic_cdk::api::id(),
+                                    method: "http_request_stream_callback".to_string(),
+                                },
+                                token: stream_callback_token 
+                            })
+                        } else {
+                            None
+                        }
                     },)
                 );
             }
@@ -2897,21 +3067,31 @@ pub fn http_request() {
 
 
 
+//#[query(manual_reply = true)]
+#[export_name = "canister_query http_request_stream_callback"]
+fn http_request_stream_callback() {
+    let (token,): (StreamCallbackTokenBackwards,) = arg_data::<(StreamCallbackTokenBackwards,)>(); 
+    
+    with(&CTS_DATA, |cts_data| {
+        match cts_data.frontcode_files.get(&token.key) {
+            None => {
+                trap("the file is not found");        
+            }, 
+            Some(file) => {
+                let chunk_i: usize = token.index.0.to_usize().unwrap_or_else(|| { trap("invalid index"); }); 
+                reply::<(StreamCallbackHttpResponse,)>((StreamCallbackHttpResponse {
+                    body: &file.content_chunks[chunk_i],
+                    token: create_opt_stream_callback_token(&token.key, file, chunk_i),
+                },));
+            }
+        }
+    })
+    
+}
 
 
 
 
-
-
-
-
-
- // ---- FOR THE TESTS --------------
-
-#[query]
-pub fn see_caller() -> Principal {
-    caller()
-} 
 
 
 
