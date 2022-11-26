@@ -690,10 +690,14 @@ fn canister_inspect_message() {
         "void_position",
         "see_icp_lock",
         "transfer_icp_balance",
-        "cycles_transferrer_transfer_cycles_callback",
+        "cm_message_cycles_position_purchase_purchaser_cmcaller_callback",
+        "cm_message_cycles_position_purchase_positor_cmcaller_callback",
+        "cm_message_icp_position_purchase_purchaser_cmcaller_callback",
+        "cm_message_icp_position_purchase_positor_cmcaller_callback",
+        "cm_message_void_cycles_position_positor_cmcaller_callback",
+        "cm_message_void_icp_position_positor_cmcaller_callback",
     ].contains(&&method_name()[..]) {
         trap("this method must be call by a canister.");
-    
     }
     
     
@@ -1857,7 +1861,29 @@ pub async fn void_position(q: VoidPositionQuest) {
             if time_seconds().saturating_sub(cm_data.icp_positions[icp_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
                 return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.icp_positions[icp_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
             }
-            cm_data.icp_positions.remove(icp_position_i);
+            if cm_data.void_icp_positions.len() >= MAX_VOID_ICP_POSITIONS {
+                return Err(VoidPositionError::CyclesMarketIsBusy);
+            }
+            let icp_position_for_the_void: IcpPosition = cm_data.icp_positions.remove(icp_position_i);
+            let icp_position_for_the_void_void_icp_positions_insertion_i: usize = cm_data.void_icp_positions.binary_search_by_key(&icp_position_for_the_void.id, |vip| { vip.position_id }).unwrap_err();
+            cm_data.void_icp_positions.insert(
+                icp_position_for_the_void_void_icp_positions_insertion_i,
+                VoidIcpPosition{
+                    position_id:    icp_position_for_the_void.id,
+                    positor:        icp_position_for_the_void.positor,
+                    icp:            icp_position_for_the_void.icp,
+                    timestamp_nanos: time_nanos(),
+                    icp_payout_lock: false,
+                    icp_payout_data: IcpPayoutData{
+                        icp_transfer: Some(IcpTransferBlockHeightAndTimestampNanos{
+                            block_height: None,
+                            timestamp_nanos: time_nanos(),
+                        }),
+                        cm_message_call_success_timestamp_nanos: None,
+                        cm_message_callback_complete: None            
+                    }
+                }
+            );
             Ok(())
         } else {
             return Err(VoidPositionError::PositionNotFound);
@@ -1866,8 +1892,8 @@ pub async fn void_position(q: VoidPositionQuest) {
         Ok(()) => {
             reply::<(VoidPositionResult,)>((Ok(()),));
         },
-        Err(void_cycles_position_error) => {
-            reply::<(VoidPositionResult,)>((Err(void_cycles_position_error),));
+        Err(void_position_error) => {
+            reply::<(VoidPositionResult,)>((Err(void_position_error),));
         }
     }
     
