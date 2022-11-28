@@ -234,7 +234,7 @@ trait IcpPayoutDataTrait {
     fn icp_payout_payee(&self) -> Principal;
     fn icp_payout_payor(&self) -> Principal;
     fn icp_payout_payee_method(&self) -> &'static str;
-    fn icp_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError>; // make sure that this is call when the icp_transfer_block_height is. 
+    fn icp_payout_payee_method_quest_bytes(&self, icp_payout_data_icp_transfer: IcpTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError>; 
     fn icp(&self) -> IcpTokens;
     fn icp_transfer_memo(&self) -> IcpMemo;
     fn cm_call_id(&self) -> u128;
@@ -282,7 +282,7 @@ impl IcpPayoutDataTrait for CyclesPositionPurchase {
     fn icp_payout_payee(&self) -> Principal { self.cycles_position_positor }
     fn icp_payout_payor(&self) -> Principal { self.purchaser }
     fn icp_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR }
-    fn icp_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
+    fn icp_payout_payee_method_quest_bytes(&self, icp_payout_data_icp_transfer: IcpTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMCyclesPositionPurchasePositorMessageQuest {
                 cycles_position_id: self.cycles_position_id,
@@ -292,8 +292,8 @@ impl IcpPayoutDataTrait for CyclesPositionPurchase {
                 cycles_purchase: self.cycles,
                 cycles_position_xdr_permyriad_per_icp_rate: self.cycles_position_xdr_permyriad_per_icp_rate,
                 icp_payment: self.icp(),
-                icp_transfer_block_height: self.icp_payout_data.icp_transfer.as_ref().unwrap().block_height.unwrap(), 
-                icp_transfer_timestamp_nanos: self.icp_payout_data.icp_transfer.as_ref().unwrap().timestamp_nanos,
+                icp_transfer_block_height: icp_payout_data_icp_transfer.block_height.unwrap(), 
+                icp_transfer_timestamp_nanos: icp_payout_data_icp_transfer.timestamp_nanos,
             }    
         )
     } 
@@ -357,7 +357,7 @@ impl IcpPayoutDataTrait for IcpPositionPurchase {
     fn icp_payout_payee(&self) -> Principal { self.purchaser }
     fn icp_payout_payor(&self) -> Principal { self.icp_position_positor }
     fn icp_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_ICP_POSITION_PURCHASE_PURCHASER }
-    fn icp_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
+    fn icp_payout_payee_method_quest_bytes(&self, icp_payout_data_icp_transfer: IcpTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMIcpPositionPurchasePurchaserMessageQuest {
                 icp_position_id: self.icp_position_id,
@@ -367,8 +367,8 @@ impl IcpPayoutDataTrait for IcpPositionPurchase {
                 icp_purchase: self.icp(),
                 icp_position_xdr_permyriad_per_icp_rate: self.icp_position_xdr_permyriad_per_icp_rate,
                 cycles_payment: icptokens_to_cycles(self.icp, self.icp_position_xdr_permyriad_per_icp_rate),
-                icp_transfer_block_height: self.icp_payout_data.icp_transfer.as_ref().unwrap().block_height.unwrap(),
-                icp_transfer_timestamp_nanos: self.icp_payout_data.icp_transfer.as_ref().unwrap().timestamp_nanos,
+                icp_transfer_block_height: icp_payout_data_icp_transfer.block_height.unwrap(),
+                icp_transfer_timestamp_nanos: icp_payout_data_icp_transfer.timestamp_nanos,
             }
         )
     }
@@ -435,7 +435,7 @@ impl IcpPayoutDataTrait for VoidIcpPosition {
     fn icp_payout_payee(&self) -> Principal { self.positor }
     fn icp_payout_payor(&self) -> Principal { self.positor }
     fn icp_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_VOID_ICP_POSITION_POSITOR }
-    fn icp_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
+    fn icp_payout_payee_method_quest_bytes(&self, _icp_payout_data_icp_transfer: IcpTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMVoidIcpPositionPositorMessageQuest {
                 position_id: self.position_id,
@@ -452,8 +452,6 @@ impl IcpPayoutDataTrait for VoidIcpPosition {
 
 
 
-
-
 #[derive(CandidType, Deserialize)]
 struct CMData {
     cts_id: Principal,
@@ -465,7 +463,8 @@ struct CMData {
     cycles_positions_purchases: Vec<CyclesPositionPurchase>,
     icp_positions_purchases: Vec<IcpPositionPurchase>,
     void_cycles_positions: Vec<VoidCyclesPosition>,
-    void_icp_positions: Vec<VoidIcpPosition>
+    void_icp_positions: Vec<VoidIcpPosition>,
+    do_payouts_errors: Vec<(u32, String)>,
 }
 
 impl CMData {
@@ -480,10 +479,29 @@ impl CMData {
             cycles_positions_purchases: Vec::new(),
             icp_positions_purchases: Vec::new(),
             void_cycles_positions: Vec::new(),
-            void_icp_positions: Vec::new()
+            void_icp_positions: Vec::new(),
+            do_payouts_errors: Vec::new()
         }
     }
 }
+
+
+
+#[derive(CandidType, Deserialize)]
+struct OldCMData {
+    cts_id: Principal,
+    cm_caller: Principal,
+    id_counter: u128,
+    mid_call_user_icp_balance_locks: HashSet<Principal>,
+    cycles_positions: Vec<CyclesPosition>,
+    icp_positions: Vec<IcpPosition>,
+    cycles_positions_purchases: Vec<CyclesPositionPurchase>,
+    icp_positions_purchases: Vec<IcpPositionPurchase>,
+    void_cycles_positions: Vec<VoidCyclesPosition>,
+    void_icp_positions: Vec<VoidIcpPosition>,
+    do_payouts_errors: Vec<(u32, String)>,
+}
+
 
 
 
@@ -536,11 +554,6 @@ const DO_ICP_POSITIONS_PURCHASES_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 10;
 const DO_ICP_POSITIONS_PURCHASES_ICP_PAYOUTS_CHUNK_SIZE: usize = 10;
 
 
-/*
-const VOID_POSITION_CYCLES_TRANSFER_MEMO_START: &[u8; 5] = b"CM-VP";
-const CYCLES_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START: &[u8; 6] = b"CM-CPP";
-const ICP_POSITION_PURCHASE_CYCLES_TRANSFER_MEMO_START: &[u8; 6] = b"CM-IPP";
-*/
 
 const CM_MESSAGE_METHOD_VOID_CYCLES_POSITION_POSITOR: &'static str       = "cm_message_void_cycles_position_positor";
 const CM_MESSAGE_METHOD_VOID_ICP_POSITION_POSITOR: &'static str          = "cm_message_void_icp_position_positor";
@@ -575,13 +588,11 @@ const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 
 thread_local! {
-
     static CM_DATA: RefCell<CMData> = RefCell::new(CMData::new()); 
     
     // not save through the upgrades
     static STOP_CALLS: Cell<bool> = Cell::new(false);
-    static STATE_SNAPSHOT: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-    static CYCLES_TRANSFERRERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);    
+    static STATE_SNAPSHOT: RefCell<Vec<u8>> = RefCell::new(Vec::new());    
 }
 
 
@@ -625,8 +636,17 @@ fn load_state_snapshot_data() {
                 /*
                 let old_cm_data: OldCMData = decode_one::<OldCMData>(state_snapshot).unwrap();
                 let cm_data: CMData = CMData{
-                    cts_id: old_cm_data.cts_id
-                    ........
+                    cts_id: old_cm_data.cts_id,
+                    cm_caller: old_cm_data.cm_caller,
+                    id_counter: old_cm_data.id_counter,
+                    mid_call_user_icp_balance_locks: old_cm_data.mid_call_user_icp_balance_locks,
+                    cycles_positions: old_cm_data.cycles_positions,
+                    icp_positions: old_cm_data.icp_positions,
+                    cycles_positions_purchases: old_cm_data.cycles_positions_purchases,
+                    icp_positions_purchases: old_cm_data.icp_positions_purchases,
+                    void_cycles_positions: old_cm_data.void_cycles_positions,
+                    void_icp_positions: old_cm_data.void_icp_positions,
+                    do_payouts_errors: old_cm_data.do_payouts_errors
                 };
                 cm_data
                 */
@@ -923,7 +943,7 @@ async fn do_icp_payout<T: IcpPayoutDataTrait>(q: T) -> DoIcpPayoutSponse {
                         cm_call_id: q.cm_call_id(),
                         for_the_canister: q.icp_payout_payee(),
                         method: q.icp_payout_payee_method().to_string(),
-                        put_bytes: match q.icp_payout_payee_method_quest_bytes() {
+                        put_bytes: match q.icp_payout_payee_method_quest_bytes(icp_payout_data_icp_transfer.clone()) {
                             Ok(b) => b,
                             Err(candid_error) => {
                                 return DoIcpPayoutSponse::IcpTransferSuccessAndCMMessageError(icp_payout_data_icp_transfer, CMMessageErrorType::CMCallQuestPutBytesCandidEncodeError(candid_error));     
@@ -965,16 +985,8 @@ async fn do_icp_payout<T: IcpPayoutDataTrait>(q: T) -> DoIcpPayoutSponse {
 
 
 
+async fn _do_payouts() {
 
-
-async fn do_payouts() {
-    
-    if with(&CM_DATA, |cm_data| { 
-        cm_data.void_cycles_positions.len() == 0
-        && cm_data.cycles_positions_purchases.len() == 0
-        && cm_data.icp_positions_purchases.len() == 0
-    }) { return; }
-    
     let mut void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
     let mut void_icp_positions_icp_payouts_chunk: Vec<(VoidIcpPositionId, _/*anonymous-future of the do_icp_payout-async-function*/)> = Vec::new();
     let mut cycles_positions_purchases_cycles_payouts_chunk: Vec<(CyclesPositionPurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
@@ -1094,21 +1106,61 @@ async fn do_payouts() {
         
     });
    
-   
     let (vcps_ids, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_cycles_payout-future*/>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
     let (vips_ids, vips_do_icp_payouts_futures): (Vec<VoidIcpPositionId>, Vec<_/*do_icp_payout-future*/>) = void_icp_positions_icp_payouts_chunk.into_iter().unzip();
     let (cpps_cycles_payouts_ids, cpps_do_cycles_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = cycles_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
     let (cpps_icp_payouts_ids, cpps_do_icp_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_icp_payout-future*/>) = cycles_positions_purchases_icp_payouts_chunk.into_iter().unzip();
     let (ipps_cycles_payouts_ids, ipps_do_cycles_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = icp_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
     let (ipps_icp_payouts_ids, ipps_do_icp_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*do_icp_payout-future*/>) = icp_positions_purchases_icp_payouts_chunk.into_iter().unzip();
-
+    
+    /*
+    let cycles_payouts_futures = futures::future::join3(
+        futures::future::join_all(vcps_do_cycles_payouts_futures),
+        futures::future::join_all(cpps_do_cycles_payouts_futures),
+        futures::future::join_all(ipps_do_cycles_payouts_futures),
+    );
+    
+    let icp_payouts_futures = futures::future::join3(
+        futures::future::join_all(vips_do_icp_payouts_futures),
+        futures::future::join_all(cpps_do_icp_payouts_futures),
+        futures::future::join_all(ipps_do_icp_payouts_futures),
+    );
+    
+    let (
+        cycles_payouts_rs, 
+        icp_payouts_rs           
+    ) = futures::future::join(
+        cycles_payouts_futures,
+        icp_payouts_futures,
+    ).await;
+    
+    let (
+        vcps_do_cycles_payouts_rs,
+        cpps_do_cycles_payouts_rs,
+        ipps_do_cycles_payouts_rs
+    ): (
+        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
+        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
+        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
+    ) = cycles_payouts_rs;
+    
+    let (
+        vips_do_icp_payouts_rs,
+        cpps_do_icp_payouts_rs,
+        ipps_do_icp_payouts_rs
+    ): (
+        Vec<DoIcpPayoutSponse>,
+        Vec<DoIcpPayoutSponse>,
+        Vec<DoIcpPayoutSponse>
+    ) = icp_payouts_rs;
+    */
     let (
         vcps_do_cycles_payouts_rs,
         vips_do_icp_payouts_rs,
         cpps_do_cycles_payouts_rs,
-        cpps_icp_payouts_rs,
+        cpps_do_icp_payouts_rs,
         ipps_do_cycles_payouts_rs,
-        ipps_icp_payouts_rs
+        ipps_do_icp_payouts_rs
     ): (
         Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
         Vec<DoIcpPayoutSponse>,
@@ -1124,7 +1176,7 @@ async fn do_payouts() {
         futures::future::join_all(ipps_do_cycles_payouts_futures),
         futures::future::join_all(ipps_do_icp_payouts_futures),
     );
-    
+
     with_mut(&CM_DATA, |cm_data| {
         for (vcp_id, do_cycles_payout_result) in vcps_ids.into_iter().zip(vcps_do_cycles_payouts_rs.into_iter()) {      
             let vcp_void_cycles_positions_i: usize = {
@@ -1167,12 +1219,12 @@ async fn do_payouts() {
             cpp.cycles_payout_lock = false;
             cpp.cycles_payout_data.handle_do_cycles_payout_result(do_cycles_payout_result);
         }
-        for (cpp_id, do_icp_payout_sponse) in cpps_icp_payouts_ids.into_iter().zip(cpps_icp_payouts_rs.into_iter()) {
+        for (cpp_id, do_icp_payout_sponse) in cpps_icp_payouts_ids.into_iter().zip(cpps_do_icp_payouts_rs.into_iter()) {
             let cpp_cycles_positions_purchases_i: usize = {
                 match cm_data.cycles_positions_purchases.binary_search_by_key(&cpp_id, |cpp| { cpp.id }) {
                     Ok(i) => i,
                     Err(_) => { continue; }
-                } 
+                }
             };
             let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[cpp_cycles_positions_purchases_i];
             cpp.icp_payout_lock = false;
@@ -1189,7 +1241,7 @@ async fn do_payouts() {
             ipp.cycles_payout_lock = false;
             ipp.cycles_payout_data.handle_do_cycles_payout_result(do_cycles_payout_result);
         }
-        for (ipp_id, do_icp_payout_sponse) in ipps_icp_payouts_ids.into_iter().zip(ipps_icp_payouts_rs.into_iter()) {
+        for (ipp_id, do_icp_payout_sponse) in ipps_icp_payouts_ids.into_iter().zip(ipps_do_icp_payouts_rs.into_iter()) {
             let ipp_icp_positions_purchases_i: usize = {
                 match cm_data.icp_positions_purchases.binary_search_by_key(&ipp_id, |ipp| { ipp.id }) {
                     Ok(i) => i,
@@ -1203,6 +1255,39 @@ async fn do_payouts() {
         
     });
     
+}
+
+
+async fn do_payouts() {
+    
+    if with(&CM_DATA, |cm_data| { 
+        cm_data.void_cycles_positions.len() == 0
+        && cm_data.cycles_positions_purchases.len() == 0
+        && cm_data.icp_positions_purchases.len() == 0
+    }) { return; }
+
+    match call::<(),()>(
+        ic_cdk::api::id(),
+        "do_payouts_public_method",
+        (),
+    ).await {
+        Ok(()) => {},
+        Err(call_error) => {
+            with_mut(&CM_DATA, |cm_data| {
+                cm_data.do_payouts_errors.push((call_error.0 as u32, call_error.1));
+            });
+        }
+    }
+}
+
+#[update]
+pub async fn do_payouts_public_method() {
+    if [ic_cdk::api::id(), with(&CM_DATA, |cm_data| { cm_data.cts_id })].contains(&caller()) == false {
+        trap("caller without the authorization.");
+    }
+    
+    _do_payouts().await;
+
 }
 
 
@@ -2076,7 +2161,6 @@ pub async fn trigger_payouts() {
 }
 
 
-
 // -------------------------------------------------------------
 
 
@@ -2204,7 +2288,6 @@ pub async fn cm_message_void_icp_position_positor_cmcaller_callback(q: CMCallbac
 
 
 
-
 // -------------------------------------------------------------
 
 
@@ -2292,6 +2375,32 @@ pub fn cts_load_state_snapshot_data() {
 
 
 // -------------------------------------------------------------
+
+
+
+#[query(manual_reply = true)]
+pub fn cts_see_payouts_errors(chunk_i: u32) {
+    if caller() != cts_id() {
+        trap("Caller must be the CTS for this method.");
+    }
+    
+    with(&CM_DATA, |cm_data| {
+        reply::<(Option<&[(u32, String)]>,)>((cm_data.do_payouts_errors.chunks(100).nth(chunk_i as usize),));
+    });    
+}
+
+
+
+#[update]
+pub fn cts_clear_payouts_errors() {
+    if caller() != cts_id() {
+        trap("Caller must be the CTS for this method.");
+    }
+    
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.do_payouts_errors = Vec::new();
+    });    
+}
 
 
 
