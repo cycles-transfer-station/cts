@@ -60,9 +60,9 @@ use cts_lib::{
         },
     },
     consts::{
-        MANAGEMENT_CANISTER_ID,
         MiB,
         WASM_PAGE_SIZE_BYTES,
+        MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
         ICP_LEDGER_CREATE_CANISTER_MEMO,
