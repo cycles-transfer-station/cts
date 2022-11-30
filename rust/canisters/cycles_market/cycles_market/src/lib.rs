@@ -1108,7 +1108,7 @@ async fn _do_payouts() {
         }
         
     });
-   
+
     let (vcps_ids, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_cycles_payout-future*/>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
     let (vips_ids, vips_do_icp_payouts_futures): (Vec<VoidIcpPositionId>, Vec<_/*do_icp_payout-future*/>) = void_icp_positions_icp_payouts_chunk.into_iter().unzip();
     let (cpps_cycles_payouts_ids, cpps_do_cycles_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = cycles_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
@@ -1316,7 +1316,24 @@ pub async fn create_cycles_position(q: CreateCyclesPositionQuest) { // -> Result
         do_payouts().await;
         return;
     }
+    
+    if q.minimum_purchase == 0 {
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumPurchaseCannotBeZero),));
+        do_payouts().await;
+        return;
+    }
 
+    if q.cycles % q.xdr_permyriad_per_icp_rate as u128 != 0 {
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::CyclesMustBeAMultipleOfTheXdrPerMyriadPerIcpRate),));
+        do_payouts().await;
+        return;
+    }
+
+    if q.minimum_purchase % q.xdr_permyriad_per_icp_rate as u128 != 0 {
+        reply::<(Result<CreateCyclesPositionSuccess, CreateCyclesPositionError>,)>((Err(CreateCyclesPositionError::MinimumPurchaseMustBeAMultipleOfTheXdrPerMyriadPerIcpRate),));
+        do_payouts().await;
+        return;
+    }
 
     let msg_cycles_quirement: Cycles = CREATE_POSITION_FEE.checked_add(q.cycles).unwrap_or(Cycles::MAX); 
 
@@ -1442,6 +1459,12 @@ pub async fn create_icp_position(q: CreateIcpPositionQuest) { //-> Result<Create
 
     if q.icp < MINIMUM_ICP_POSITION {
         reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::MinimumIcpPosition(MINIMUM_ICP_POSITION)),));
+        do_payouts().await;
+        return;
+    }
+    
+    if q.minimum_purchase.e8s() == 0 {
+        reply::<(Result<CreateIcpPositionSuccess, CreateIcpPositionError>,)>((Err(CreateIcpPositionError::MinimumPurchaseCannotBeZero),));
         do_payouts().await;
         return;
     }
@@ -1684,6 +1707,9 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
             Err(_) => { return Err(PurchaseCyclesPositionError::CyclesPositionNotFound); }
         };
         let cycles_position_ref: &CyclesPosition = &cm_data.cycles_positions[cycles_position_cycles_positions_i];
+        if q.cycles % cycles_position_ref.xdr_permyriad_per_icp_rate as u128 != 0 {
+            return Err(PurchaseCyclesPositionError::PurchaseCyclesMustBeAMultipleOfTheXdrPerMyriadPerIcpRate);
+        }
         if cycles_position_ref.cycles < q.cycles {
             return Err(PurchaseCyclesPositionError::CyclesPositionCyclesIsLessThanThePurchaseQuest{ cycles_position_cycles: cycles_position_ref.cycles });
         }

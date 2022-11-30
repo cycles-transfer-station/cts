@@ -351,7 +351,7 @@ pub mod cycles_market {
     
     pub type PositionId = u128;
     pub type PurchaseId = u128;
-    
+
     #[derive(CandidType, Deserialize)]
     pub struct CreateCyclesPositionQuest {
         pub cycles: Cycles,
@@ -363,10 +363,13 @@ pub mod cycles_market {
     pub enum CreateCyclesPositionError{
         MinimumPurchaseMustBeEqualOrLessThanTheCyclesPosition,
         MsgCyclesTooLow{ create_position_fee: Cycles },
+        CyclesMustBeAMultipleOfTheXdrPerMyriadPerIcpRate,
+        MinimumPurchaseMustBeAMultipleOfTheXdrPerMyriadPerIcpRate,
         CyclesMarketIsBusy,
         CyclesMarketIsFull,
         CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_cycles_position_for_a_bump: Cycles },
-        MinimumCyclesPosition(Cycles)   
+        MinimumCyclesPosition(Cycles),
+        MinimumPurchaseCannotBeZero
     }
 
     #[derive(CandidType, Deserialize)]
@@ -394,6 +397,7 @@ pub mod cycles_market {
         UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
         CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
         MinimumIcpPosition(IcpTokens),
+        MinimumPurchaseCannotBeZero
     }
 
     #[derive(CandidType, Deserialize)]
@@ -419,6 +423,7 @@ pub mod cycles_market {
         CyclesPositionNotFound,
         CyclesPositionCyclesIsLessThanThePurchaseQuest{ cycles_position_cycles: Cycles },
         CyclesPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ cycles_position_minimum_purchase: Cycles },
+        PurchaseCyclesMustBeAMultipleOfTheXdrPerMyriadPerIcpRate,
     }
 
     #[derive(CandidType, Deserialize)]
