@@ -13,6 +13,7 @@ use crate::{
         NANOS_IN_A_SECOND
     },
     types::{
+        Cycles,
         XdrPerMyriadPerIcp
     }
 };
@@ -159,18 +160,22 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: XdrPerMyriadPerI
 
 #[test]
 fn test_icp_cycles_transform() {
-    let t: IcpTokens = IcpTokens::from_e8s(0123456789);
-    let xdr_permyriad_per_icp: u64 = 45627;
+    let xdr_permyriad_per_icp: u64 = 456271237;
+    let t: IcpTokens = IcpTokens::from_e8s(1);
     assert_eq!(t, cycles_to_icptokens(icptokens_to_cycles(t, xdr_permyriad_per_icp), xdr_permyriad_per_icp));
+    let c: Cycles = 456271237*513216;
+    assert_eq!(c, icptokens_to_cycles(cycles_to_icptokens(c, xdr_permyriad_per_icp), xdr_permyriad_per_icp));
     
-    println!("{}", icptokens_to_cycles(t, xdr_permyriad_per_icp));
-    //println!("{}", cycles_to_icptokens(5000000000000, xdr_permyriad_per_icp));
+    
+    println!("{}", icptokens_to_cycles(t, xdr_permyriad_per_icp));    
+    println!("{}", cycles_to_icptokens(c, xdr_permyriad_per_icp));
+    
+    println!("{}", icptokens_to_cycles(IcpTokens::from_e8s(00000592), 24590));    
+    println!("{}", cycles_to_icptokens(000014557280, 24590));
+    assert_eq!(000014557280, icptokens_to_cycles(cycles_to_icptokens(000014557280, 24590), 24590));
     
 
 }
-
-
-
 
 
 
