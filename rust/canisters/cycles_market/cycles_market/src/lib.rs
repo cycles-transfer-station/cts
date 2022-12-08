@@ -2018,9 +2018,14 @@ pub async fn void_position(q: VoidPositionQuest) {
 
 // ----------------
 
+#[derive(CandidType, Deserialize)]
+pub struct SeeIcpLockQuest {
+    principal_id: Principal,
+}
+
 #[query]
-pub fn see_icp_lock() -> IcpTokens {
-    with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &caller()) })
+pub fn see_icp_lock(q: SeeIcpLockQuest) -> IcpTokens {
+    with(&CM_DATA, |cm_data| { check_user_icp_balance_in_the_lock(cm_data, &q.principal_id) })
 }
 
 
