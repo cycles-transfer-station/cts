@@ -536,6 +536,19 @@ fn post_upgrade() {
     
 }
 
+// ---------------------------
+
+// this is onli for ingress-messages (calls that come from outside the network)
+#[no_mangle]
+fn canister_inspect_message() {
+    use cts_lib::ic_cdk::api::call::{method_name, accept_message};
+    
+    if caller() != user_id() {
+        trap("caller must be the owner");
+    }
+    
+    accept_message();
+}
 
 
 
@@ -1419,7 +1432,7 @@ pub async fn cm_void_position(q: cycles_market::VoidPositionQuest) -> Result<(),
 
 
 // -------
-
+/*
 #[derive(CandidType, Deserialize)]
 pub enum UserCMSeeIcpLockError {
     CTSFuelTooLow,
@@ -1447,7 +1460,7 @@ pub async fn cm_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
         }
     }
 } 
-
+*/
 
 // -------
 
