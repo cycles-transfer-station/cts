@@ -719,8 +719,12 @@ fn canister_inspect_message() {
         "cm_message_icp_position_purchase_positor_cmcaller_callback",
         "cm_message_void_cycles_position_positor_cmcaller_callback",
         "cm_message_void_icp_position_positor_cmcaller_callback",
+        "see_cycles_positions",
+        "see_icp_positions",
+        "see_cycles_positions_purchases",
+        "see_icp_positions_purchases"
     ].contains(&&method_name()[..]) {
-        trap("this method must be call by a canister.");
+        trap("this method must be call by a canister or a query call.");
     }
     
     
@@ -816,7 +820,7 @@ async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutResul
                     cm_callback_method: q.cm_call_callback_method().to_string(),
                 }
             )?,
-            q.cycles()
+            q.cycles() + 10_000_000_000 // for the cm_caller
         );
                 
         if let Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
@@ -961,7 +965,7 @@ async fn do_icp_payout<T: IcpPayoutDataTrait>(q: T) -> DoIcpPayoutSponse {
                         return DoIcpPayoutSponse::IcpTransferSuccessAndCMMessageError(icp_payout_data_icp_transfer, CMMessageErrorType::CMCallQuestCandidEncodeError(candid_error));
                     }
                 },
-                0
+                0 + 10_000_000_000 // for the cm_caller
             );
             match call_future.await {
                 Ok(b) => match decode_one::<CMCallResult>(&b) {
