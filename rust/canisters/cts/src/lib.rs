@@ -300,13 +300,13 @@ pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
     + NEW_CYCLES_BANK_BACKUP_CYCLES
 };
 
-pub const MAX_USERS_PURCHASE_CYCLES_BANK: usize = 5000; // the max number of entries in the NEW_USERS-hashmap at the same-time
+pub const MAX_USERS_PURCHASE_CYCLES_BANK: usize = 170; // the max number of entries in the hashmap at the same-time
 pub const MAX_CBS_MAPS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
 
-pub const MAX_USERS_TRANSFER_ICP: usize = 2000;
+pub const MAX_USERS_TRANSFER_ICP: usize = 170;
 pub const CTS_TRANSFER_ICP_FEE: Cycles = 30_000_000_000; // taken as the icptokens by the conversion-rate
 
-const MAX_USERS_BURN_ICP_MINT_CYCLES: usize = 1000;
+const MAX_USERS_BURN_ICP_MINT_CYCLES: usize = 170;
 const MINIMUM_USER_BURN_ICP_MINT_CYCLES: IcpTokens = IcpTokens::from_e8s(3000000); // 0.03 icp
 const USER_BURN_ICP_MINT_CYCLES_FEE: Cycles = 50_000_000_000; //  user gets cmc-cycles minus this fee
 
@@ -1487,7 +1487,7 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
             burn_icp_mint_cycles_data.cycles_bank_canister_id.unwrap(),
             "cycles_transfer",
             &match encode_one(CyclesTransfer{
-                memo: CyclesTransferMemo::Blob(b"CTS-BURN-ICP-MINT-CYCLES".to_vec())
+                memo: CyclesTransferMemo::Text("CTS-BURN-ICP-MINT-CYCLES".to_string())
             }) {
                 Ok(b)=>b, 
                 Err(candid_error)=>{
@@ -1920,17 +1920,19 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, p
                     }
                 }
             
-                match call_raw128(
-                    MANAGEMENT_CANISTER_ID,
-                    "install_code",
-                    &encode_one(&ManagementCanisterInstallCodeQuest{
-                        mode : ManagementCanisterInstallCodeMode::upgrade,
-                        canister_id : *umc_id/*copy*/,
-                        wasm_module : unsafe {&*with(&CTS_DATA, |cts_data| { cts_data.cbs_map_canister_code.module() as *const Vec<u8> })},
-                        arg : &post_upgrade_arg,
-                    }).unwrap(),
-                    0
-                ).await {
+                match with(&CTS_DATA, |cts_data| {
+                    call_raw128(
+                        MANAGEMENT_CANISTER_ID,
+                        "install_code",
+                        &encode_one(&ManagementCanisterInstallCodeQuest{
+                            mode : ManagementCanisterInstallCodeMode::upgrade,
+                            canister_id : *umc_id/*copy*/,
+                            wasm_module : cts_data.cbs_map_canister_code.module(),
+                            arg : &post_upgrade_arg,
+                        }).unwrap(),
+                        0
+                    )
+                }).await {
                     Ok(_) => {},
                     Err(upgrade_code_call_error) => {
                         return Err((*umc_id/*copy*/, ControllerUpgradeUMCCallErrorType::UpgradeCodeCallError, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
@@ -2325,17 +2327,19 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
         }
     }
 
-    match call_raw128(
-        MANAGEMENT_CANISTER_ID,
-        "install_code",
-        &encode_one(&ManagementCanisterInstallCodeQuest{
-            mode : ManagementCanisterInstallCodeMode::upgrade,
-            canister_id : upgrade_ctc,
-            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canister_code.module() as *const Vec<u8> })},
-            arg : &post_upgrade_arg,
-        }).unwrap(),
-        0
-    ).await {
+    match with(&CTS_DATA, |cts_data| { 
+        call_raw128(
+            MANAGEMENT_CANISTER_ID,
+            "install_code",
+            &encode_one(&ManagementCanisterInstallCodeQuest{
+                mode : ManagementCanisterInstallCodeMode::upgrade,
+                canister_id : upgrade_ctc,
+                wasm_module : cts_data.cycles_transferrer_canister_code.module(),
+                arg : &post_upgrade_arg,
+            }).unwrap(),
+            0
+        )
+    }).await {
         Ok(_) => {},
         Err(upgrade_code_call_error) => {
             return Err((upgrade_ctc, ControllerUpgradeCTCCallErrorType::UpgradeCodeCallError, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
