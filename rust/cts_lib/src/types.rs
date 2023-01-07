@@ -34,6 +34,7 @@ pub type XdrPerMyriadPerIcp = u64;
 #[derive(CandidType, Deserialize, Clone, serde::Serialize)]
 pub enum CyclesTransferMemo {
     Nat(u128),
+    Int(i128),
     Text(String),
     Blob(Vec<u8>)   // with serde bytes
 }

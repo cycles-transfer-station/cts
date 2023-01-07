@@ -1,21 +1,9 @@
-// icp transfers , 0.05-xdr / 7-cents flat fee
-
-// 10 years save the user's-cycles-balance and icp-balance if the user-canister finishes.  
-
-// convert icp for the cycles as a service and send to a canister with the cycles_transfer-specification . for the users with a cts-user-contract.
-
-
-// MANAGE-MEMBERSHIP page in the frontcode
-
-
-
 //#![allow(unused)] 
 #![allow(non_camel_case_types)]
 
 use std::{
-    cell::{Cell, RefCell, RefMut}, 
+    cell::{Cell, RefCell}, 
     collections::{HashMap, HashSet},
-    future::Future,  
 };
 use futures::task::Poll;
 
@@ -94,7 +82,6 @@ use cts_lib::{
             caller, 
             time,
             id,
-            canister_balance128,
             performance_counter,
             call::{
                 arg_data,
@@ -283,12 +270,12 @@ pub struct OldFile {
 */
  
 
-pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 15_000_000_000_000; //15T-cycles for a new-cycles_bank. lifetime: 1-year, storage-size: 50mib/*160mib-canister-memory-allocation*/, start-with-the-ctsfuel: 5T-cycles. 
-pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year.
-pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 5_000_000_000_000; // 5T-cycles.
-pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 50; // 50-mib
+pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 5_000_000_000_000;
+pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year
+pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 2_000_000_000_000;
+pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 10;
 pub const NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB: u128 = cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(NEW_CYCLES_BANK_STORAGE_SIZE_MiB);
-pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 1_400_000_000_000;
+pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 1_000_000_000_000;
 pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
     NETWORK_CANISTER_CREATION_FEE_CYCLES
     + (

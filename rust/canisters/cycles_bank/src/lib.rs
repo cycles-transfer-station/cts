@@ -656,6 +656,7 @@ fn ctsfuel_balance() -> CTSFuel {
 fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -> CyclesTransferMemo {
     match cycles_transfer_memo {
         CyclesTransferMemo::Nat(_n) => {},
+        CyclesTransferMemo::Int(_int) => {},
         CyclesTransferMemo::Blob(ref mut b) => {
             b.truncate(32);
             b.shrink_to_fit();
@@ -861,7 +862,8 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
             s.shrink_to_fit();
             if s.capacity() > s.len() { trap("check this out"); }
         },
-        CyclesTransferMemo::Nat(_n) => {} 
+        CyclesTransferMemo::Nat(_n) => {},
+        CyclesTransferMemo::Int(_int) => {} 
     }
  
     let cycles_transfer_id: u128 = with_mut(&CB_DATA, |cb_data| {
