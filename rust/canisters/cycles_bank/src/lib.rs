@@ -1,22 +1,3 @@
-// this canister can safe stop before upgrade
-
-
-// use the heartbeat/timer for the check of the per_month_storage cost and check the cts-fuel in each call. if either one is 0, send the cycles-balance to the cts to save for the 10 years (calculate that the user pays for these 10 years in the first create_user_contract payment.)and delete 
-
-// once the cts fuel is 0, send the cycles balance and the user_id to the cts for the safekeep. and block user calls (stop-calls flag?). the user can topup the user-contract-ctsfuel through the CTS-MAIN.
-// when the storage/contract-duration is done, send the cycles balance and the user_id to the cts for the safekeep. and transfer the user-canister-cycles to the cts-main and delete the user-canister.
-
-// let the user dowload the cycles-transfers (of the specific-logs-ids?)  with an autograph by the cts-main. charge for the cts-fuel. autograph by the cts-main is given when the user-contract is create that this user-contract is a part of the CTS.
-
-
-//static USER_CANISTER_CTSFUEL_AUTO_TOPUP_PER_MONTH:               Cell<CTSFuel>               = Cell::new(0);   
-//static USER_CANISTER_CTSFUEL_AUTO_TOPUP_PER_MONTH_LAST_CHARGE_TIMESTAMP_SECONDS: Cell<u64>   = Cell::new(0);
-    
-
-    
-// ------------------------------------------------
-
-
 use std::{
     cell::{RefCell,Cell}
 };
@@ -931,7 +912,7 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
 
 
 
-// :lack of the check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method. set on the side the ctsfuel for the callback?
+// no check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method. set on the side the ctsfuel for the callback?
 
 #[update]
 pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::TransferCyclesCallbackQuest) -> () {
@@ -1434,37 +1415,7 @@ pub async fn cm_void_position(q: cycles_market::VoidPositionQuest) -> Result<(),
 
 
 // -------
-/*
-#[derive(CandidType, Deserialize)]
-pub enum UserCMSeeIcpLockError {
-    CTSFuelTooLow,
-    CyclesMarketSeeIcpLockCallError((u32, String)),
-}
 
-#[update]
-pub async fn cm_see_icp_lock() -> Result<IcpTokens, UserCMSeeIcpLockError> {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if ctsfuel_balance() < 30_000_000_000 {
-        return Err(UserCMSeeIcpLockError::CTSFuelTooLow);
-    }
-    
-    match call::<(), (IcpTokens,)>(
-        with(&CB_DATA, |cb_data| { cb_data.cycles_market_id }),
-        "see_icp_lock",
-        ()
-    ).await {
-        Ok((icp_tokens,)) => Ok(icp_tokens),
-        Err(call_error) => {
-            return Err(UserCMSeeIcpLockError::CyclesMarketSeeIcpLockCallError((call_error.0 as u32, call_error.1)));
-        }
-    }
-} 
-*/
-
-// -------
 
 #[derive(CandidType, Deserialize)]
 pub enum UserCMTransferIcpBalanceError {
@@ -2097,20 +2048,6 @@ pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
 // ----------------------------------------------------------
 
 
-/*
-#[export_name = "canister_query cycles_balance"]
-pub fn cycles_balance_canister_method() {  // -> Cycles
-    if caller() != user_id() {
-        trap("caller must be the user")
-    }
-    
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon.") }
-    
-    reply::<(Cycles,)>((cycles_balance(),));
-    return;
-}
-*/
-
 
 
 
@@ -2204,9 +2141,6 @@ pub fn metrics() -> UserUCMetrics {
 
 // --------------------------------------------------------
 
-// method on the cts-main for the ctsfuel-topup of a user-canister using icp - ledger-topup-cycles for the user-canister
-
-
 #[update]
 pub fn topup_ctsfuel_with_some_cycles() -> () {
     msg_cycles_accept128(msg_cycles_available128());
@@ -2279,10 +2213,8 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
         return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), lengthen_cost_cycles });
     }
     
-    // let id for the log
     with_mut(&CB_DATA, |cb_data| {    
         cb_data.user_data.cycles_balance -= lengthen_cost_cycles; 
-        // make a log with the id
     });
     
     match call::<(&LengthenLifetimeQuest,),()>(
@@ -2299,7 +2231,6 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
         Err(call_error) => {
             with_mut(&CB_DATA, |cb_data| {    
                 cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(lengthen_cost_cycles); 
-                // delete the log with the id
             });
             return Err(LengthenLifetimeError::CBSMCallError((call_error.0 as u32, call_error.1)));
         }
