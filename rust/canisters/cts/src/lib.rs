@@ -3012,10 +3012,10 @@ pub fn http_request() {
     
     let (quest,): (HttpRequest,) = arg_data::<(HttpRequest,)>(); 
     
-    let file_name: String = quest.url;
+    let file_name: &str = quest.url.split("?").next().unwrap();
     
     with(&CTS_DATA, |cts_data| {
-        match cts_data.frontcode_files.get(&file_name) {
+        match cts_data.frontcode_files.get(file_name) {
             None => {
                 reply::<(HttpResponse,)>(
                     (HttpResponse {
@@ -3031,12 +3031,12 @@ pub fn http_request() {
                     (HttpResponse {
                         status_code: 200,
                         headers: vec![
-                            make_file_certificate_header(&file_name), 
+                            make_file_certificate_header(file_name), 
                             ("content-type".to_string(), file.content_type.clone()),
                             ("content-encoding".to_string(), file.content_encoding.clone())
                         ],
                         body: &file.content_chunks[0],
-                        streaming_strategy: if let Some(stream_callback_token) = create_opt_stream_callback_token(&file_name, file, 0) {
+                        streaming_strategy: if let Some(stream_callback_token) = create_opt_stream_callback_token(file_name, file, 0) {
                             Some(StreamStrategy::Callback{ 
                                 callback: Func{
                                     principal: ic_cdk::api::id(),
