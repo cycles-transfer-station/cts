@@ -100,9 +100,6 @@ use cts_lib::{
 };
 
 
-// on a cycles-payout, the cycles-market will try once to send the cycles with a cycles_transfer-method call and if it fails, the cycles-market will use the deposit_cycles management canister method and close the position.
-
-// make sure the positors and purchaser are secret and hidden. public-data is the position-id, the commodity, the minimum purchase, and the rate, (and the timestamp? no that makes it traceable)
 
 type VoidCyclesPositionId = PositionId;
 type VoidIcpPositionId = PositionId;
@@ -1120,47 +1117,6 @@ async fn _do_payouts() {
     let (ipps_cycles_payouts_ids, ipps_do_cycles_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = icp_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
     let (ipps_icp_payouts_ids, ipps_do_icp_payouts_futures): (Vec<IcpPositionPurchaseId>, Vec<_/*do_icp_payout-future*/>) = icp_positions_purchases_icp_payouts_chunk.into_iter().unzip();
     
-    /*
-    let cycles_payouts_futures = futures::future::join3(
-        futures::future::join_all(vcps_do_cycles_payouts_futures),
-        futures::future::join_all(cpps_do_cycles_payouts_futures),
-        futures::future::join_all(ipps_do_cycles_payouts_futures),
-    );
-    
-    let icp_payouts_futures = futures::future::join3(
-        futures::future::join_all(vips_do_icp_payouts_futures),
-        futures::future::join_all(cpps_do_icp_payouts_futures),
-        futures::future::join_all(ipps_do_icp_payouts_futures),
-    );
-    
-    let (
-        cycles_payouts_rs, 
-        icp_payouts_rs           
-    ) = futures::future::join(
-        cycles_payouts_futures,
-        icp_payouts_futures,
-    ).await;
-    
-    let (
-        vcps_do_cycles_payouts_rs,
-        cpps_do_cycles_payouts_rs,
-        ipps_do_cycles_payouts_rs
-    ): (
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-    ) = cycles_payouts_rs;
-    
-    let (
-        vips_do_icp_payouts_rs,
-        cpps_do_icp_payouts_rs,
-        ipps_do_icp_payouts_rs
-    ): (
-        Vec<DoIcpPayoutSponse>,
-        Vec<DoIcpPayoutSponse>,
-        Vec<DoIcpPayoutSponse>
-    ) = icp_payouts_rs;
-    */
     let (
         vcps_do_cycles_payouts_rs,
         vips_do_icp_payouts_rs,

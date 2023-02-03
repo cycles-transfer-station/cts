@@ -83,7 +83,7 @@ pub struct TryCallback {
     cm_callback_quest: CMCallbackQuest, 
     cycles_transfer_refund: CyclesTransferRefund,
     try_number: u32,
-    call_error_of_the_last_try: (RejectionCode, String)/*the call-error of the last try*/
+    call_error_of_the_last_try: (RejectionCode, String)
 }
 
 
