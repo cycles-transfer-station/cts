@@ -1,7 +1,8 @@
 type CyclesTransferMemo = variant {
 	Text: text;
-	Nat64: nat64;
+	Nat: nat;
 	Blob: blob;
+	Int: int;
 };
 
 type CyclesTransfer = record {
