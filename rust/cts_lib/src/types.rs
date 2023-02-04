@@ -28,6 +28,20 @@ pub type XdrPerMyriadPerIcp = u64;
 
 
 
+#[derive(CandidType, Deserialize)]
+pub struct DownloadRChunkQuest {
+    pub chunk_size: u64,
+    pub chunk_i: u64,
+    pub opt_height: Option<u64>,
+}
+
+#[derive(CandidType)]
+pub struct RChunkData<'a, T: 'a> {
+    pub latest_height: u64,
+    pub data: Option<&'a [T]>
+}
+
+
 
 
 

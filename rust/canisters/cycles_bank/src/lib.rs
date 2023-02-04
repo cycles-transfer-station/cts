@@ -69,6 +69,7 @@ use cts_lib::{
         CyclesTransfer,
         CyclesTransferMemo,
         XdrPerMyriadPerIcp,
+        DownloadRChunkQuest,
         cts,
         cycles_transferrer,
         cycles_bank::{
@@ -108,7 +109,8 @@ use cts_lib::{
             }
         },
         icptokens_to_cycles,
-        cycles_to_icptokens
+        cycles_to_icptokens,
+        rchunk_data
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -650,6 +652,12 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
     cycles_transfer_memo
 }
 
+fn maintenance_check() {
+    if localkey::cell::get(&STOP_CALLS) == true { 
+        trap("Maintenance, try soon."); 
+    }
+}
+
 
 // ---------------------------------------------------------------------------------
 
@@ -662,7 +670,7 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
 #[export_name = "canister_update cycles_transfer"]
 pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
 
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
+    maintenance_check();
 
     if ctsfuel_balance() < 10_000_000_000 {
         if caller() == cts_id() {
@@ -735,7 +743,7 @@ pub fn download_cycles_transfers_in() {
         return;
     }    
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -744,7 +752,23 @@ pub fn download_cycles_transfers_in() {
     
 }
 
-
+#[query(manual_reply = true)]
+pub fn download_cycles_transfers_in_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }    
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cycles_transfers_in),)); 
+    });
+} 
 
 #[update(manual_reply = true)]
 pub fn delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
@@ -757,7 +781,7 @@ pub fn delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         for delete_cycles_transfer_in_id in delete_cycles_transfers_in_ids.into_iter() {
@@ -809,7 +833,7 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
         trap("Caller must be the user for this method.");
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); }
+    maintenance_check();
     
     if ctsfuel_balance() < 15_000_000_000 {
         return Err(UserTransferCyclesError::CTSFuelTooLow);
@@ -921,7 +945,7 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
         trap("caller must be one of the CTS-cycles-transferrer-canisters for this method.");
     }
     
-    //if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try again soon."); } // make sure that when set a stop-call-flag, there are 0 ongoing-$cycles-transfers. cycles-transfer-callback errors will hold for
+    //maintenance_check(); // make sure that when set a stop-call-flag, there are 0 ongoing-$cycles-transfers. cycles-transfer-callback errors will hold for
     
     let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128()); 
 
@@ -952,7 +976,7 @@ pub fn download_cycles_transfers_out() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -960,8 +984,23 @@ pub fn download_cycles_transfers_out() {
     });
 }
 
+#[query(manual_reply = true)]
+pub fn download_cycles_transfers_out_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
 
-
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cycles_transfers_out),)); 
+    });
+}
 
 
 #[update(manual_reply = true)]
@@ -975,7 +1014,7 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         for delete_cycles_transfer_out_id in delete_cycles_transfers_out_ids.into_iter() {
@@ -1631,6 +1670,102 @@ pub fn cm_message_void_icp_position_positor(q: CMVoidIcpPositionPositorMessageQu
 // -------------------------------
 
 
+#[query(manual_reply = true)]
+pub fn download_cm_cycles_positions_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_cycles_positions),));
+    });    
+}
+
+#[query(manual_reply = true)]
+pub fn download_cm_icp_positions_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_icp_positions),));
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_cm_cycles_positions_purchases_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_cycles_positions_purchases),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_icp_positions_purchases_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_icp_positions_purchases),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_icp_transfers_out_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_icp_transfers_out),));
+    });
+}
+
+
+// ---
+
 
 #[query(manual_reply = true)]
 pub fn download_cm_cycles_positions() {
@@ -1643,7 +1778,7 @@ pub fn download_cm_cycles_positions() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1663,7 +1798,7 @@ pub fn download_cm_icp_positions() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1683,7 +1818,7 @@ pub fn download_cm_cycles_positions_purchases() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1704,7 +1839,7 @@ pub fn download_cm_icp_positions_purchases() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1724,7 +1859,7 @@ pub fn download_cm_icp_transfers_out() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>();                                   // starts at 0
@@ -1735,6 +1870,125 @@ pub fn download_cm_icp_transfers_out() {
 
 
 // -----------------
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_cycles_position_purchase_positor_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_cycles_position_purchase_purchaser_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs),));
+    });
+}
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_icp_position_purchase_positor_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_icp_position_purchase_purchaser_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs),));
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_void_cycles_position_positor_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs),));
+    });
+}
+
+
+
+#[query(manual_reply = true)]
+pub fn download_cm_message_void_icp_position_positor_logs_rchunks(q: DownloadRChunkQuest) {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    if ctsfuel_balance() < 10_000_000_000 {
+        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
+        return;
+    }
+    
+    maintenance_check();
+    
+    with(&CB_DATA, |cb_data| {
+        reply((rchunk_data(q, &cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs),));
+    });
+}
+
+
+
+
+// ---
 
 
 #[query(manual_reply = true)]
@@ -1748,7 +2002,7 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1768,7 +2022,7 @@ pub fn download_cm_message_cycles_position_purchase_purchaser_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1788,7 +2042,7 @@ pub fn download_cm_message_icp_position_purchase_positor_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1809,7 +2063,7 @@ pub fn download_cm_message_icp_position_purchase_purchaser_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1828,7 +2082,7 @@ pub fn download_cm_message_void_cycles_position_positor_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1849,7 +2103,7 @@ pub fn download_cm_message_void_icp_position_positor_logs() {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
@@ -1873,7 +2127,7 @@ pub fn delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_cycles_positions.sort_by_key(|cm_cycles_position| { cm_cycles_position.id });
@@ -1909,7 +2163,7 @@ pub fn delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_icp_positions.sort_by_key(|cm_icp_position| { cm_icp_position.id });
@@ -1946,7 +2200,7 @@ pub fn delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_cycles_positions_purchases.sort_by_key(|cm_cycles_position_purchase| { cm_cycles_position_purchase.id });
@@ -1983,7 +2237,7 @@ pub fn delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: 
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_icp_positions_purchases.sort_by_key(|cm_icp_position_purchase| { cm_icp_position_purchase.id });
@@ -2018,7 +2272,7 @@ pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
         return;
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance. try soon."); }
+    maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cm_icp_transfers_out.sort_by_key(|cm_icp_transfer_out| { cm_icp_transfer_out.block_height });
@@ -2159,7 +2413,7 @@ pub fn cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<
         trap("caller must be the user for this method.");
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
+    maintenance_check();
     
     if cycles_for_the_ctsfuel < MINIMUM_CYCLES_FOR_THE_CTSFUEL {
         return Err(UserCyclesBalanceForTheCTSFuelError::MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: MINIMUM_CYCLES_FOR_THE_CTSFUEL });
@@ -2196,7 +2450,7 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
         trap("caller must be the user for this method.");
     }
     
-    if localkey::cell::get(&STOP_CALLS) { trap("Maintenance, try soon."); }
+    maintenance_check();
 
     let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(MINIMUM_LENGTHEN_LIFETIME_SECONDS).unwrap_or_else(|| { trap("time is not support at the moment") });
     if q.set_lifetime_termination_timestamp_seconds < minimum_set_lifetime_termination_timestamp_seconds {

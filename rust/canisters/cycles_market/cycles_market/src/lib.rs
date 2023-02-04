@@ -17,6 +17,7 @@ use cts_lib::{
         time_nanos,
         time_nanos_u64,
         time_seconds,
+        rchunk_data
     },
     consts::{
         MiB,
@@ -32,6 +33,7 @@ use cts_lib::{
         CyclesTransferMemo,
         CyclesTransferRefund,
         XdrPerMyriadPerIcp,
+        DownloadRChunkQuest,
         cycles_transferrer,
         management_canister,
         cycles_market::*,
@@ -719,7 +721,11 @@ fn canister_inspect_message() {
         "see_cycles_positions",
         "see_icp_positions",
         "see_cycles_positions_purchases",
-        "see_icp_positions_purchases"
+        "see_icp_positions_purchases",
+        "download_cycles_positions_rchunks",
+        "download_icp_positions_rchunks",
+        "download_cycles_positions_purchases_rchunks",
+        "download_icp_positions_purchases_rchunks"
     ].contains(&&method_name()[..]) {
         trap("this method must be call by a canister or a query call.");
     }
@@ -2083,6 +2089,40 @@ pub async fn transfer_icp_balance(q: TransferIcpBalanceQuest) {
 
 // -------------------------------
 
+#[query(manual_reply = true)]
+pub fn download_cycles_positions_rchunks(q: DownloadRChunkQuest) {
+    with(&CM_DATA, |cm_data| {
+        reply((rchunk_data(q, &cm_data.cycles_positions),));
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_icp_positions_rchunks(q: DownloadRChunkQuest) {
+    with(&CM_DATA, |cm_data| {
+        rchunk_data(q, &cm_data.icp_positions);
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_cycles_positions_purchases_rchunks(q: DownloadRChunkQuest) {
+    with(&CM_DATA, |cm_data| {
+        rchunk_data(q, &cm_data.cycles_positions_purchases);
+    });
+}
+
+#[query(manual_reply = true)]
+pub fn download_icp_positions_purchases_rchunks(q: DownloadRChunkQuest) {
+    with(&CM_DATA, |cm_data| {
+        rchunk_data(q, &cm_data.icp_positions_purchases);
+    });
+}
+
+
+
+// ----------------------
+
+
+
 #[derive(CandidType, Deserialize)]
 pub struct SeeCyclesPositionsQuest {
     chunk_i: u128
@@ -2096,8 +2136,6 @@ pub fn see_cycles_positions(q: SeeCyclesPositionsQuest) {
         ,));
     });
 }
-
-
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeIcpPositionsQuest {
@@ -2113,7 +2151,6 @@ pub fn see_icp_positions(q: SeeIcpPositionsQuest) {
     });
 }
 
-
 #[derive(CandidType, Deserialize)]
 pub struct SeeCyclesPositionsPurchasesQuest {
     chunk_i: u128
@@ -2128,8 +2165,6 @@ pub fn see_cycles_positions_purchases(q: SeeCyclesPositionsPurchasesQuest) {
     });
 }
 
-
-
 #[derive(CandidType, Deserialize)]
 pub struct SeeIcpPositionsPurchasesQuest {
     chunk_i: u128
@@ -2143,6 +2178,7 @@ pub fn see_icp_positions_purchases(q: SeeIcpPositionsPurchasesQuest) {
         ,));
     });
 }
+
 
 // ---------------------------------
 
