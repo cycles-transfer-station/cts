@@ -2099,21 +2099,21 @@ pub fn download_cycles_positions_rchunks(q: DownloadRChunkQuest) {
 #[query(manual_reply = true)]
 pub fn download_icp_positions_rchunks(q: DownloadRChunkQuest) {
     with(&CM_DATA, |cm_data| {
-        rchunk_data(q, &cm_data.icp_positions);
+        reply((rchunk_data(q, &cm_data.icp_positions),));
     });
 }
 
 #[query(manual_reply = true)]
 pub fn download_cycles_positions_purchases_rchunks(q: DownloadRChunkQuest) {
     with(&CM_DATA, |cm_data| {
-        rchunk_data(q, &cm_data.cycles_positions_purchases);
+        reply((rchunk_data(q, &cm_data.cycles_positions_purchases),));
     });
 }
 
 #[query(manual_reply = true)]
 pub fn download_icp_positions_purchases_rchunks(q: DownloadRChunkQuest) {
     with(&CM_DATA, |cm_data| {
-        rchunk_data(q, &cm_data.icp_positions_purchases);
+        reply((rchunk_data(q, &cm_data.icp_positions_purchases),));
     });
 }
 
