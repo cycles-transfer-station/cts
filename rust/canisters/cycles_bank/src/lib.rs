@@ -193,6 +193,27 @@ struct CMIcpTransferOut{
 }
 
 #[derive(CandidType, Deserialize)]
+struct CMCallsOut {
+    cm_cycles_positions: Vec<CMCyclesPosition>,
+    cm_icp_positions: Vec<CMIcpPosition>,
+    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
+    cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
+    cm_icp_transfers_out: Vec<CMIcpTransferOut>,
+}
+impl CMCallsOut {
+    fn new() -> Self {
+        Self {
+            cm_cycles_positions: Vec::new(),
+            cm_icp_positions: Vec::new(),
+            cm_cycles_positions_purchases: Vec::new(),
+            cm_icp_positions_purchases: Vec::new(),    
+            cm_icp_transfers_out: Vec::new(),
+        }
+    }
+}
+
+
+#[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePositorLog{
     timestamp_nanos: u128,
     cm_message_cycles_position_purchase_positor_quest: CMCyclesPositionPurchasePositorMessageQuest 
@@ -259,11 +280,7 @@ struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
     cycles_transfers_out: Vec<CyclesTransferOut>,
-    cm_cycles_positions: Vec<CMCyclesPosition>,
-    cm_icp_positions: Vec<CMIcpPosition>,
-    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
-    cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
-    cm_icp_transfers_out: Vec<CMIcpTransferOut>,
+    cm_calls_out: CMCallsOut, 
     cm_message_logs: CMMessageLogs
 }
 
@@ -273,16 +290,41 @@ impl UserData {
             cycles_balance: 0u128,
             cycles_transfers_in: Vec::new(),
             cycles_transfers_out: Vec::new(),
-            cm_cycles_positions: Vec::new(),
-            cm_icp_positions: Vec::new(),
-            cm_cycles_positions_purchases: Vec::new(),
-            cm_icp_positions_purchases: Vec::new(),    
-            cm_icp_transfers_out: Vec::new(),
+            cm_calls_out: CMCallsOut::new(),
             cm_message_logs: CMMessageLogs::new()
         }
     }
 }
 
+
+#[derive(CandidType, Deserialize)]
+struct OldUserData {
+    cycles_balance: Cycles,
+    cycles_transfers_in: Vec<CyclesTransferIn>,
+    cycles_transfers_out: Vec<CyclesTransferOut>,
+    cm_cycles_positions: Vec<CMCyclesPosition>,
+    cm_icp_positions: Vec<CMIcpPosition>,
+    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
+    cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
+    cm_icp_transfers_out: Vec<CMIcpTransferOut>,
+    cm_message_logs: CMMessageLogs
+}
+
+
+#[derive(CandidType, Deserialize)]
+struct OldCBData {
+    user_canister_creation_timestamp_nanos: u128,
+    cts_id: Principal,
+    cbsm_id: Principal,
+    cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
+    user_id: Principal,
+    storage_size_mib: u128,
+    lifetime_termination_timestamp_seconds: u128,
+    cycles_transferrer_canisters: Vec<Principal>,
+    user_data: OldUserData,
+    cycles_transfers_id_counter: u128,
+}
 
 
 #[derive(CandidType, Deserialize)]
@@ -436,11 +478,11 @@ fn create_cb_data_candid_bytes() -> Vec<u8> {
     with_mut(&CB_DATA, |cb_data| { 
         cb_data.user_data.cycles_transfers_in.shrink_to_fit();
         cb_data.user_data.cycles_transfers_out.shrink_to_fit(); 
-        cb_data.user_data.cm_cycles_positions.shrink_to_fit();
-        cb_data.user_data.cm_icp_positions.shrink_to_fit();
-        cb_data.user_data.cm_cycles_positions_purchases.shrink_to_fit();
-        cb_data.user_data.cm_icp_positions_purchases.shrink_to_fit();
-        cb_data.user_data.cm_icp_transfers_out.shrink_to_fit();
+        cb_data.user_data.cm_calls_out.cm_cycles_positions.shrink_to_fit();
+        cb_data.user_data.cm_calls_out.cm_icp_positions.shrink_to_fit();
+        cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.shrink_to_fit();
+        cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.shrink_to_fit();
+        cb_data.user_data.cm_calls_out.cm_icp_transfers_out.shrink_to_fit();
         cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.shrink_to_fit();
         cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.shrink_to_fit();
         cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.shrink_to_fit();
@@ -459,15 +501,34 @@ fn re_store_cb_data_candid_bytes(cb_data_candid_bytes: Vec<u8>) {
     let cb_data: CBData = match decode_one::<CBData>(&cb_data_candid_bytes) {
         Ok(cb_data) => cb_data,
         Err(_) => {
-            trap("error decode of the CBData");
-            /*
+            //trap("error decode of the CBData");
             let old_cb_data: OldCBData = decode_one::<OldCBData>(&cb_data_candid_bytes).unwrap();
             let cb_data: CBData = CBData{
+                user_canister_creation_timestamp_nanos: old_cb_data.user_canister_creation_timestamp_nanos,
                 cts_id: old_cb_data.cts_id,
-                .......
+                cbsm_id: old_cb_data.cbsm_id,
+                cycles_market_id: old_cb_data.cycles_market_id,
+                cycles_market_cmcaller: old_cb_data.cycles_market_cmcaller,
+                user_id: old_cb_data.user_id,
+                storage_size_mib: old_cb_data.storage_size_mib,
+                lifetime_termination_timestamp_seconds: old_cb_data.lifetime_termination_timestamp_seconds,
+                cycles_transferrer_canisters: old_cb_data.cycles_transferrer_canisters,
+                user_data: UserData{
+                    cycles_balance: old_cb_data.user_data.cycles_balance,
+                    cycles_transfers_in: old_cb_data.user_data.cycles_transfers_in,
+                    cycles_transfers_out: old_cb_data.user_data.cycles_transfers_out,
+                    cm_calls_out: CMCallsOut{
+                        cm_cycles_positions: old_cb_data.user_data.cm_cycles_positions,
+                        cm_icp_positions: old_cb_data.user_data.cm_icp_positions,
+                        cm_cycles_positions_purchases: old_cb_data.user_data.cm_cycles_positions_purchases,
+                        cm_icp_positions_purchases: old_cb_data.user_data.cm_icp_positions_purchases,    
+                        cm_icp_transfers_out: old_cb_data.user_data.cm_icp_transfers_out,
+                    }, 
+                    cm_message_logs: old_cb_data.user_data.cm_message_logs
+                },
+                cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
             };
             cb_data
-            */
        }
     };
 
@@ -589,15 +650,15 @@ fn calculate_current_storage_usage() -> u128 {
             + 
             cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
             +
-            cb_data.user_data.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
+            cb_data.user_data.cm_calls_out.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
             +
-            cb_data.user_data.cm_icp_positions.len() * std::mem::size_of::<CMIcpPosition>()
+            cb_data.user_data.cm_calls_out.cm_icp_positions.len() * std::mem::size_of::<CMIcpPosition>()
             +
-            cb_data.user_data.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
+            cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
             +
-            cb_data.user_data.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
+            cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
             +
-            cb_data.user_data.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
+            cb_data.user_data.cm_calls_out.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
             +
             cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
             +
@@ -1102,7 +1163,7 @@ pub async fn cm_create_cycles_position(q: cycles_market::CreateCyclesPositionQue
             Ok(cm_create_cycles_position_result) => match cm_create_cycles_position_result {
                 Ok(cm_create_cycles_position_success) => {
                     with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_cycles_positions.push(
+                        cb_data.user_data.cm_calls_out.cm_cycles_positions.push(
                             CMCyclesPosition{
                                 id: cm_create_cycles_position_success.position_id,   
                                 cycles: q.cycles,
@@ -1191,7 +1252,7 @@ pub async fn cm_create_icp_position(q: cycles_market::CreateIcpPositionQuest) ->
             Ok(cm_create_icp_position_result) => match cm_create_icp_position_result {
                 Ok(cm_create_icp_position_success) => {
                     with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_icp_positions.push(
+                        cb_data.user_data.cm_calls_out.cm_icp_positions.push(
                             CMIcpPosition{
                                 id: cm_create_icp_position_success.position_id,   
                                 icp: q.icp,
@@ -1286,7 +1347,7 @@ pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -
             Ok(cm_purchase_cycles_position_result) => match cm_purchase_cycles_position_result {
                 Ok(cm_purchase_cycles_position_success) => {
                     with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_cycles_positions_purchases.push(
+                        cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.push(
                             CMCyclesPositionPurchase{
                                 cycles_position_id: q.cycles_market_purchase_cycles_position_quest.cycles_position_id,
                                 cycles_position_xdr_permyriad_per_icp_rate: q.cycles_position_xdr_permyriad_per_icp_rate,
@@ -1383,7 +1444,7 @@ pub async fn cm_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Resu
             Ok(cm_purchase_icp_position_result) => match cm_purchase_icp_position_result {
                 Ok(cm_purchase_icp_position_success) => {
                     with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_icp_positions_purchases.push(
+                        cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.push(
                             CMIcpPositionPurchase{
                                 icp_position_id: q.cycles_market_purchase_icp_position_quest.icp_position_id,
                                 icp_position_xdr_permyriad_per_icp_rate: q.icp_position_xdr_permyriad_per_icp_rate,
@@ -1511,7 +1572,7 @@ pub async fn cm_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) 
             Ok(cm_transfer_icp_balance_result) => match cm_transfer_icp_balance_result {
                 Ok(block_height) => {
                     with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_icp_transfers_out.push(
+                        cb_data.user_data.cm_calls_out.cm_icp_transfers_out.push(
                             CMIcpTransferOut{
                                 icp: q.icp,
                                 icp_fee: q.icp_fee,
@@ -1684,7 +1745,7 @@ pub fn download_cm_cycles_positions_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_cycles_positions),));
+        reply((rchunk_data(q, &cb_data.user_data.cm_calls_out.cm_cycles_positions),));
     });    
 }
 
@@ -1702,7 +1763,7 @@ pub fn download_cm_icp_positions_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_icp_positions),));
+        reply((rchunk_data(q, &cb_data.user_data.cm_calls_out.cm_icp_positions),));
     });
 }
 
@@ -1720,7 +1781,7 @@ pub fn download_cm_cycles_positions_purchases_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_cycles_positions_purchases),));
+        reply((rchunk_data(q, &cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases),));
     });
 }
 
@@ -1740,7 +1801,7 @@ pub fn download_cm_icp_positions_purchases_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_icp_positions_purchases),));
+        reply((rchunk_data(q, &cb_data.user_data.cm_calls_out.cm_icp_positions_purchases),));
     });
 }
 
@@ -1759,7 +1820,7 @@ pub fn download_cm_icp_transfers_out_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_icp_transfers_out),));
+        reply((rchunk_data(q, &cb_data.user_data.cm_calls_out.cm_icp_transfers_out),));
     });
 }
 
@@ -1782,7 +1843,7 @@ pub fn download_cm_cycles_positions() {
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CMCyclesPosition]>,)>((cb_data.user_data.cm_cycles_positions.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[CMCyclesPosition]>,)>((cb_data.user_data.cm_calls_out.cm_cycles_positions.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -1802,7 +1863,7 @@ pub fn download_cm_icp_positions() {
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CMIcpPosition]>,)>((cb_data.user_data.cm_icp_positions.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[CMIcpPosition]>,)>((cb_data.user_data.cm_calls_out.cm_icp_positions.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -1822,7 +1883,7 @@ pub fn download_cm_cycles_positions_purchases() {
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CMCyclesPositionPurchase]>,)>((cb_data.user_data.cm_cycles_positions_purchases.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[CMCyclesPositionPurchase]>,)>((cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -1843,7 +1904,7 @@ pub fn download_cm_icp_positions_purchases() {
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CMIcpPositionPurchase]>,)>((cb_data.user_data.cm_icp_positions_purchases.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[CMIcpPositionPurchase]>,)>((cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.chunks(USER_DOWNLOAD_CM_ICP_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -1863,7 +1924,7 @@ pub fn download_cm_icp_transfers_out() {
     
     with(&CB_DATA, |cb_data| {
         let (chunk_i,): (u128,) = arg_data::<(u128,)>();                                   // starts at 0
-        reply::<(Option<&[CMIcpTransferOut]>,)>((cb_data.user_data.cm_icp_transfers_out.chunks(USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply::<(Option<&[CMIcpTransferOut]>,)>((cb_data.user_data.cm_calls_out.cm_icp_transfers_out.chunks(USER_DOWNLOAD_CM_ICP_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
     });
 }
 
@@ -2130,14 +2191,14 @@ pub fn delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
     maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_cycles_positions.sort_by_key(|cm_cycles_position| { cm_cycles_position.id });
+        cb_data.user_data.cm_calls_out.cm_cycles_positions.sort_by_key(|cm_cycles_position| { cm_cycles_position.id });
         for delete_cm_cycles_position_id in delete_cm_cycles_positions_ids.into_iter() {
-            match cb_data.user_data.cm_cycles_positions.binary_search_by_key(&delete_cm_cycles_position_id, |cm_cycles_position| { cm_cycles_position.id }) {
+            match cb_data.user_data.cm_calls_out.cm_cycles_positions.binary_search_by_key(&delete_cm_cycles_position_id, |cm_cycles_position| { cm_cycles_position.id }) {
                 Ok(i) => {
-                    if time_nanos().saturating_sub(cb_data.user_data.cm_cycles_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_calls_out.cm_cycles_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
                         trap(&format!("cm_cycles_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
-                    cb_data.user_data.cm_cycles_positions.remove(i);
+                    cb_data.user_data.cm_calls_out.cm_cycles_positions.remove(i);
                 },
                 Err(_) => {
                     trap(&format!("cm_cycles_position id: {} not found.", delete_cm_cycles_position_id))
@@ -2166,14 +2227,14 @@ pub fn delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
     maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_icp_positions.sort_by_key(|cm_icp_position| { cm_icp_position.id });
+        cb_data.user_data.cm_calls_out.cm_icp_positions.sort_by_key(|cm_icp_position| { cm_icp_position.id });
         for delete_cm_icp_position_id in delete_cm_icp_positions_ids.into_iter() {
-            match cb_data.user_data.cm_icp_positions.binary_search_by_key(&delete_cm_icp_position_id, |cm_icp_position| { cm_icp_position.id }) {
+            match cb_data.user_data.cm_calls_out.cm_icp_positions.binary_search_by_key(&delete_cm_icp_position_id, |cm_icp_position| { cm_icp_position.id }) {
                 Ok(i) => {
-                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_calls_out.cm_icp_positions[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
                         trap(&format!("cm_icp_position id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
-                    cb_data.user_data.cm_icp_positions.remove(i);
+                    cb_data.user_data.cm_calls_out.cm_icp_positions.remove(i);
                 },
                 Err(_) => {
                     trap(&format!("cm_icp_position id: {} not found.", delete_cm_icp_position_id))
@@ -2203,14 +2264,14 @@ pub fn delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases
     maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_cycles_positions_purchases.sort_by_key(|cm_cycles_position_purchase| { cm_cycles_position_purchase.id });
+        cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.sort_by_key(|cm_cycles_position_purchase| { cm_cycles_position_purchase.id });
         for delete_cm_cycles_position_purchase_id in delete_cm_cycles_positions_purchases_ids.into_iter() {
-            match cb_data.user_data.cm_cycles_positions_purchases.binary_search_by_key(&delete_cm_cycles_position_purchase_id, |cm_cycles_position_purchase| { cm_cycles_position_purchase.id }) {
+            match cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.binary_search_by_key(&delete_cm_cycles_position_purchase_id, |cm_cycles_position_purchase| { cm_cycles_position_purchase.id }) {
                 Ok(i) => {
-                    if time_nanos().saturating_sub(cb_data.user_data.cm_cycles_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
                         trap(&format!("cm_cycles_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_cycles_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
-                    cb_data.user_data.cm_cycles_positions_purchases.remove(i);
+                    cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.remove(i);
                 },
                 Err(_) => {
                     trap(&format!("cm_cycles_position_purchase id: {} not found.", delete_cm_cycles_position_purchase_id))
@@ -2240,14 +2301,14 @@ pub fn delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: 
     maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_icp_positions_purchases.sort_by_key(|cm_icp_position_purchase| { cm_icp_position_purchase.id });
+        cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.sort_by_key(|cm_icp_position_purchase| { cm_icp_position_purchase.id });
         for delete_cm_icp_position_purchase_id in delete_cm_icp_positions_purchases_ids.into_iter() {
-            match cb_data.user_data.cm_icp_positions_purchases.binary_search_by_key(&delete_cm_icp_position_purchase_id, |cm_icp_position_purchase| { cm_icp_position_purchase.id }) {
+            match cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.binary_search_by_key(&delete_cm_icp_position_purchase_id, |cm_icp_position_purchase| { cm_icp_position_purchase.id }) {
                 Ok(i) => {
-                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_calls_out.cm_icp_positions_purchases[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
                         trap(&format!("cm_icp_position_purchase id: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_position_purchase_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
-                    cb_data.user_data.cm_icp_positions_purchases.remove(i);
+                    cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.remove(i);
                 },
                 Err(_) => {
                     trap(&format!("cm_icp_position_purchase id: {} not found.", delete_cm_icp_position_purchase_id))
@@ -2275,14 +2336,14 @@ pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
     maintenance_check();
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_icp_transfers_out.sort_by_key(|cm_icp_transfer_out| { cm_icp_transfer_out.block_height });
+        cb_data.user_data.cm_calls_out.cm_icp_transfers_out.sort_by_key(|cm_icp_transfer_out| { cm_icp_transfer_out.block_height });
         for delete_cm_icp_transfer_out_id in delete_cm_icp_transfers_out_ids.into_iter() {
-            match cb_data.user_data.cm_icp_transfers_out.binary_search_by_key(&delete_cm_icp_transfer_out_id, |cm_icp_transfer_out| { cm_icp_transfer_out.block_height }) {
+            match cb_data.user_data.cm_calls_out.cm_icp_transfers_out.binary_search_by_key(&delete_cm_icp_transfer_out_id, |cm_icp_transfer_out| { cm_icp_transfer_out.block_height }) {
                 Ok(i) => {
-                    if time_nanos().saturating_sub(cb_data.user_data.cm_icp_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
+                    if time_nanos().saturating_sub(cb_data.user_data.cm_calls_out.cm_icp_transfers_out[i].timestamp_nanos) < DELETE_LOG_MINIMUM_WAIT_NANOS {
                         trap(&format!("cm_icp_transfer_out block_height: {} is too new to delete. must be at least {} days in the past to delete.", delete_cm_icp_transfer_out_id, DELETE_LOG_MINIMUM_WAIT_NANOS/NANOS_IN_A_SECOND/SECONDS_IN_A_DAY));
                     }
-                    cb_data.user_data.cm_icp_transfers_out.remove(i);
+                    cb_data.user_data.cm_calls_out.cm_icp_transfers_out.remove(i);
                 },
                 Err(_) => {
                     trap(&format!("cm_icp_transfer_out block_height: {} not found.", delete_cm_icp_transfer_out_id))
@@ -2366,11 +2427,11 @@ pub fn metrics() -> UserUCMetrics {
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
             download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u128,
             download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u128,
-            cm_cycles_positions_len: cb_data.user_data.cm_cycles_positions.len() as u128,
-            cm_icp_positions_len: cb_data.user_data.cm_icp_positions.len() as u128,
-            cm_cycles_positions_purchases_len: cb_data.user_data.cm_cycles_positions_purchases.len() as u128,
-            cm_icp_positions_purchases_len: cb_data.user_data.cm_icp_positions_purchases.len() as u128,
-            cm_icp_transfers_out_len: cb_data.user_data.cm_icp_transfers_out.len() as u128,
+            cm_cycles_positions_len: cb_data.user_data.cm_calls_out.cm_cycles_positions.len() as u128,
+            cm_icp_positions_len: cb_data.user_data.cm_calls_out.cm_icp_positions.len() as u128,
+            cm_cycles_positions_purchases_len: cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.len() as u128,
+            cm_icp_positions_purchases_len: cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.len() as u128,
+            cm_icp_transfers_out_len: cb_data.user_data.cm_calls_out.cm_icp_transfers_out.len() as u128,
             download_cm_cycles_positions_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE as u128,
             download_cm_icp_positions_chunk_size: USER_DOWNLOAD_CM_ICP_POSITIONS_CHUNK_SIZE as u128,
             download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
