@@ -1,5 +1,6 @@
 use std::{
-    cell::{RefCell,Cell}
+    cell::{RefCell,Cell},
+    collections::HashSet
 };
 use cts_lib::{
     self,
@@ -18,6 +19,7 @@ use cts_lib::{
                 RejectionCode,
                 reject,
                 reply,
+                reply_raw,
                 CallResult,
                 arg_data,
                 arg_data_raw_size,
@@ -86,6 +88,7 @@ use cts_lib::{
             CMVoidCyclesPositionPositorMessageQuest,
             CMVoidIcpPositionPositorMessageQuest,
         },
+        icrc1
     },
     consts::{
         KiB,
@@ -281,7 +284,8 @@ struct UserData {
     cycles_transfers_in: Vec<CyclesTransferIn>,
     cycles_transfers_out: Vec<CyclesTransferOut>,
     cm_calls_out: CMCallsOut, 
-    cm_message_logs: CMMessageLogs
+    cm_message_logs: CMMessageLogs,
+    known_icrc1_ledgers: HashSet<Principal>
 }
 
 impl UserData {
@@ -291,7 +295,8 @@ impl UserData {
             cycles_transfers_in: Vec::new(),
             cycles_transfers_out: Vec::new(),
             cm_calls_out: CMCallsOut::new(),
-            cm_message_logs: CMMessageLogs::new()
+            cm_message_logs: CMMessageLogs::new(),
+            known_icrc1_ledgers: HashSet::new()
         }
     }
 }
@@ -501,7 +506,8 @@ fn re_store_cb_data_candid_bytes(cb_data_candid_bytes: Vec<u8>) {
     let cb_data: CBData = match decode_one::<CBData>(&cb_data_candid_bytes) {
         Ok(cb_data) => cb_data,
         Err(_) => {
-            //trap("error decode of the CBData");
+            trap("error decode of the CBData");
+            /*
             let old_cb_data: OldCBData = decode_one::<OldCBData>(&cb_data_candid_bytes).unwrap();
             let cb_data: CBData = CBData{
                 user_canister_creation_timestamp_nanos: old_cb_data.user_canister_creation_timestamp_nanos,
@@ -529,6 +535,7 @@ fn re_store_cb_data_candid_bytes(cb_data_candid_bytes: Vec<u8>) {
                 cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
             };
             cb_data
+            */
        }
     };
 
@@ -1098,7 +1105,56 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
 
 
 
+// --------------------------
+// icrc1-tokens methods
 
+#[derive(CandidType, Deserialize)]
+pub struct ICRC1TransferQuest {
+    to : icrc1::Account,
+    amount : u128,
+    fee : Option<u128>,
+    memo : Option<Vec<u8>>,
+}
+
+
+#[update(manual_reply = true)]
+pub async fn transfer_icrc1(icrc1_ledger: Principal, icrc1_transfer_arg_raw: Vec<u8>) {//-> CallResult<Vec<u8>> {
+    if caller() != user_id() { trap("Caller must be the user"); }
+    
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.known_icrc1_ledgers.contains(&icrc1_ledger) == false }) {
+        reject("Unknown ledger. Put this ledger into the known-ledgers list.");
+        return;
+    }
+    
+    let call_result: CallResult<Vec<u8>> = call_raw128(
+        icrc1_ledger,
+        "icrc1_transfer",
+        &icrc1_transfer_arg_raw,//&encode_one(&icrc1_transfer_arg).unwrap(),
+        0
+    ).await;
+    
+    reply::<(CallResult<Vec<u8>>,)>((call_result,));
+}
+
+#[update]
+pub fn put_known_icrc1_ledger(icrc1_ledger_id: Principal) {
+    if caller() != user_id() { trap("Caller must be the user"); }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.known_icrc1_ledgers.insert(icrc1_ledger_id);
+    });
+
+}
+
+#[query(manual_reply = true)]
+pub fn see_known_icrc1_ledgers() {//-> HashSet<Principal>
+    if caller() != user_id() { trap("Caller must be the user"); }
+
+    with(&CB_DATA, |cb_data| {
+        reply::<(&HashSet<Principal>,)>((&cb_data.user_data.known_icrc1_ledgers,));
+    });
+
+}
 
 // ---------------------------------------------------
 // cycles-market methods
