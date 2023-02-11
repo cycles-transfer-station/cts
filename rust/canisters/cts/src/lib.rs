@@ -239,35 +239,6 @@ impl CTSData {
     }
 }
 
-/*
-#[derive(CandidType, Deserialize)]
-pub struct OldCTSData {
-    controllers: Vec<Principal>,
-    cycles_market_id: Principal,
-    cycles_market_cmcaller: Principal,
-    cycles_bank_canister_code: CanisterCode,
-    cbs_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
-    frontcode_files: HashMap<String, OldFile>,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
-    cbs_maps: Vec<Principal>,
-    create_new_cbs_map_lock: bool,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
-    canisters_for_the_use: HashSet<Principal>,
-    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
-    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
-    users_transfer_icp: HashMap<Principal, TransferIcpData>
-
-}
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct OldFile {
-    pub content_type: String,
-    pub content_encoding: String,
-    pub content: Vec<u8>
-}
-*/
  
 
 pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 5_000_000_000_000;
