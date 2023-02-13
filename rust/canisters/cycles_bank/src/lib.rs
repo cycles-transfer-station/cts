@@ -307,11 +307,7 @@ struct OldUserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
     cycles_transfers_out: Vec<CyclesTransferOut>,
-    cm_cycles_positions: Vec<CMCyclesPosition>,
-    cm_icp_positions: Vec<CMIcpPosition>,
-    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
-    cm_icp_positions_purchases: Vec<CMIcpPositionPurchase>,    
-    cm_icp_transfers_out: Vec<CMIcpTransferOut>,
+    cm_calls_out: CMCallsOut, 
     cm_message_logs: CMMessageLogs
 }
 
@@ -459,26 +455,6 @@ fn canister_init(user_canister_init: CyclesBankInit) {
 
 
 
-/*
-
-#[derive(CandidType, Deserialize)]
-struct OldCBData {
-    
-}
-
-
-#[derive(CandidType, Deserialize, Clone)]
-struct OldUserData {
-    
-}
-
-*/
-
-
-
-
-
-
 fn create_cb_data_candid_bytes() -> Vec<u8> {
     with_mut(&CB_DATA, |cb_data| { 
         cb_data.user_data.cycles_transfers_in.shrink_to_fit();
@@ -506,8 +482,8 @@ fn re_store_cb_data_candid_bytes(cb_data_candid_bytes: Vec<u8>) {
     let cb_data: CBData = match decode_one::<CBData>(&cb_data_candid_bytes) {
         Ok(cb_data) => cb_data,
         Err(_) => {
-            trap("error decode of the CBData");
-            /*
+            //trap("error decode of the CBData");
+            
             let old_cb_data: OldCBData = decode_one::<OldCBData>(&cb_data_candid_bytes).unwrap();
             let cb_data: CBData = CBData{
                 user_canister_creation_timestamp_nanos: old_cb_data.user_canister_creation_timestamp_nanos,
@@ -523,19 +499,14 @@ fn re_store_cb_data_candid_bytes(cb_data_candid_bytes: Vec<u8>) {
                     cycles_balance: old_cb_data.user_data.cycles_balance,
                     cycles_transfers_in: old_cb_data.user_data.cycles_transfers_in,
                     cycles_transfers_out: old_cb_data.user_data.cycles_transfers_out,
-                    cm_calls_out: CMCallsOut{
-                        cm_cycles_positions: old_cb_data.user_data.cm_cycles_positions,
-                        cm_icp_positions: old_cb_data.user_data.cm_icp_positions,
-                        cm_cycles_positions_purchases: old_cb_data.user_data.cm_cycles_positions_purchases,
-                        cm_icp_positions_purchases: old_cb_data.user_data.cm_icp_positions_purchases,    
-                        cm_icp_transfers_out: old_cb_data.user_data.cm_icp_transfers_out,
-                    }, 
-                    cm_message_logs: old_cb_data.user_data.cm_message_logs
+                    cm_calls_out: old_cb_data.user_data.cm_calls_out, 
+                    cm_message_logs: old_cb_data.user_data.cm_message_logs,
+                    known_icrc1_ledgers: HashSet::new(),
                 },
                 cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
             };
             cb_data
-            */
+            
        }
     };
 
@@ -1121,10 +1092,12 @@ pub struct ICRC1TransferQuest {
 pub async fn transfer_icrc1(icrc1_ledger: Principal, icrc1_transfer_arg_raw: Vec<u8>) {//-> CallResult<Vec<u8>> {
     if caller() != user_id() { trap("Caller must be the user"); }
     
+    /*
     if with(&CB_DATA, |cb_data| { cb_data.user_data.known_icrc1_ledgers.contains(&icrc1_ledger) == false }) {
         reject("Unknown ledger. Put this ledger into the known-ledgers list.");
         return;
     }
+    */
     
     let call_result: CallResult<Vec<u8>> = call_raw128(
         icrc1_ledger,
@@ -2459,6 +2432,7 @@ pub struct UserUCMetrics {
     download_cm_message_icp_position_purchase_purchaser_logs_chunk_size: u128,
     download_cm_message_void_cycles_position_positor_logs_chunk_size: u128,
     download_cm_message_void_icp_position_positor_logs_chunk_size: u128,
+    known_icrc1_ledgers: HashSet<Principal>,
 }
 
 
@@ -2505,6 +2479,7 @@ pub fn metrics() -> UserUCMetrics {
             download_cm_message_icp_position_purchase_purchaser_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_ICP_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE as u128,
             download_cm_message_void_cycles_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
             download_cm_message_void_icp_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_ICP_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
+            known_icrc1_ledgers: cb_data.user_data.known_icrc1_ledgers.clone(),
         }
     })
 }
