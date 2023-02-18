@@ -24,13 +24,19 @@ const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 
 #[derive(CandidType, Deserialize, Clone)]
 pub struct File {
-    pub content_type: String,
-    pub content_encoding: String,
+    pub headers: Vec<(String, String)>,
     pub content_chunks: Vec<ByteBuf>
 }
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
 
+#[derive(CandidType, Deserialize, Clone)]
+pub struct OldFile {
+    pub content_type: String,
+    pub content_encoding: String,
+    pub content_chunks: Vec<ByteBuf>
+}
+pub type OldFiles = HashMap<String, OldFile>;
 
 
 
@@ -46,7 +52,7 @@ pub struct HttpRequest {
 #[derive(Clone, Debug, CandidType)]
 pub struct HttpResponse<'a> {
     pub status_code: u16,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(&'a str, &'a str)>,
     pub body: &'a ByteBuf,
     pub streaming_strategy: Option<StreamStrategy<'a>>,
 }
@@ -114,7 +120,7 @@ pub fn create_opt_stream_callback_token<'a>(file_name: &'a str, file: &'a File, 
     if file.content_chunks.len() > chunk_i + 1 {
         Some(StreamCallbackToken{
             key: file_name,
-            content_encoding: &file.content_encoding,
+            content_encoding: file.headers.iter().find(|header| { header.0.eq_ignore_ascii_case("Content-Encoding") }).map(|header| { &*(header.1) }).unwrap_or(""),
             index: Nat::from(chunk_i + 1),
             sha256: {
                 with(&FRONTCODE_FILES_HASHES, |ffhs| {
