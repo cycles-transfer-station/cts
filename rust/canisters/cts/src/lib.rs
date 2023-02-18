@@ -192,8 +192,32 @@ use frontcode::{
     StreamStrategy,
     StreamCallbackTokenBackwards,
     StreamCallbackHttpResponse,
+    OldFile,
+    OldFiles
 };
 
+
+
+#[derive(CandidType, Deserialize)]
+pub struct OldCTSData {
+    controllers: Vec<Principal>,
+    cycles_market_id: Principal,
+    cycles_market_cmcaller: Principal,
+    cycles_bank_canister_code: CanisterCode,
+    cbs_map_canister_code: CanisterCode,
+    cycles_transferrer_canister_code: CanisterCode,
+    frontcode_files: OldFiles,
+    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
+    cbs_maps: Vec<Principal>,
+    create_new_cbs_map_lock: bool,
+    cycles_transferrer_canisters: Vec<Principal>,
+    cycles_transferrer_canisters_round_robin_counter: u32,
+    canisters_for_the_use: HashSet<Principal>,
+    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
+    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
+    users_transfer_icp: HashMap<Principal, TransferIcpData>
+
+}
 
 
 #[derive(CandidType, Deserialize)]
@@ -333,8 +357,8 @@ fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
     let mut cts_data: CTSData = match decode_one::<CTSData>(&cts_data_candid_bytes) {
         Ok(cts_data) => cts_data,
         Err(e) => {
-            trap(&format!("error decode of the CTSData: {:?}", e));
-            /*
+            //trap(&format!("error decode of the CTSData: {:?}", e));
+            
             let old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_data_candid_bytes).unwrap();
             let cts_data: CTSData = CTSData{
                 controllers: old_cts_data.controllers,
@@ -343,18 +367,21 @@ fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
                 cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
                 cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
                 cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
-                frontcode_files: old_cts_data.frontcode_files.into_iter()
-                    .map(|(filename, old_file): (String, OldFile)| {
+                frontcode_files: old_cts_data.frontcode_files
+                    .into_iter().map(|(k,f): (String, OldFile)| { 
                         (   
-                            filename, 
+                            k, 
                             File{
-                                content_type: old_file.content_type,
-                                content_encoding: old_file.content_encoding,
-                                content_chunks: vec![ByteBuf::from(old_file.content)]
+                                headers: vec![
+                                    ("Content-Encoding".to_string(), 
+                                    f.content_encoding),
+                                    ("Content-Type".to_string(), 
+                                    f.content_type)
+                                ],
+                                content_chunks: f.content_chunks
                             }
-                        )    
-                    })
-                    .collect::<HashMap<String, File>>(),
+                        ) 
+                    }).collect::<Files>(),
                 frontcode_files_hashes: old_cts_data.frontcode_files_hashes,
                 cbs_maps: old_cts_data.cbs_maps,
                 create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
@@ -366,7 +393,7 @@ fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
                 users_transfer_icp: old_cts_data.users_transfer_icp
             };
             cts_data
-            */
+            
         }
     };
 
@@ -2838,8 +2865,7 @@ pub fn controller_see_metrics() -> CTSMetrics {
 #[derive(CandidType, Deserialize)]
 pub struct UploadFile {
     pub filename: String,
-    pub content_type: String,
-    pub content_encoding: String,
+    pub headers: Vec<(String, String)>,
     pub first_chunk: ByteBuf,
     pub chunks: u32
 }
@@ -2868,8 +2894,7 @@ pub fn controller_upload_file(q: UploadFile) {
         cts_data.frontcode_files.insert(
             q.filename, 
             File{
-                content_type: q.content_type,
-                content_encoding: q.content_encoding,
+                headers: q.headers,
                 content_chunks: {
                     let mut v: Vec<ByteBuf> = vec![ByteBuf::new(); q.chunks.try_into().unwrap()];
                     v[0] = q.first_chunk;
@@ -2998,14 +3023,13 @@ pub fn http_request() {
                 );        
             }, 
             Some(file) => {
+                let (file_certificate_header_key, file_certificate_header_value): (String, String) = make_file_certificate_header(file_name); 
+                let mut headers: Vec<(&str, &str)> = vec![(&file_certificate_header_key, &file_certificate_header_value),];
+                headers.extend(file.headers.iter().map(|tuple: &(String, String)| { (&*tuple.0, &*tuple.1) }));
                 reply::<(HttpResponse,)>(
                     (HttpResponse {
                         status_code: 200,
-                        headers: vec![
-                            make_file_certificate_header(file_name), 
-                            ("content-type".to_string(), file.content_type.clone()),
-                            ("content-encoding".to_string(), file.content_encoding.clone())
-                        ],
+                        headers: headers, 
                         body: &file.content_chunks[0],
                         streaming_strategy: if let Some(stream_callback_token) = create_opt_stream_callback_token(file_name, file, 0) {
                             Some(StreamStrategy::Callback{ 
