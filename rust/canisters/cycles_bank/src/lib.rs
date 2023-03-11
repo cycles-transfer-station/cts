@@ -1077,15 +1077,7 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
 
 
 // --------------------------
-// icrc1-tokens methods
-
-#[derive(CandidType, Deserialize)]
-pub struct ICRC1TransferQuest {
-    to : icrc1::Account,
-    amount : u128,
-    fee : Option<u128>,
-    memo : Option<Vec<u8>>,
-}
+// bank-token-methods
 
 
 #[update(manual_reply = true)]

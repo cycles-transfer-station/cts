@@ -654,7 +654,7 @@ pub mod icrc1 {
     #[derive(CandidType, Deserialize)]
     pub struct Account {
         owner: Principal,
-        subaccount: [u8; 32]
+        subaccount: Option<[u8; 32]>
     }
     
     #[derive(CandidType, Deserialize)]
