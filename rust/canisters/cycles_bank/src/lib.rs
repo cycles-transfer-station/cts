@@ -584,8 +584,8 @@ fn user_id() -> Principal {
     with(&CB_DATA, |cb_data| { cb_data.user_id })
 }
 
-fn cycles_balance() -> Cycles {
-    with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance })
+fn cycles_balance(cb_data: &CBData) -> Cycles {
+    cb_data.user_data.cycles_balance
 }
 
 fn new_cycles_transfer_id(id_counter: &mut u128) -> u128 {
@@ -619,55 +619,55 @@ fn next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
 }
     
 // compute the size of a CyclesTransferIn and of a CyclesTransferOut, check the length of both vectors, and compute the current storage usage. 
-fn calculate_current_storage_usage() -> u128 {
+fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
     (
         localkey::cell::get(&MEMORY_SIZE_AT_THE_START) 
         + 
-        with(&CB_DATA, |cb_data| { 
-            cb_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<CyclesTransferIn>() + 32/*for the cycles-transfer-memo-heap-size*/ )
-            + 
-            cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
-            +
-            cb_data.user_data.cm_calls_out.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
-            +
-            cb_data.user_data.cm_calls_out.cm_icp_positions.len() * std::mem::size_of::<CMIcpPosition>()
-            +
-            cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
-            +
-            cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
-            +
-            cb_data.user_data.cm_calls_out.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
-            +
-            cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
-            +
-            cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePurchaserLog>()
-            +
-            cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePositorLog>()
-            +
-            cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePurchaserLog>()
-            +
-            cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidCyclesPositionPositorLog>()
-            +
-            cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidIcpPositionPositorLog>()
-        })
+        cb_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<CyclesTransferIn>() + 32/*for the cycles-transfer-memo-heap-size*/ )
+        + 
+        cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
+        +
+        cb_data.user_data.cm_calls_out.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
+        +
+        cb_data.user_data.cm_calls_out.cm_icp_positions.len() * std::mem::size_of::<CMIcpPosition>()
+        +
+        cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
+        +
+        cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.len() * std::mem::size_of::<CMIcpPositionPurchase>()
+        +
+        cb_data.user_data.cm_calls_out.cm_icp_transfers_out.len() * std::mem::size_of::<CMIcpTransferOut>()
+        +
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
+        +
+        cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePurchaserLog>()
+        +
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePositorLog>()
+        +
+        cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageIcpPositionPurchasePurchaserLog>()
+        +
+        cb_data.user_data.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidCyclesPositionPositorLog>()
+        +
+        cb_data.user_data.cm_message_logs.cm_message_void_icp_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidIcpPositionPositorLog>()
+        +
+        cb_data.user_data.known_icrc1_ledgers.len() * std::mem::size_of::<Principal>()
     ) as u128
 }
 
-fn calculate_free_storage() -> u128 {
-    ( with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) * MiB as u128 ).saturating_sub(calculate_current_storage_usage())
+fn calculate_free_storage(cb_data: &CBData) -> u128 {
+    ( cb_data.storage_size_mib * MiB as u128 ).saturating_sub(calculate_current_storage_usage(cb_data))
 }
 
 
-fn ctsfuel_balance() -> CTSFuel {
+fn ctsfuel_balance(cb_data: &CBData) -> CTSFuel {
     canister_balance128()
-    .saturating_sub(cycles_balance())
+    .saturating_sub(cb_data.user_data.cycles_balance)
     .saturating_sub(USER_CANISTER_BACKUP_CYCLES)
     .saturating_sub(
-        with(&CB_DATA, |cb_data| { 
+        (
             cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
             cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(cb_data.storage_size_mib) * MiB as u128 // canister-memory-allocation in the mib
-        })
+        )
         *
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
         /
@@ -711,7 +711,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
 
     maintenance_check();
 
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         if caller() == cts_id() {
             with_mut(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_accept128(msg_cycles_available128())); });
             reply::<()>(());
@@ -721,7 +721,7 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
         return;
     }
 
-    if calculate_free_storage() < std::mem::size_of::<CyclesTransferIn>() as u128 + 32 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CyclesTransferIn>() as u128 + 32 {
         if caller() == cts_id() {
             with_mut(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_accept128(msg_cycles_available128())); });
             reply::<()>(());
@@ -777,7 +777,7 @@ pub fn download_cycles_transfers_in() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }    
@@ -797,7 +797,7 @@ pub fn download_cycles_transfers_in_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }    
@@ -815,7 +815,7 @@ pub fn delete_cycles_transfers_in(delete_cycles_transfers_in_ids: Vec<u128>) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -874,11 +874,11 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
     
     maintenance_check();
     
-    if ctsfuel_balance() < 15_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 15_000_000_000 {
         return Err(UserTransferCyclesError::CTSFuelTooLow);
     }
     
-    if calculate_free_storage() < std::mem::size_of::<CyclesTransferOut>() as u128 + 32 + 40 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CyclesTransferOut>() as u128 + 32 + 40 {
         return Err(UserTransferCyclesError::MemoryIsFull);
     }
     
@@ -886,8 +886,8 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
     }
     
-    if q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE > cycles_balance() {
-        return Err(UserTransferCyclesError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_transferrer_transfer_cycles_fee: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE });
+    if q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE > with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) {
+        return Err(UserTransferCyclesError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_transferrer_transfer_cycles_fee: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE });
     }
     
     // check memo size
@@ -1010,7 +1010,7 @@ pub fn download_cycles_transfers_out() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1029,7 +1029,7 @@ pub fn download_cycles_transfers_out_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1048,7 +1048,7 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1182,16 +1182,16 @@ pub async fn cm_create_cycles_position(q: cycles_market::CreateCyclesPositionQue
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMCreateCyclesPositionError::CTSFuelTooLow);
     }
     
-    if calculate_free_storage() < std::mem::size_of::<CMCyclesPosition>() as u128 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMCyclesPosition>() as u128 {
         return Err(UserCMCreateCyclesPositionError::MemoryIsFull);
     }
    
-    if cycles_balance() < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
 
     let mut call_future = call_raw128(   // <(&cycles_market::CreateCyclesPositionQuest,), (cycles_market::CreateCyclesPositionResult,)>
@@ -1271,16 +1271,16 @@ pub async fn cm_create_icp_position(q: cycles_market::CreateIcpPositionQuest) ->
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMCreateIcpPositionError::CTSFuelTooLow);
     }
     
-    if calculate_free_storage() < std::mem::size_of::<CMIcpPosition>() as u128 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMIcpPosition>() as u128 {
         return Err(UserCMCreateIcpPositionError::MemoryIsFull);
     }
    
-    if cycles_balance() < CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateIcpPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_CREATE_POSITION_FEE {
+        return Err(UserCMCreateIcpPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
     }
     
     let mut call_future = call_raw128(  // <(&cycles_market::CreateIcpPositionQuest,), (cycles_market::CreateIcpPositionResult,)>
@@ -1366,16 +1366,16 @@ pub async fn cm_purchase_cycles_position(q: UserCMPurchaseCyclesPositionQuest) -
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMPurchaseCyclesPositionError::CTSFuelTooLow);
     }
     
-    if calculate_free_storage() < std::mem::size_of::<CMCyclesPositionPurchase>() as u128 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMCyclesPositionPurchase>() as u128 {
         return Err(UserCMPurchaseCyclesPositionError::MemoryIsFull);
     }
     
-    if cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE {
-        return Err(UserCMPurchaseCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_PURCHASE_POSITION_FEE {
+        return Err(UserCMPurchaseCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
     
     let mut call_future = call_raw128(  // <(&cycles_market::PurchaseCyclesPositionQuest,), (cycles_market::PurchaseCyclesPositionResult,)>
@@ -1461,18 +1461,18 @@ pub async fn cm_purchase_icp_position(q: UserCMPurchaseIcpPositionQuest) -> Resu
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMPurchaseIcpPositionError::CTSFuelTooLow);
     }
     
-    if calculate_free_storage() < std::mem::size_of::<CMIcpPositionPurchase>() as u128 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMIcpPositionPurchase>() as u128 {
         return Err(UserCMPurchaseIcpPositionError::MemoryIsFull);
     }
     
     let purchase_icp_position_cycles_payment: Cycles = icptokens_to_cycles(q.cycles_market_purchase_icp_position_quest.icp, q.icp_position_xdr_permyriad_per_icp_rate);
     
-    if cycles_balance() < CYCLES_MARKET_PURCHASE_POSITION_FEE + purchase_icp_position_cycles_payment {
-        return Err(UserCMPurchaseIcpPositionError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_PURCHASE_POSITION_FEE + purchase_icp_position_cycles_payment {
+        return Err(UserCMPurchaseIcpPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
     }
     
     let mut call_future = call_raw128( // <(&cycles_market::PurchaseIcpPositionQuest,), (cycles_market::PurchaseIcpPositionResult,)>
@@ -1548,7 +1548,7 @@ pub async fn cm_void_position(q: cycles_market::VoidPositionQuest) -> Result<(),
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMVoidPositionError::CTSFuelTooLow);
     }
     
@@ -1591,16 +1591,16 @@ pub async fn cm_transfer_icp_balance(q: cycles_market::TransferIcpBalanceQuest) 
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 30_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
         return Err(UserCMTransferIcpBalanceError::CTSFuelTooLow);
     }
 
-    if calculate_free_storage() < std::mem::size_of::<CMIcpTransferOut>() as u128 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMIcpTransferOut>() as u128 {
         return Err(UserCMTransferIcpBalanceError::MemoryIsFull);
     }
 
-    if cycles_balance() < CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE {
-        return Err(UserCMTransferIcpBalanceError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE {
+        return Err(UserCMTransferIcpBalanceError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_transfer_icp_balance_fee: CYCLES_MARKET_TRANSFER_ICP_BALANCE_FEE });
     }
     
     let mut call_future = call_raw128(   // <(&cycles_market::TransferIcpBalanceQuest,), (cycles_market::TransferIcpBalanceResult,)>
@@ -1795,7 +1795,7 @@ pub fn download_cm_cycles_positions_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1813,7 +1813,7 @@ pub fn download_cm_icp_positions_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1831,7 +1831,7 @@ pub fn download_cm_cycles_positions_purchases_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1851,7 +1851,7 @@ pub fn download_cm_icp_positions_purchases_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1870,7 +1870,7 @@ pub fn download_cm_icp_transfers_out_rchunks(q: DownloadRChunkQuest) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1892,7 +1892,7 @@ pub fn download_cm_cycles_positions() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1912,7 +1912,7 @@ pub fn download_cm_icp_positions() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1932,7 +1932,7 @@ pub fn download_cm_cycles_positions_purchases() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1953,7 +1953,7 @@ pub fn download_cm_icp_positions_purchases() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1973,7 +1973,7 @@ pub fn download_cm_icp_transfers_out() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -1996,7 +1996,7 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs_rchunks(q: Down
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2015,7 +2015,7 @@ pub fn download_cm_message_cycles_position_purchase_purchaser_logs_rchunks(q: Do
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2034,7 +2034,7 @@ pub fn download_cm_message_icp_position_purchase_positor_logs_rchunks(q: Downloa
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2054,7 +2054,7 @@ pub fn download_cm_message_icp_position_purchase_purchaser_logs_rchunks(q: Downl
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2072,7 +2072,7 @@ pub fn download_cm_message_void_cycles_position_positor_logs_rchunks(q: Download
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2092,7 +2092,7 @@ pub fn download_cm_message_void_icp_position_positor_logs_rchunks(q: DownloadRCh
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2116,7 +2116,7 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2136,7 +2136,7 @@ pub fn download_cm_message_cycles_position_purchase_purchaser_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2156,7 +2156,7 @@ pub fn download_cm_message_icp_position_purchase_positor_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2177,7 +2177,7 @@ pub fn download_cm_message_icp_position_purchase_purchaser_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2196,7 +2196,7 @@ pub fn download_cm_message_void_cycles_position_positor_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2217,7 +2217,7 @@ pub fn download_cm_message_void_icp_position_positor_logs() {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2241,7 +2241,7 @@ pub fn delete_cm_cycles_positions(delete_cm_cycles_positions_ids: Vec<u128>) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2277,7 +2277,7 @@ pub fn delete_cm_icp_positions(delete_cm_icp_positions_ids: Vec<u128>) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2314,7 +2314,7 @@ pub fn delete_cm_cycles_positions_purchases(delete_cm_cycles_positions_purchases
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2351,7 +2351,7 @@ pub fn delete_cm_icp_positions_purchases(delete_cm_icp_positions_purchases_ids: 
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2386,7 +2386,7 @@ pub fn delete_cm_icp_transfers_out(delete_cm_icp_transfers_out_ids: Vec<u128>) {
         trap("Caller must be the user for this method.");
     }
     
-    if ctsfuel_balance() < 10_000_000_000 {
+    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
         reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
         return;
     }
@@ -2474,13 +2474,13 @@ pub fn metrics() -> UserUCMetrics {
     with(&CB_DATA, |cb_data| {
         UserUCMetrics{
             cycles_balance: cb_data.user_data.cycles_balance,
-            ctsfuel_balance: ctsfuel_balance(),
+            ctsfuel_balance: ctsfuel_balance(cb_data),
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,
             cycles_transferrer_canisters: cb_data.cycles_transferrer_canisters.clone(),
             user_id: cb_data.user_id,
             user_canister_creation_timestamp_nanos: cb_data.user_canister_creation_timestamp_nanos,
-            storage_usage: calculate_current_storage_usage(),
+            storage_usage: calculate_current_storage_usage(cb_data),
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
@@ -2540,8 +2540,8 @@ pub fn cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<
         return Err(UserCyclesBalanceForTheCTSFuelError::MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: MINIMUM_CYCLES_FOR_THE_CTSFUEL });
     }
     
-    if cycles_balance() < cycles_for_the_ctsfuel {
-        return Err(UserCyclesBalanceForTheCTSFuelError::CyclesBalanceTooLow{ cycles_balance: cycles_balance() });        
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < cycles_for_the_ctsfuel {
+        return Err(UserCyclesBalanceForTheCTSFuelError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) });        
     } 
     
     with_mut(&CB_DATA, |cb_data| {
@@ -2584,8 +2584,8 @@ pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lif
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
     };
     
-    if lengthen_cost_cycles > cycles_balance() {
-        return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), lengthen_cost_cycles });
+    if lengthen_cost_cycles > with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) {
+        return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), lengthen_cost_cycles });
     }
     
     with_mut(&CB_DATA, |cb_data| {    
@@ -2652,8 +2652,8 @@ pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), Us
         * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
     };
     
-    if cycles_balance() < new_storage_size_mib_cost_cycles {
-        return Err(UserChangeStorageSizeMibError::CyclesBalanceTooLow{ cycles_balance: cycles_balance(), new_storage_size_mib_cost_cycles });
+    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < new_storage_size_mib_cost_cycles {
+        return Err(UserChangeStorageSizeMibError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), new_storage_size_mib_cost_cycles });
     }
 
     // take the cycles before the .await and if error after here, refund the cycles
@@ -2821,7 +2821,7 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
         CTSUCMetrics{
             canister_cycles_balance: canister_balance128(),
             cycles_balance: cb_data.user_data.cycles_balance,
-            ctsfuel_balance: ctsfuel_balance(),
+            ctsfuel_balance: ctsfuel_balance(cb_data),
             wasm_memory_size_bytes: ( core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES ) as u128,
             stable_memory_size_bytes: stable64_size() * WASM_PAGE_SIZE_BYTES as u64,
             storage_size_mib: cb_data.storage_size_mib,
@@ -2833,8 +2833,8 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
             memory_size_at_the_start: localkey::cell::get(&MEMORY_SIZE_AT_THE_START) as u128,
-            storage_usage: calculate_current_storage_usage(),
-            free_storage: calculate_free_storage()
+            storage_usage: calculate_current_storage_usage(cb_data),
+            free_storage: calculate_free_storage(cb_data)
         }
     })
 }
