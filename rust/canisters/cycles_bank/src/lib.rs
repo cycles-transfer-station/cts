@@ -1129,6 +1129,30 @@ pub fn see_known_icrc1_ledgers() {//-> HashSet<Principal>
 
 }
 
+
+// because the first icp account ids are not possible to use with the icrc1_transfer function.
+#[update(manual_reply = true)]
+pub async fn transfer_icp(transfer_arg_raw: Vec<u8>) {
+    if caller() != user_id() { trap("Caller must be the user"); }
+    
+    let s: CallResult<Vec<u8>> = call_raw128(
+        MAINNET_LEDGER_CANISTER_ID,
+        "transfer",
+        &transfer_arg_raw,
+        0
+    ).await;
+    
+    reply::<(CallResult<Vec<u8>>,)>((s,));
+
+}
+
+
+
+
+
+
+
+
 // ---------------------------------------------------
 // cycles-market methods
 
