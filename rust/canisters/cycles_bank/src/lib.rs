@@ -1111,6 +1111,19 @@ pub fn put_known_icrc1_ledger(icrc1_ledger_id: Principal) {
 
 }
 
+#[update]
+pub fn remove_known_icrc1_ledger(icrc1_ledger_id: Principal) {
+    if caller() != user_id() { trap("Caller must be the user"); }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        let was_there: bool = cb_data.user_data.known_icrc1_ledgers.remove(&icrc1_ledger_id);
+        if was_there == false {
+            trap(&format!("known_icrc1_ledgers does not contain the principal: {}", icrc1_ledger_id));
+        }
+    });
+}
+
+
 #[query(manual_reply = true)]
 pub fn see_known_icrc1_ledgers() {//-> HashSet<Principal>
     if caller() != user_id() { trap("Caller must be the user"); }
