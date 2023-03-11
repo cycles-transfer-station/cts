@@ -648,5 +648,37 @@ pub mod safe_caller {
 
 
 
+pub mod icrc1 {
+    use super::{Principal, CallResult, CandidType, Deserialize};
 
+    #[derive(CandidType, Deserialize)]
+    pub struct Account {
+        owner: Principal,
+        subaccount: Option<[u8; 32]>
+    }
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct TransferArgs {
+        from_subaccount : Option<[u8; 32]>,
+        to : Account,
+        amount : u128,
+        fee : Option<u128>,
+        memo : Option<Vec<u8>>,
+        created_at_time : Option<u64>,
+    }
+
+    #[derive(CandidType, Deserialize)]
+    pub enum TransferError {
+        BadFee{ expected_fee : u128 },
+        BadBurn{ min_burn_amount : u128 },
+        InsufficientFunds{ balance : u128 },
+        TooOld,
+        CreatedInFuture{ ledger_time: u64 },
+        Duplicate{ duplicate_of : u128 },
+        TemporarilyUnavailable,
+        GenericError{ error_code : u128, message : String },
+    }
+
+
+}
 
