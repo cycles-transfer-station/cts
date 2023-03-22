@@ -17,7 +17,8 @@ use crate::{
         XdrPerMyriadPerIcp,
         DownloadRChunkQuest,
         RChunkData,
-    }
+    },
+    icrc::{Tokens},
 };
 use std::thread::LocalKey;
 use std::cell::Cell;
@@ -117,17 +118,18 @@ fn thirty_bytes_principal() {
 
 
 
-
-
-
-
-
-
 pub fn principal_icp_subaccount(principal: &Principal) -> IcpIdSub {
     let mut sub_bytes = [0u8; 32];
     sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(principal));
     IcpIdSub(sub_bytes)
 }
+
+pub fn principal_token_subaccount(principal: &Principal) -> [u8; 32] {
+    let mut sub_bytes = [0u8; 32];
+    sub_bytes[..30].copy_from_slice(&principal_as_thirty_bytes(principal));
+    sub_bytes
+}
+
 
 pub fn user_icp_id(cts_id: &Principal, user_id: &Principal) -> IcpId {
     IcpId::new(cts_id, &principal_icp_subaccount(user_id))
@@ -159,7 +161,6 @@ pub fn cycles_to_icptokens(cycles: u128, xdr_permyriad_per_icp: XdrPerMyriadPerI
 
 
 
-
 #[test]
 fn test_icp_cycles_transform() {
     let xdr_permyriad_per_icp: u64 = 456271237;
@@ -178,6 +179,39 @@ fn test_icp_cycles_transform() {
     
 
 }
+
+
+
+
+
+
+
+// 100-million-cycles for a token*10^8
+// == cycles per token
+
+
+pub fn tokens_transform_cycles(tokens: Tokens, cycles_per_token: Cycles) -> Cycles {
+    tokens * cycles_per_token
+}
+
+pub fn cycles_transform_tokens(cycles: Cycles, cycles_per_token: Cycles) -> Tokens {
+    cycles / cycles_per_token
+}
+
+
+
+
+#[test]
+fn test_tokens_cycles_transform() {
+    let cycles_per_token: Cycles = 500_000_000;
+    let tokens: Tokens = Tokens::from(10);
+    assert_eq!(tokens.clone(), cycles_transform_tokens(tokens_transform_cycles(tokens.clone(), cycles_per_token), cycles_per_token));
+
+    println!("{:?}", tokens_transform_cycles(tokens.clone(), cycles_per_token));
+    println!("{:?}", cycles_transform_tokens(tokens_transform_cycles(tokens.clone(), cycles_per_token), cycles_per_token));
+
+}
+
 
 
 

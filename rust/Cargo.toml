@@ -7,7 +7,9 @@ members = [
     "canisters/cbs_map",
     "canisters/cycles_bank",
     "canisters/cycles_transferrer",
+    "canisters/cycles_market/cm_main",
     "canisters/cycles_market/cycles_market",
+    "canisters/cycles_market/icrc1_token_trade_contract",
     "canisters/cycles_market/cm_caller",
 ]
 
