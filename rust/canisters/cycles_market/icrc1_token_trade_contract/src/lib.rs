@@ -96,8 +96,14 @@ use cts_lib::{
         post_upgrade
     }
 };
+
+use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
+
 use serde_bytes::ByteBuf;
 
+
+
+// ---------------
 
 
 type VoidCyclesPositionId = PositionId;
@@ -174,6 +180,7 @@ impl CyclesPayoutData {
 
 trait CyclesPayoutDataTrait {
     fn cycles_payout_data(&self) -> CyclesPayoutData;
+    fn cycles_payout_lock(&self) -> bool;
     fn cycles_payout_payee(&self) -> Principal;
     fn cycles_payout_payee_method(&self) -> &'static str;
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError>;
@@ -203,6 +210,7 @@ impl TokenPayoutData {
     }
     fn is_complete(&self) -> bool {
         if self.cm_message_callback_complete.is_some() {
+            // maybe add a check for if there is an error sending the cm_message and re-try on some cases 
             return true;
         }
         false
@@ -227,6 +235,7 @@ impl TokenPayoutData {
 
 trait TokenPayoutDataTrait {
     fn token_payout_data(&self) -> TokenPayoutData;
+    fn token_payout_lock(&self) -> bool;
     fn token_payout_payee(&self) -> Principal;
     fn token_payout_payor(&self) -> Principal;
     fn token_payout_payee_method(&self) -> &'static str;
@@ -256,6 +265,7 @@ struct CyclesPositionPurchase {
 }
 impl CyclesPayoutDataTrait for CyclesPositionPurchase {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
+    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
     fn cycles_payout_payee(&self) -> Principal { self.purchaser }
     fn cycles_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER }
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
@@ -276,6 +286,7 @@ impl CyclesPayoutDataTrait for CyclesPositionPurchase {
 }
 impl TokenPayoutDataTrait for CyclesPositionPurchase {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
+    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { self.cycles_position_positor }
     fn token_payout_payor(&self) -> Principal { self.purchaser }
     fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR }
@@ -322,6 +333,7 @@ impl CyclesPayoutDataTrait for TokenPositionPurchase {
     fn cycles_payout_data(&self) -> CyclesPayoutData {
         self.cycles_payout_data.clone()
     }
+    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
     fn cycles_payout_payee(&self) -> Principal {
         self.token_position_positor
     }
@@ -352,6 +364,7 @@ impl CyclesPayoutDataTrait for TokenPositionPurchase {
 }
 impl TokenPayoutDataTrait for TokenPositionPurchase {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
+    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { self.purchaser }
     fn token_payout_payor(&self) -> Principal { self.token_position_positor }
     fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER }
@@ -394,6 +407,7 @@ impl CyclesPayoutDataTrait for VoidCyclesPosition {
     fn cycles_payout_data(&self) -> CyclesPayoutData {
         self.cycles_payout_data.clone()
     }
+    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
     fn cycles_payout_payee(&self) -> Principal {
         self.positor
     }
@@ -431,6 +445,7 @@ struct VoidTokenPosition {
 }
 impl TokenPayoutDataTrait for VoidTokenPosition {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
+    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { self.positor }
     fn token_payout_payor(&self) -> Principal { self.positor }
     fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_VOID_TOKEN_POSITION_POSITOR }
@@ -449,6 +464,30 @@ impl TokenPayoutDataTrait for VoidTokenPosition {
     fn cm_call_id(&self) -> u128 { self.position_id }  
     fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_VOID_TOKEN_POSITION_POSITOR } 
 }
+
+
+
+trait CanSendIntoTheStableMemoryForTheLongTermStorage {
+    fn can_send_into_the_stable_memory_for_the_long_term_storage(&self) -> bool;
+}
+
+// implement for the CyclesPositionPurchase & TokenPositionPurchase structs.
+impl<T: CyclesPayoutDataTrait + TokenPayoutDataTrait> CanSendIntoTheStableMemoryForTheLongTermStorage for T {
+    fn can_send_into_the_stable_memory_for_the_long_term_storage(&self) -> bool {
+        self.cycles_payout_lock() == false 
+        && self.token_payout_lock() == false 
+        && self.cycles_payout_data().is_complete() == true
+        && self.token_payout_data().is_complete() == true
+    }
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -592,6 +631,29 @@ const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
+const STABLE_MEMORY_ID_HEAP_SERIALIZATION: MemoryId = MemoryId::new(0);
+const STABLE_MEMORY_ID_: MemoryId = MemoryId::new(1);
+// think bout the position matches, maker is the position-positor, taker is the position-purchaser,
+// perhaps log each trade as a whole, 
+
+/*
+
+struct TradeLog {
+    positor: Principal, //maker
+    purchaser: Principal, //taker
+    tokens: Tokens,
+    cycles: Cycles,
+    rate: CyclesPerTokenRate,
+    //but then how do we know whether the position is a cycles-position or a token-position & whether this is a cycles-position-purchase or a token-position-purchase?
+    position_kind: PositionKind
+}
+
+enum PositionKind {
+    Cycles,
+    Token
+}
+
+*/
 
 
 
@@ -1262,8 +1324,9 @@ async fn _do_payouts() {
 
 async fn do_payouts() {
     
-    if with(&CM_DATA, |cm_data| { 
+    if with(&CM_DATA, |cm_data| {
         cm_data.void_cycles_positions.len() == 0
+        && cm_data.void_token_positions.len() == 0
         && cm_data.cycles_positions_purchases.len() == 0
         && cm_data.token_positions_purchases.len() == 0
     }) { return; }
@@ -1273,7 +1336,19 @@ async fn do_payouts() {
         "do_payouts_public_method",
         (),
     ).await {
-        Ok(()) => {},
+        Ok(()) => {
+            // move complete purchases into the stable-memory
+            with_mut(&CM_DATA, |cm_data| {
+                let move_cycles_positions_purchases_into_stable_memory: Vec<CyclesPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.cycles_positions_purchases);
+                if move_cycles_positions_purchases_into_stable_memory.len() != 0 {
+                
+                }
+                let move_token_positions_purchases_into_stable_memory: Vec<TokenPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.token_positions_purchases);
+                if move_token_positions_purchases_into_stable_memory.len() != 0 {
+                
+                }
+            });
+        },
         Err(call_error) => {
             with_mut(&CM_DATA, |cm_data| {
                 cm_data.do_payouts_errors.push((call_error.0 as u32, call_error.1));
@@ -1297,6 +1372,34 @@ pub async fn do_payouts_public_method() {
 
 
 
+
+fn collect_items_for_the_move_into_the_stable_memory<T: CanSendIntoTheStableMemoryForTheLongTermStorage>(v: &mut Vec<T>) -> Vec<T> {
+    let mut move_items_into_stable_memory: Vec<T> = Vec::new();
+    let mut i = 0;
+    while i < v.len() {
+        if v[i].can_send_into_the_stable_memory_for_the_long_term_storage() == true {
+            move_items_into_stable_memory.push(v.remove(i));
+        } else {
+            //i += 1;
+            break; // bc want to save into the stable-memory in the correct sequence.
+        }
+    }
+    move_items_into_stable_memory
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+// -------------------------------------------------------------
 
 
 #[update(manual_reply = true)]
@@ -1780,25 +1883,21 @@ pub async fn purchase_cycles_position(q: PurchaseCyclesPositionQuest) { // -> Re
 
     let cycles_position_purchase_id: PurchaseId = match with_mut(&CM_DATA, |cm_data| {
         if cm_data.cycles_positions_purchases.len() >= MAX_CYCLES_POSITIONS_PURCHASES {
-            let remove_cpp_id: PurchaseId = match cm_data.cycles_positions_purchases.iter().filter(
-                |cycles_position_purchase: &&CyclesPositionPurchase| {
+            let remove_cpp_cycles_positions_purchases_i: usize = match cm_data.cycles_positions_purchases.iter().enumerate().filter(
+                |(_i, cycles_position_purchase): &(usize, &CyclesPositionPurchase)| {
                     ( cycles_position_purchase.cycles_payout_data.is_complete() || ( cycles_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time_nanos().saturating_sub(cycles_position_purchase.cycles_payout_data.cmcaller_cycles_payout_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK ) ) && ( cycles_position_purchase.token_payout_data.is_complete() || ( cycles_position_purchase.token_payout_data.is_waiting_for_the_cmcaller_callback() && time_nanos().saturating_sub(cycles_position_purchase.token_payout_data.cm_message_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK ) ) 
                 }
             ).min_by_key(
-                |cycles_position_purchase: &&CyclesPositionPurchase| {
+                |(_i, cycles_position_purchase): &(usize, &CyclesPositionPurchase)| {
                     cycles_position_purchase.timestamp_nanos
                 }    
             ) {
                 None => {
                     return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy);    
                 },
-                Some(remove_cpp) => {
-                    remove_cpp.id
+                Some((i, _remove_cpp)) => {
+                    i
                 }
-            };
-            let remove_cpp_cycles_positions_purchases_i: usize = match cm_data.cycles_positions_purchases.binary_search_by_key(&remove_cpp_id, |cpp| { cpp.id }) {
-                Ok(i) => i,
-                Err(_) => /*will not happen*/return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy),
             };
             cm_data.cycles_positions_purchases.remove(remove_cpp_cycles_positions_purchases_i); 
         }
@@ -1913,25 +2012,21 @@ pub async fn purchase_token_position(q: PurchaseTokenPositionQuest) {
 
     let token_position_purchase_id: PurchaseId = match with_mut(&CM_DATA, |cm_data| {
         if cm_data.token_positions_purchases.len() >= MAX_TOKEN_POSITIONS_PURCHASES {
-            let remove_ipp_id: PurchaseId = match cm_data.token_positions_purchases.iter().filter(
-                |token_position_purchase: &&TokenPositionPurchase| {
+            let remove_ipp_token_positions_purchases_i: usize = match cm_data.token_positions_purchases.iter().enumerate().filter(
+                |(_i, token_position_purchase): &(usize, &TokenPositionPurchase)| {
                     ( token_position_purchase.cycles_payout_data.is_complete() || ( token_position_purchase.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() && time_nanos().saturating_sub(token_position_purchase.cycles_payout_data.cmcaller_cycles_payout_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK ) ) && ( token_position_purchase.token_payout_data.is_complete() || ( token_position_purchase.token_payout_data.is_waiting_for_the_cmcaller_callback() && time_nanos().saturating_sub(token_position_purchase.token_payout_data.cm_message_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK ) )
                 }
             ).min_by_key(
-                |token_position_purchase: &&TokenPositionPurchase| {
+                |(_i, token_position_purchase): &(usize, &TokenPositionPurchase)| {
                     token_position_purchase.timestamp_nanos
                 }    
             ) {
                 None => {
                     return Err(PurchaseTokenPositionError::CyclesMarketIsBusy);    
                 },
-                Some(remove_ipp) => {
-                    remove_ipp.id
+                Some((i, _remove_ipp)) => {
+                    i
                 }
-            };
-            let remove_ipp_token_positions_purchases_i: usize = match cm_data.token_positions_purchases.binary_search_by_key(&remove_ipp_id, |ipp| { ipp.id }) {
-                Ok(i) => i,
-                Err(_) => /*will not happen*/return Err(PurchaseTokenPositionError::CyclesMarketIsBusy),
             };
             cm_data.token_positions_purchases.remove(remove_ipp_token_positions_purchases_i);            
         }
