@@ -4,7 +4,6 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashSet}
 };
-use futures::task::Poll;
 use cts_lib::{
     tools::{
         localkey::{
@@ -69,12 +68,14 @@ use cts_lib::{
                 arg_data,
             },
             canister_balance128,
+            /*
             stable::{
                 stable64_write,
                 stable64_size,
                 stable64_read,
                 stable64_grow
            }
+           */
            
         },
         export::{
@@ -97,374 +98,26 @@ use cts_lib::{
     }
 };
 
-use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
+use ic_stable_structures::{
+    Memory,
+    DefaultMemoryImpl, 
+    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
+    
+};
 
 use serde_bytes::ByteBuf;
+
+// -------
+
+mod types;
+use types::*;
+
+mod payouts;
+use payouts::_do_payouts;
 
 
 
 // ---------------
-
-
-type VoidCyclesPositionId = PositionId;
-type VoidTokenPositionId = PositionId;
-type CyclesPositionPurchaseId = PurchaseId;
-type TokenPositionPurchaseId = PurchaseId;
-
-
-#[derive(CandidType, Deserialize)]
-struct CyclesPosition {
-    id: PositionId,   
-    positor: Principal,
-    cycles: Cycles,
-    minimum_purchase: Cycles,
-    cycles_per_token_rate: CyclesPerToken,
-    timestamp_nanos: u128,
-}
-
-#[derive(CandidType, Deserialize)]
-struct TokenPosition {
-    id: PositionId,   
-    positor: Principal,
-    tokens: Tokens,
-    minimum_purchase: Tokens,
-    cycles_per_token_rate: CyclesPerToken,
-    timestamp_nanos: u128,
-}
-
-
-
-
-#[derive(Clone, CandidType, Deserialize)]
-struct CyclesPayoutData {
-    cmcaller_cycles_payout_call_success_timestamp_nanos: Option<u128>,
-    cmcaller_cycles_payout_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
-    management_canister_posit_cycles_call_success: bool // this is use for when the payout-cycles-transfer-refund != 0, call the management_canister-deposit_cycles(payout-cycles-transfer-refund)
-}
-impl CyclesPayoutData {
-    fn new() -> Self {
-        Self {
-            cmcaller_cycles_payout_call_success_timestamp_nanos: None,
-            cmcaller_cycles_payout_callback_complete: None,
-            management_canister_posit_cycles_call_success: false
-        }
-    }
-    fn is_waiting_for_the_cycles_transferrer_transfer_cycles_callback(&self) -> bool {
-        self.cmcaller_cycles_payout_call_success_timestamp_nanos.is_some() 
-        && self.cmcaller_cycles_payout_callback_complete.is_none()
-    }
-    fn is_complete(&self) -> bool {
-        if let Some((cycles_transfer_refund, _)) = self.cmcaller_cycles_payout_callback_complete {
-            if cycles_transfer_refund == 0 || self.management_canister_posit_cycles_call_success == true {
-                return true;
-            }
-        }
-        false
-    }
-    fn handle_do_cycles_payout_result(&mut self, do_cycles_payout_result: DoCyclesPayoutResult) {
-        if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
-            match do_cycles_payout_sponse {
-                DoCyclesPayoutSponse::CMCallerCyclesPayoutCallSuccessTimestampNanos(opt_timestamp_ns) => {
-                    self.cmcaller_cycles_payout_call_success_timestamp_nanos = opt_timestamp_ns;                            
-                },
-                DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success) => {
-                    self.management_canister_posit_cycles_call_success = management_canister_posit_cycles_call_success;
-                },
-                DoCyclesPayoutSponse::NothingToDo => {}
-            }
-        }
-    }
-
-}
-
-
-trait CyclesPayoutDataTrait {
-    fn cycles_payout_data(&self) -> CyclesPayoutData;
-    fn cycles_payout_lock(&self) -> bool;
-    fn cycles_payout_payee(&self) -> Principal;
-    fn cycles_payout_payee_method(&self) -> &'static str;
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError>;
-    fn cycles(&self) -> Cycles;
-    fn cm_call_id(&self) -> u128;
-    fn cm_call_callback_method(&self) -> &'static str;
-}
-
-
-
-#[derive(Clone, CandidType, Deserialize)]
-struct TokenTransferBlockHeightAndTimestampNanos {
-    block_height: Option<BlockId>, // if None that means there was no transfer in this token-payout. it is an unlock of the funds within the same-token-id.
-    timestamp_nanos: u128,
-}
-#[derive(Clone, CandidType, Deserialize)]
-struct TokenPayoutData {
-    token_transfer: Option<TokenTransferBlockHeightAndTimestampNanos>,
-    cm_message_call_success_timestamp_nanos: Option<u128>,
-    cm_message_callback_complete: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-positor-message-call-error
-}
-impl TokenPayoutData {
-    // no new fn because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferBlockHeightAndTimestampNanos)
-    fn is_waiting_for_the_cmcaller_callback(&self) -> bool {
-        self.cm_message_call_success_timestamp_nanos.is_some() 
-        && self.cm_message_callback_complete.is_none()
-    }
-    fn is_complete(&self) -> bool {
-        if self.cm_message_callback_complete.is_some() {
-            // maybe add a check for if there is an error sending the cm_message and re-try on some cases 
-            return true;
-        }
-        false
-    }
-    fn handle_do_token_payout_sponse(&mut self, do_token_payout_sponse: DoTokenPayoutSponse) {
-        match do_token_payout_sponse {
-            DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType) => {
-                
-            },
-            DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_transfer, _cm_message_error_type) => {
-                self.token_transfer = Some(token_transfer);
-            },
-            DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageSuccess(token_transfer, cm_message_call_success_timestamp_nanos) => {
-                self.token_transfer = Some(token_transfer);
-                self.cm_message_call_success_timestamp_nanos = Some(cm_message_call_success_timestamp_nanos);
-            },
-            DoTokenPayoutSponse::NothingForTheDo => {},
-        }
-    }
-    
-}
-
-trait TokenPayoutDataTrait {
-    fn token_payout_data(&self) -> TokenPayoutData;
-    fn token_payout_lock(&self) -> bool;
-    fn token_payout_payee(&self) -> Principal;
-    fn token_payout_payor(&self) -> Principal;
-    fn token_payout_payee_method(&self) -> &'static str;
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError>; 
-    fn tokens(&self) -> Tokens;
-    fn token_transfer_memo(&self) -> Option<IcrcMemo>;
-    fn token_transfer_fee(&self) -> Tokens;
-    fn cm_call_id(&self) -> u128;
-    fn cm_call_callback_method(&self) -> &'static str; 
-}
-
-
-
-#[derive(Clone, CandidType, Deserialize)]
-struct CyclesPositionPurchase {
-    cycles_position_id: PositionId,
-    cycles_position_positor: Principal,
-    cycles_position_cycles_per_token_rate: CyclesPerToken,
-    id: PurchaseId,
-    purchaser: Principal,
-    cycles: Cycles,
-    timestamp_nanos: u128,
-    cycles_payout_lock: bool,
-    token_payout_lock: bool,
-    cycles_payout_data: CyclesPayoutData,
-    token_payout_data: TokenPayoutData
-}
-impl CyclesPayoutDataTrait for CyclesPositionPurchase {
-    fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal { self.purchaser }
-    fn cycles_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER }
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMCyclesPositionPurchasePurchaserMessageQuest {
-                cycles_position_id: self.cycles_position_id,
-                cycles_position_positor: self.cycles_position_positor,
-                cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
-                purchase_id: self.id,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                token_payment: cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate),
-            }
-        ) 
-    }
-    fn cycles(&self) -> Cycles { self.cycles }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER }
-}
-impl TokenPayoutDataTrait for CyclesPositionPurchase {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.cycles_position_positor }
-    fn token_payout_payor(&self) -> Principal { self.purchaser }
-    fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR }
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMCyclesPositionPurchasePositorMessageQuest {
-                cycles_position_id: self.cycles_position_id,
-                purchase_id: self.id,
-                purchaser: self.purchaser,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                cycles_purchase: self.cycles,
-                cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
-                token_payment: self.tokens(),
-                token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
-                token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
-            }    
-        )
-    } 
-    fn tokens(&self) -> Tokens { cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate) }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(*CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))) }
-    fn token_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR } 
-}
-
-
-
-
-#[derive(Clone, CandidType, Deserialize)]
-struct TokenPositionPurchase {
-    token_position_id: PositionId,
-    token_position_positor: Principal,
-    token_position_cycles_per_token_rate: CyclesPerToken,
-    id: PurchaseId,
-    purchaser: Principal,
-    tokens: Tokens,
-    timestamp_nanos: u128,
-    cycles_payout_lock: bool,
-    token_payout_lock: bool,
-    cycles_payout_data: CyclesPayoutData,
-    token_payout_data: TokenPayoutData // even though the purchaser knows bout the purchase, it is better to send the purchaser a message when the token_transfer is complete with the block height 
-}
-impl CyclesPayoutDataTrait for TokenPositionPurchase {
-    fn cycles_payout_data(&self) -> CyclesPayoutData {
-        self.cycles_payout_data.clone()
-    }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal {
-        self.token_position_positor
-    }
-    fn cycles_payout_payee_method(&self) -> &'static str {
-        CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_POSITOR
-    }
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMTokenPositionPurchasePositorMessageQuest{
-                token_position_id: self.token_position_id,
-                token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
-                purchase_id: self.id,
-                purchaser: self.purchaser,
-                token_purchase: self.tokens,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-            }
-        )
-    }
-    fn cycles(&self) -> Cycles {
-        tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate)
-    }
-    fn cm_call_id(&self) -> u128 {
-        self.id
-    }
-    fn cm_call_callback_method(&self) -> &'static str {
-        CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_POSITOR
-    }
-}
-impl TokenPayoutDataTrait for TokenPositionPurchase {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.purchaser }
-    fn token_payout_payor(&self) -> Principal { self.token_position_positor }
-    fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER }
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMTokenPositionPurchasePurchaserMessageQuest {
-                token_position_id: self.token_position_id,
-                purchase_id: self.id, 
-                positor: self.token_position_positor,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                token_purchase: self.tokens(),
-                token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
-                cycles_payment: tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate),
-                token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
-                token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
-            }
-        )
-    }
-    fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(*TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))) }
-    fn token_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE)/*change for a fee set at the time of the lock of the funds and plus the fee willing to be paid by the purchaser*/ }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_PURCHASER }
-
-}
-
-
-
-#[derive(Clone, CandidType, Deserialize)]
-struct VoidCyclesPosition {
-    position_id: PositionId,
-    positor: Principal,
-    cycles: Cycles,
-    cycles_payout_lock: bool,  // lock for the payout
-    cycles_payout_data: CyclesPayoutData,
-    timestamp_nanos: u128
-}
-
-impl CyclesPayoutDataTrait for VoidCyclesPosition {
-    fn cycles_payout_data(&self) -> CyclesPayoutData {
-        self.cycles_payout_data.clone()
-    }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal {
-        self.positor
-    }
-    fn cycles_payout_payee_method(&self) -> &'static str {
-        CM_MESSAGE_METHOD_VOID_CYCLES_POSITION_POSITOR
-    } 
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMVoidCyclesPositionPositorMessageQuest{
-                position_id: self.position_id,
-                timestamp_nanos: self.timestamp_nanos,
-            }
-        )
-    }
-    fn cycles(&self) -> Cycles {
-        self.cycles
-    }
-    fn cm_call_id(&self) -> u128 {
-        self.position_id
-    }
-    fn cm_call_callback_method(&self) -> &'static str {
-        CMCALLER_CALLBACK_VOID_CYCLES_POSITION_POSITOR
-    }
-}
-
-
-#[derive(CandidType, Deserialize, Clone)]
-struct VoidTokenPosition {
-    position_id: PositionId,
-    tokens: Tokens,
-    positor: Principal,
-    token_payout_lock: bool,  // lock for the payout
-    token_payout_data: TokenPayoutData,
-    timestamp_nanos: u128
-}
-impl TokenPayoutDataTrait for VoidTokenPosition {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.positor }
-    fn token_payout_payor(&self) -> Principal { self.positor }
-    fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_VOID_TOKEN_POSITION_POSITOR }
-    fn token_payout_payee_method_quest_bytes(&self, _token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMVoidTokenPositionPositorMessageQuest {
-                position_id: self.position_id,
-                void_tokens: self.tokens(),
-                timestamp_nanos: self.timestamp_nanos
-            }
-        )
-    }
-    fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
-    fn token_transfer_fee(&self) -> Tokens { trap("void-token-position does not call the ledger."); }
-    fn cm_call_id(&self) -> u128 { self.position_id }  
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_VOID_TOKEN_POSITION_POSITOR } 
-}
-
 
 
 trait CanSendIntoTheStableMemoryForTheLongTermStorage {
@@ -659,7 +312,11 @@ enum PositionKind {
 
 
 thread_local! {
+    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+    
     static CM_DATA: RefCell<CMData> = RefCell::new(CMData::new()); 
+    
     
     // not save through the upgrades
     static TOKEN_LEDGER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
@@ -748,33 +405,47 @@ fn load_state_snapshot_data() {
 // -------------------------------------------------------------
 
 
+
+fn get_heap_serialization_memory() -> VirtualMemory<DefaultMemoryImpl> {
+    with(&MEMORY_MANAGER, |memory_manager| { memory_manager.get(STABLE_MEMORY_ID_HEAP_SERIALIZATION) })
+}
+
+
 #[pre_upgrade]
 fn pre_upgrade() {
     
     create_state_snapshot();
     
-    let current_stable_size_wasm_pages: u64 = stable64_size();
+    let heap_serialization_memory: VirtualMemory<DefaultMemoryImpl> = get_heap_serialization_memory();
+    
+    let current_stable_size_wasm_pages: u64 = heap_serialization_memory.size();
     let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
 
     with(&STATE_SNAPSHOT, |state_snapshot| {
         let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the state_snapshot*/ + state_snapshot.len() as u64; 
         if current_stable_size_bytes < want_stable_memory_size_bytes {
-            stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
+            let grow_result: i64 = heap_serialization_memory.grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1);
+            if grow_result == -1 {
+                trap("failed to grow heap_serialization_memory");
+            }
         }
-        stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((state_snapshot.len() as u64).to_be_bytes()));
-        stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
+        heap_serialization_memory.write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((state_snapshot.len() as u64).to_be_bytes()));
+        heap_serialization_memory.write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
     });
 }
 
 #[post_upgrade]
 fn post_upgrade() {
+    
+    let heap_serialization_memory: VirtualMemory<DefaultMemoryImpl> = get_heap_serialization_memory();
+
     let mut state_snapshot_len_u64_be_bytes: [u8; 8] = [0; 8];
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut state_snapshot_len_u64_be_bytes);
+    heap_serialization_memory.read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut state_snapshot_len_u64_be_bytes);
     let state_snapshot_len_u64: u64 = u64::from_be_bytes(state_snapshot_len_u64_be_bytes); 
     
     with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = vec![0; state_snapshot_len_u64 as usize]; 
-        stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
+        *state_snapshot = vec![0; state_snapshot_len_u64.try_into().unwrap()]; 
+        heap_serialization_memory.read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
     });
     
     load_state_snapshot_data();
@@ -820,9 +491,6 @@ fn canister_inspect_message() {
 
 // -------------------------------------------------------------
 
-fn cts_id() -> Principal {
-    with(&CM_DATA, |cm_data| { cm_data.cts_id })
-}
 
 fn new_id(cm_data_id_counter: &mut u128) -> u128 {
     let id: u128 = cm_data_id_counter.clone();
@@ -878,448 +546,26 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
 
 
 
-pub enum DoCyclesPayoutError {
-    CandidError(CandidError),
-    CMCallCallPerformError(u32),
-    CMCallCallError((u32, String)),
-    CMCallError(CMCallError),
-    ManagementCanisterCallPerformError(u32),
-    ManagementCanisterCallError((u32, String)),
-}
-impl From<CandidError> for DoCyclesPayoutError {
-    fn from(ce: CandidError) -> DoCyclesPayoutError {
-        DoCyclesPayoutError::CandidError(ce)  
-    }
-}
 
-// use this enum in the stead of returning the CyclesPayoutData cause we want to make sure the cycles_payout_data is not re-place by this output cause the cycles_transferrer-transfer_cycles_callback can come back before this output is put back on the purchase/vcp. so we use this struct so that only the fields get re-place. 
-pub enum DoCyclesPayoutSponse {
-    CMCallerCyclesPayoutCallSuccessTimestampNanos(Option<u128>),
-    ManagementCanisterPositCyclesCallSuccess(bool),
-    NothingToDo
-}
-
-type DoCyclesPayoutResult = Result<DoCyclesPayoutSponse, DoCyclesPayoutError>;
-
-async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutResult {
-    
-    if q.cycles_payout_data().cmcaller_cycles_payout_call_success_timestamp_nanos.is_none() {
-        let cmcaller_cycles_payout_call_success_timestamp_nanos: Option<u128>;
-        
-        let mut call_future = call_raw128(
-            with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
-            "cm_call",
-            &encode_one(
-                CMCallQuest{
-                    cm_call_id: q.cm_call_id(),
-                    for_the_canister: q.cycles_payout_payee(),
-                    method: q.cycles_payout_payee_method().to_string(),
-                    put_bytes: q.cycles_payout_payee_method_quest_bytes()?,
-                    cycles: q.cycles(),
-                    cm_callback_method: q.cm_call_callback_method().to_string(),
-                }
-            )?,
-            q.cycles() + 10_000_000_000 // for the cm_caller
-        );
-                
-        if let Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-            //cmcaller_cycles_payout_call_success_timestamp_nanos = None;
-            return Err(DoCyclesPayoutError::CMCallCallPerformError(call_result_with_an_error.unwrap_err().0 as u32));
-        } 
-        match call_future.await {
-            Ok(sponse_bytes) => match decode_one::<CMCallResult>(&sponse_bytes) {
-                Ok(cm_call_result) => match cm_call_result {
-                    Ok(()) => {
-                        cmcaller_cycles_payout_call_success_timestamp_nanos = Some(time_nanos());
-                    },
-                    Err(cm_call_error) => {
-                        //cmcaller_cycles_payout_call_success_timestamp_nanos = None;
-                        return Err(DoCyclesPayoutError::CMCallError(cm_call_error))
-                    }
-                },
-                Err(_candid_decode_error) => {
-                    if msg_cycles_refunded128() >= q.cycles() {
-                        cmcaller_cycles_payout_call_success_timestamp_nanos = None;
-                    } else {
-                        cmcaller_cycles_payout_call_success_timestamp_nanos = Some(time_nanos());
-                    }    
-                }
-            },
-            Err(cm_call_call_error) => {
-                //cmcaller_cycles_payout_call_success_timestamp_nanos = None;
-                return Err(DoCyclesPayoutError::CMCallCallError((cm_call_call_error.0 as u32, cm_call_call_error.1)));
-            }
-        }
-        return Ok(DoCyclesPayoutSponse::CMCallerCyclesPayoutCallSuccessTimestampNanos(cmcaller_cycles_payout_call_success_timestamp_nanos));
-    }
-    
-    if let Some((cycles_transfer_refund, _)) = q.cycles_payout_data().cmcaller_cycles_payout_callback_complete {
-        if cycles_transfer_refund != 0 
-        && q.cycles_payout_data().management_canister_posit_cycles_call_success == false {
-            let management_canister_posit_cycles_call_success: bool;
-            match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
-                MANAGEMENT_CANISTER_ID,
-                "deposit_cycles",
-                (management_canister::CanisterIdRecord{
-                    canister_id: q.cycles_payout_payee()
-                },),
-                cycles_transfer_refund
-            ).await {
-                Ok(_) => {
-                    management_canister_posit_cycles_call_success = true;
-                },
-                Err(_) => {
-                    management_canister_posit_cycles_call_success = false;
-                }
-            }
-            return Ok(DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success));
-        }
-    }    
-    
-    return Ok(DoCyclesPayoutSponse::NothingToDo);
-}
+// ---------------
 
 
 
-enum TokenTransferErrorType {
-    TokenTransferError(TokenTransferError),
-    TokenTransferCallError((u32, String))
-}
 
-enum CMMessageErrorType {
-    CMCallQuestCandidEncodeError(CandidError),
-    CMCallQuestPutBytesCandidEncodeError(CandidError),
-    CMCallerCallError(CMCallError),
-    CMCallerCallSponseCandidDecodeError(CandidError),
-    CMCallerCallCallError((u32, String))
-}
-
-enum DoTokenPayoutSponse {
-    TokenTransferError(TokenTransferErrorType),
-    TokenTransferSuccessAndCMMessageError(TokenTransferBlockHeightAndTimestampNanos, CMMessageErrorType),
-    TokenTransferSuccessAndCMMessageSuccess(TokenTransferBlockHeightAndTimestampNanos, u128),
-    //CMMessageError(CMMessageErrorType),
-    //CMMessageSuccess(u128),
-    NothingForTheDo,
-}
-
-async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> DoTokenPayoutSponse {
-    
-    let token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos = match q.token_payout_data().token_transfer {
-        Some(token_transfer_data) => token_transfer_data,
-        None => {
-            let token_transfer_created_at_time: u64 = time_nanos_u64()-NANOS_IN_A_SECOND as u64;
-            match token_transfer(
-                TokenTransferArg{
-                    memo: q.token_transfer_memo(),
-                    amount: q.tokens().into(),
-                    fee: Some(q.token_transfer_fee().into()),
-                    from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
-                    to: IcrcId{owner: ic_cdk::api::id(), subaccount: Some(principal_token_subaccount(&q.token_payout_payee()))},
-                    created_at_time: Some(token_transfer_created_at_time)
-                }
-            ).await {
-                Ok(token_transfer_result) => match token_transfer_result {
-                    Ok(block_height) => {
-                        TokenTransferBlockHeightAndTimestampNanos{
-                            block_height: Some(block_height),
-                            timestamp_nanos: token_transfer_created_at_time as u128
-                        }
-                    },
-                    Err(token_transfer_error) => {
-                        return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferError(token_transfer_error));
-                    }
-                },
-                Err(token_transfer_call_error) => {
-                    return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferCallError(token_transfer_call_error));
-                }
-            }
-        }
-    };
-    
-    match q.token_payout_data().cm_message_call_success_timestamp_nanos {
-        Some(cm_message_call_success_timestamp_nanos) => return DoTokenPayoutSponse::NothingForTheDo,
-        None => {
-            let call_future = call_raw128(
-                with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
-                "cm_call",
-                &match encode_one(
-                    CMCallQuest{
-                        cm_call_id: q.cm_call_id(),
-                        for_the_canister: q.token_payout_payee(),
-                        method: q.token_payout_payee_method().to_string(),
-                        put_bytes: match q.token_payout_payee_method_quest_bytes(token_payout_data_token_transfer.clone()) {
-                            Ok(b) => b,
-                            Err(candid_error) => {
-                                return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallQuestPutBytesCandidEncodeError(candid_error));     
-                            }
-                        },
-                        cycles: 0,
-                        cm_callback_method: q.cm_call_callback_method().to_string(),
-                    }
-                ) {
-                    Ok(b) => b,
-                    Err(candid_error) => {
-                        return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallQuestCandidEncodeError(candid_error));
-                    }
-                },
-                0 + 10_000_000_000 // for the cm_caller
-            );
-            match call_future.await {
-                Ok(b) => match decode_one::<CMCallResult>(&b) {
-                    Ok(cm_call_sponse) => match cm_call_sponse {
-                        Ok(()) => {
-                            return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageSuccess(token_payout_data_token_transfer, time_nanos());
-                        },
-                        Err(cm_call_error) => {
-                            return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallError(cm_call_error));
-                        }
-                    },
-                    Err(candid_error) => {
-                        return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallSponseCandidDecodeError(candid_error));                    
-                    }
-                },
-                Err(call_error) => {
-                    return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallCallError((call_error.0 as u32, call_error.1)));                    
-                } 
-            }
+fn collect_items_for_the_move_into_the_stable_memory<T: CanSendIntoTheStableMemoryForTheLongTermStorage>(v: &mut Vec<T>) -> Vec<T> {
+    let mut move_items_into_stable_memory: Vec<T> = Vec::new();
+    let mut i = 0;
+    while i < v.len() {
+        if v[i].can_send_into_the_stable_memory_for_the_long_term_storage() == true {
+            move_items_into_stable_memory.push(v.remove(i));
+        } else {
+            //i += 1;
+            break; // bc want to save into the stable-memory in the correct sequence.
         }
     }
-    
+    move_items_into_stable_memory
 }
 
-
-
-async fn _do_payouts() {
-
-    let mut void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
-    let mut void_token_positions_token_payouts_chunk: Vec<(VoidTokenPositionId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
-    let mut cycles_positions_purchases_cycles_payouts_chunk: Vec<(CyclesPositionPurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
-    let mut cycles_positions_purchases_token_payouts_chunk: Vec<(CyclesPositionPurchaseId, _/*anonymous-future of the token_transfer-function*/)> = Vec::new();
-    let mut token_positions_purchases_cycles_payouts_chunk: Vec<(TokenPositionPurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
-    let mut token_positions_purchases_token_payouts_chunk: Vec<(TokenPositionPurchaseId, _/*anonymous-future of the token_transfer-function*/)> = Vec::new();
-
-    with_mut(&CM_DATA, |cm_data| {
-        let mut i: usize = 0;
-        while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
-            let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
-            if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
-                if time_nanos().saturating_sub(vcp.cycles_payout_data.cmcaller_cycles_payout_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK {
-                    std::mem::drop(vcp);
-                    cm_data.void_cycles_positions.remove(i);
-                    continue;
-                }
-                // skip
-            } else if vcp.cycles_payout_lock == true { 
-                // skip
-            } else {
-                vcp.cycles_payout_lock = true;
-                void_cycles_positions_cycles_payouts_chunk.push(
-                    (
-                        vcp.position_id,
-                        do_cycles_payout(vcp.clone())
-                    )
-                );
-            }
-            i += 1;
-        }
-        
-        let mut i: usize = 0;
-        while i < cm_data.void_token_positions.len() && void_token_positions_token_payouts_chunk.len() < DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE {
-            let vip: &mut VoidTokenPosition = &mut cm_data.void_token_positions[i];
-            if vip.token_payout_data.is_waiting_for_the_cmcaller_callback() {
-                if time_nanos().saturating_sub(vip.token_payout_data.cm_message_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK {
-                    std::mem::drop(vip);
-                    cm_data.void_token_positions.remove(i);
-                    continue;
-                }
-                // skip
-            } else if vip.token_payout_lock == true { 
-                // skip
-            } else {
-                vip.token_payout_lock = true;
-                void_token_positions_token_payouts_chunk.push(
-                    (
-                        vip.position_id,
-                        do_token_payout(vip.clone())
-                    )
-                );
-            }
-            i += 1;
-        }
-        
-        
-        let mut i: usize = 0;
-        while i < cm_data.cycles_positions_purchases.len() {
-            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[i];                    
-            if cpp.cycles_payout_data.is_complete() == false 
-            && cpp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() == false
-            && cpp.cycles_payout_lock == false
-            && cycles_positions_purchases_cycles_payouts_chunk.len() < DO_CYCLES_POSITIONS_PURCHASES_CYCLES_PAYOUTS_CHUNK_SIZE {
-                cpp.cycles_payout_lock = true;    
-                cycles_positions_purchases_cycles_payouts_chunk.push(
-                    (
-                        cpp.id,
-                        do_cycles_payout(cpp.clone())
-                    )
-                );
-            }
-            if cpp.token_payout_data.is_complete() == false
-            && cpp.token_payout_data.is_waiting_for_the_cmcaller_callback() == false
-            && cpp.token_payout_lock == false
-            && cycles_positions_purchases_token_payouts_chunk.len() < DO_CYCLES_POSITIONS_PURCHASES_TOKEN_PAYOUTS_CHUNK_SIZE {
-                cpp.token_payout_lock = true;
-                cycles_positions_purchases_token_payouts_chunk.push(
-                    (     
-                        cpp.id,
-                        do_token_payout(cpp.clone())                        
-                    )
-                );
-            }
-            i += 1;
-        }
-        
-        let mut i: usize = 0;
-        while i < cm_data.token_positions_purchases.len() {
-            let ipp: &mut TokenPositionPurchase = &mut cm_data.token_positions_purchases[i];                    
-            if ipp.cycles_payout_data.is_complete() == false 
-            && ipp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() == false
-            && ipp.cycles_payout_lock == false
-            && token_positions_purchases_cycles_payouts_chunk.len() < DO_TOKEN_POSITIONS_PURCHASES_CYCLES_PAYOUTS_CHUNK_SIZE {
-                ipp.cycles_payout_lock = true;
-                token_positions_purchases_cycles_payouts_chunk.push(
-                    (
-                        ipp.id,
-                        do_cycles_payout(ipp.clone())
-                    )
-                );
-            }
-            if ipp.token_payout_data.is_complete() == false
-            && ipp.token_payout_data.is_waiting_for_the_cmcaller_callback() == false
-            && ipp.token_payout_lock == false                                                        
-            && token_positions_purchases_token_payouts_chunk.len() < DO_TOKEN_POSITIONS_PURCHASES_TOKEN_PAYOUTS_CHUNK_SIZE {
-                ipp.token_payout_lock = true;
-                token_positions_purchases_token_payouts_chunk.push(
-                    (     
-                        ipp.id,
-                        do_token_payout(ipp.clone())
-                    )
-                );
-            }
-            i += 1;
-        }
-        
-    });
-
-    let (vcps_ids, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_cycles_payout-future*/>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
-    let (vips_ids, vips_do_token_payouts_futures): (Vec<VoidTokenPositionId>, Vec<_/*do_token_payout-future*/>) = void_token_positions_token_payouts_chunk.into_iter().unzip();
-    let (cpps_cycles_payouts_ids, cpps_do_cycles_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = cycles_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
-    let (cpps_token_payouts_ids, cpps_do_token_payouts_futures): (Vec<CyclesPositionPurchaseId>, Vec<_/*do_token_payout-future*/>) = cycles_positions_purchases_token_payouts_chunk.into_iter().unzip();
-    let (ipps_cycles_payouts_ids, ipps_do_cycles_payouts_futures): (Vec<TokenPositionPurchaseId>, Vec<_/*do_cycles_payout-future*/>) = token_positions_purchases_cycles_payouts_chunk.into_iter().unzip();
-    let (ipps_token_payouts_ids, ipps_do_token_payouts_futures): (Vec<TokenPositionPurchaseId>, Vec<_/*do_token_payout-future*/>) = token_positions_purchases_token_payouts_chunk.into_iter().unzip();
-    
-    let (
-        vcps_do_cycles_payouts_rs,
-        vips_do_token_payouts_rs,
-        cpps_do_cycles_payouts_rs,
-        cpps_do_token_payouts_rs,
-        ipps_do_cycles_payouts_rs,
-        ipps_do_token_payouts_rs
-    ): (
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-        Vec<DoTokenPayoutSponse>,
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-        Vec<DoTokenPayoutSponse>,
-        Vec<Result<DoCyclesPayoutSponse, DoCyclesPayoutError>>,
-        Vec<DoTokenPayoutSponse>,
-    ) = futures::join!(
-        futures::future::join_all(vcps_do_cycles_payouts_futures),
-        futures::future::join_all(vips_do_token_payouts_futures),
-        futures::future::join_all(cpps_do_cycles_payouts_futures),
-        futures::future::join_all(cpps_do_token_payouts_futures),
-        futures::future::join_all(ipps_do_cycles_payouts_futures),
-        futures::future::join_all(ipps_do_token_payouts_futures),
-    );
-
-    with_mut(&CM_DATA, |cm_data| {
-        for (vcp_id, do_cycles_payout_result) in vcps_ids.into_iter().zip(vcps_do_cycles_payouts_rs.into_iter()) {      
-            let vcp_void_cycles_positions_i: usize = {
-                match cm_data.void_cycles_positions.binary_search_by_key(&vcp_id, |vcp| { vcp.position_id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }  
-            };
-            let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[vcp_void_cycles_positions_i];
-            vcp.cycles_payout_lock = false;
-            vcp.cycles_payout_data.handle_do_cycles_payout_result(do_cycles_payout_result);
-            if vcp.cycles_payout_data.is_complete() {
-                std::mem::drop(vcp);
-                cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
-            }
-        }
-        for (vip_id, do_token_payout_sponse) in vips_ids.into_iter().zip(vips_do_token_payouts_rs.into_iter()) {      
-            let vip_void_token_positions_i: usize = {
-                match cm_data.void_token_positions.binary_search_by_key(&vip_id, |vip| { vip.position_id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }  
-            };
-            let vip: &mut VoidTokenPosition = &mut cm_data.void_token_positions[vip_void_token_positions_i];
-            vip.token_payout_lock = false;
-            vip.token_payout_data.handle_do_token_payout_sponse(do_token_payout_sponse);
-            if vip.token_payout_data.is_complete() {
-                std::mem::drop(vip);
-                cm_data.void_token_positions.remove(vip_void_token_positions_i);
-            }
-        }
-        for (cpp_id, do_cycles_payout_result) in cpps_cycles_payouts_ids.into_iter().zip(cpps_do_cycles_payouts_rs.into_iter()) {
-            let cpp_cycles_positions_purchases_i: usize = {
-                match cm_data.cycles_positions_purchases.binary_search_by_key(&cpp_id, |cpp| { cpp.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
-            };
-            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[cpp_cycles_positions_purchases_i];
-            cpp.cycles_payout_lock = false;
-            cpp.cycles_payout_data.handle_do_cycles_payout_result(do_cycles_payout_result);
-        }
-        for (cpp_id, do_token_payout_sponse) in cpps_token_payouts_ids.into_iter().zip(cpps_do_token_payouts_rs.into_iter()) {
-            let cpp_cycles_positions_purchases_i: usize = {
-                match cm_data.cycles_positions_purchases.binary_search_by_key(&cpp_id, |cpp| { cpp.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
-            };
-            let cpp: &mut CyclesPositionPurchase = &mut cm_data.cycles_positions_purchases[cpp_cycles_positions_purchases_i];
-            cpp.token_payout_lock = false;
-            cpp.token_payout_data.handle_do_token_payout_sponse(do_token_payout_sponse);
-        }
-        for (ipp_id, do_cycles_payout_result) in ipps_cycles_payouts_ids.into_iter().zip(ipps_do_cycles_payouts_rs.into_iter()) {
-            let ipp_token_positions_purchases_i: usize = {
-                match cm_data.token_positions_purchases.binary_search_by_key(&ipp_id, |ipp| { ipp.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
-            };
-            let ipp: &mut TokenPositionPurchase = &mut cm_data.token_positions_purchases[ipp_token_positions_purchases_i];
-            ipp.cycles_payout_lock = false;
-            ipp.cycles_payout_data.handle_do_cycles_payout_result(do_cycles_payout_result);
-        }
-        for (ipp_id, do_token_payout_sponse) in ipps_token_payouts_ids.into_iter().zip(ipps_do_token_payouts_rs.into_iter()) {
-            let ipp_token_positions_purchases_i: usize = {
-                match cm_data.token_positions_purchases.binary_search_by_key(&ipp_id, |ipp| { ipp.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
-            };
-            let ipp: &mut TokenPositionPurchase = &mut cm_data.token_positions_purchases[ipp_token_positions_purchases_i];
-            ipp.token_payout_lock = false;
-            ipp.token_payout_data.handle_do_token_payout_sponse(do_token_payout_sponse);
-        }
-        
-    });
-    
-}
 
 
 async fn do_payouts() {
@@ -1372,20 +618,6 @@ pub async fn do_payouts_public_method() {
 
 
 
-
-fn collect_items_for_the_move_into_the_stable_memory<T: CanSendIntoTheStableMemoryForTheLongTermStorage>(v: &mut Vec<T>) -> Vec<T> {
-    let mut move_items_into_stable_memory: Vec<T> = Vec::new();
-    let mut i = 0;
-    while i < v.len() {
-        if v[i].can_send_into_the_stable_memory_for_the_long_term_storage() == true {
-            move_items_into_stable_memory.push(v.remove(i));
-        } else {
-            //i += 1;
-            break; // bc want to save into the stable-memory in the correct sequence.
-        }
-    }
-    move_items_into_stable_memory
-}
 
 
 
@@ -2552,20 +1784,23 @@ pub async fn cm_message_void_token_position_positor_cmcaller_callback(q: CMCallb
 // -------------------------------------------------------------
 
 
+fn caller_is_cts_check() {
+    if caller() != with(&CM_DATA, |cm_data| { cm_data.cts_id }) {
+        trap("Caller must be the CTS for this method.");
+    }
+}
 
 #[update]
 pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
+    
     localkey::cell::set(&STOP_CALLS, stop_calls_flag);
 }
 
 #[query]
 pub fn cts_see_stop_calls_flag() -> bool {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
+    
     localkey::cell::get(&STOP_CALLS)
 }
 
@@ -2575,9 +1810,7 @@ pub fn cts_see_stop_calls_flag() -> bool {
 
 #[update]
 pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot*/ {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
     
     create_state_snapshot();
     
@@ -2592,9 +1825,8 @@ pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot*/ {
 
 #[export_name = "canister_query cts_download_state_snapshot"]
 pub fn cts_download_state_snapshot() {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
+    
     let chunk_size: usize = 1 * MiB as usize;
     with(&STATE_SNAPSHOT, |state_snapshot| {
         let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
@@ -2606,9 +1838,8 @@ pub fn cts_download_state_snapshot() {
 
 #[update]
 pub fn cts_clear_state_snapshot() {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
+    
     with_mut(&STATE_SNAPSHOT, |state_snapshot| {
         *state_snapshot = Vec::new();
     });    
@@ -2616,9 +1847,8 @@ pub fn cts_clear_state_snapshot() {
 
 #[update]
 pub fn cts_append_state_snapshot(mut append_bytes: Vec<u8>) {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
+    
     with_mut(&STATE_SNAPSHOT, |state_snapshot| {
         state_snapshot.append(&mut append_bytes);
     });
@@ -2626,9 +1856,7 @@ pub fn cts_append_state_snapshot(mut append_bytes: Vec<u8>) {
 
 #[update]
 pub fn cts_load_state_snapshot_data() {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
     
     load_state_snapshot_data();
 }
@@ -2641,22 +1869,18 @@ pub fn cts_load_state_snapshot_data() {
 
 #[query(manual_reply = true)]
 pub fn cts_see_payouts_errors(chunk_i: u32) {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
     
     with(&CM_DATA, |cm_data| {
         reply::<(Option<&[(u32, String)]>,)>((cm_data.do_payouts_errors.chunks(100).nth(chunk_i as usize),));
-    });    
+    });
 }
 
 
 
 #[update]
 pub fn cts_clear_payouts_errors() {
-    if caller() != cts_id() {
-        trap("Caller must be the CTS for this method.");
-    }
+    caller_is_cts_check();
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.do_payouts_errors = Vec::new();
