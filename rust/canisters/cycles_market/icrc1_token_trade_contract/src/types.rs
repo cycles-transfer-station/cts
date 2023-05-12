@@ -116,147 +116,158 @@ pub trait TokenPayoutDataTrait {
 
 
 
+// -----------------
+
+
+
 #[derive(Clone, CandidType, Deserialize)]
-pub struct CyclesPositionPurchase {
-    pub cycles_position_id: PositionId,
-    pub cycles_position_positor: Principal,
-    pub cycles_position_cycles_per_token_rate: CyclesPerToken,
+pub struct TradeLog {
+    pub position_id: PositionId,
     pub id: PurchaseId,
-    pub purchaser: Principal,
+    pub positor: Principal, //maker
+    pub purchaser: Principal, //taker
+    pub tokens: Tokens,
     pub cycles: Cycles,
+    pub rate: CyclesPerTokenRate,
+    //but then how do we know whether the position is a cycles-position or a token-position & whether this is a cycles-position-purchase or a token-position-purchase?
+    pub position_kind: PositionKind,
     pub timestamp_nanos: u128,
     pub cycles_payout_lock: bool,
     pub token_payout_lock: bool,
     pub cycles_payout_data: CyclesPayoutData,
     pub token_payout_data: TokenPayoutData
 }
-impl CyclesPayoutDataTrait for CyclesPositionPurchase {
+
+pub enum PositionKind {
+    Cycles,
+    Token
+}
+
+impl CyclesPayoutDataTrait for TradeLog {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
     fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal { self.purchaser }
-    fn cycles_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER }
+    fn cycles_payout_payee(&self) -> Principal { 
+        match self.position_kind { 
+            PositionKind::Cycles => self.purchaser,
+            PositionKind::Token => self.positor,
+        }
+    }
+    fn cycles_payout_payee_method(&self) -> &'static str { 
+        match self.position_kind { 
+            PositionKind::Cycles => CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER,
+            PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_POSITOR,
+        } 
+    }
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMCyclesPositionPurchasePurchaserMessageQuest {
-                cycles_position_id: self.cycles_position_id,
-                cycles_position_positor: self.cycles_position_positor,
-                cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
-                purchase_id: self.id,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                token_payment: cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate),
+        match self.position_kind { 
+            PositionKind::Cycles => {
+                encode_one(
+                    CMCyclesPositionPurchasePurchaserMessageQuest {
+                        cycles_position_id: self.cycles_position_id,
+                        cycles_position_positor: self.cycles_position_positor,
+                        cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
+                        purchase_id: self.id,
+                        purchase_timestamp_nanos: self.timestamp_nanos,
+                        token_payment: cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate),
+                    }
+                ) 
             }
-        ) 
+            PositionKind::Token => {
+                encode_one(
+                    CMTokenPositionPurchasePositorMessageQuest{
+                        token_position_id: self.token_position_id,
+                        token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
+                        purchase_id: self.id,
+                        purchaser: self.purchaser,
+                        token_purchase: self.tokens,
+                        purchase_timestamp_nanos: self.timestamp_nanos,
+                    }
+                )
+            }
+        }
     }
     fn cycles(&self) -> Cycles { self.cycles }
     fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER }
+    fn cm_call_callback_method(&self) -> &'static str { 
+        match self.position_kind { 
+            PositionKind::Cycles => CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER,
+            PositionKind::Token => CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_POSITOR
+        }
+    }
 }
-impl TokenPayoutDataTrait for CyclesPositionPurchase {
+impl TokenPayoutDataTrait for TradeLog {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.cycles_position_positor }
-    fn token_payout_payor(&self) -> Principal { self.purchaser }
-    fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR }
+    fn token_payout_payee(&self) -> Principal { 
+        match self.position_kind { 
+            PositionKind::Cycles => self.positor,
+            PositionKind::Token => self.purchaser,
+        }
+    }
+    fn token_payout_payor(&self) -> Principal { 
+        match self.position_kind { 
+            PositionKind::Cycles => self.purchaser,
+            PositionKind::Token => self.positor,
+        }
+    }
+    fn token_payout_payee_method(&self) -> &'static str { 
+        match self.position_kind { 
+            PositionKind::Cycles => CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR,
+            PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER,
+    }
     fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMCyclesPositionPurchasePositorMessageQuest {
-                cycles_position_id: self.cycles_position_id,
-                purchase_id: self.id,
-                purchaser: self.purchaser,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                cycles_purchase: self.cycles,
-                cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
-                token_payment: self.tokens(),
-                token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
-                token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
-            }    
-        )
+        match self.position_kind { 
+            PositionKind::Cycles => {
+                encode_one(
+                    CMCyclesPositionPurchasePositorMessageQuest {
+                        cycles_position_id: self.cycles_position_id,
+                        purchase_id: self.id,
+                        purchaser: self.purchaser,
+                        purchase_timestamp_nanos: self.timestamp_nanos,
+                        cycles_purchase: self.cycles,
+                        cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
+                        token_payment: self.tokens(),
+                        token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
+                        token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
+                    }    
+                )
+            }
+            PositionKind::Token => {
+                encode_one(
+                    CMTokenPositionPurchasePurchaserMessageQuest {
+                        token_position_id: self.token_position_id,
+                        purchase_id: self.id, 
+                        positor: self.token_position_positor,
+                        purchase_timestamp_nanos: self.timestamp_nanos,
+                        token_purchase: self.tokens(),
+                        token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
+                        cycles_payment: tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate),
+                        token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
+                        token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
+                    }
+                )
+            }
+        }
     } 
-    fn tokens(&self) -> Tokens { cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate) }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(*CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))) }
+    fn tokens(&self) -> Tokens { self.tokens }
+    fn token_transfer_memo(&self) -> Option<IcrcMemo> { 
+        match self.position_kind { 
+            PositionKind::Cycles => Some(IcrcMemo(ByteBuf::from(*CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))),
+            PositionKind::Token => Some(IcrcMemo(ByteBuf::from(*TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO)))
+        }
+    }
     fn token_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
     fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR } 
+    fn cm_call_callback_method(&self) -> &'static str { 
+        match self.position_kind { 
+            PositionKind::Cycles => CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR, 
+            PositionKind::Token => CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_PURCHASER
+        }
+    } 
 }
 
 
-
-
-#[derive(Clone, CandidType, Deserialize)]
-pub struct TokenPositionPurchase {
-    pub token_position_id: PositionId,
-    pub token_position_positor: Principal,
-    pub token_position_cycles_per_token_rate: CyclesPerToken,
-    pub id: PurchaseId,
-    pub purchaser: Principal,
-    pub tokens: Tokens,
-    pub timestamp_nanos: u128,
-    pub cycles_payout_lock: bool,
-    pub token_payout_lock: bool,
-    pub cycles_payout_data: CyclesPayoutData,
-    pub token_payout_data: TokenPayoutData // even though the purchaser knows bout the purchase, it is better to send the purchaser a message when the token_transfer is complete with the block height 
-}
-impl CyclesPayoutDataTrait for TokenPositionPurchase {
-    fn cycles_payout_data(&self) -> CyclesPayoutData {
-        self.cycles_payout_data.clone()
-    }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal {
-        self.token_position_positor
-    }
-    fn cycles_payout_payee_method(&self) -> &'static str {
-        CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_POSITOR
-    }
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMTokenPositionPurchasePositorMessageQuest{
-                token_position_id: self.token_position_id,
-                token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
-                purchase_id: self.id,
-                purchaser: self.purchaser,
-                token_purchase: self.tokens,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-            }
-        )
-    }
-    fn cycles(&self) -> Cycles {
-        tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate)
-    }
-    fn cm_call_id(&self) -> u128 {
-        self.id
-    }
-    fn cm_call_callback_method(&self) -> &'static str {
-        CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_POSITOR
-    }
-}
-impl TokenPayoutDataTrait for TokenPositionPurchase {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.purchaser }
-    fn token_payout_payor(&self) -> Principal { self.token_position_positor }
-    fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER }
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMTokenPositionPurchasePurchaserMessageQuest {
-                token_position_id: self.token_position_id,
-                purchase_id: self.id, 
-                positor: self.token_position_positor,
-                purchase_timestamp_nanos: self.timestamp_nanos,
-                token_purchase: self.tokens(),
-                token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
-                cycles_payment: tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate),
-                token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
-                token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
-            }
-        )
-    }
-    fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(*TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))) }
-    fn token_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE)/*change for a fee set at the time of the lock of the funds and plus the fee willing to be paid by the purchaser*/ }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_PURCHASER }
-
-}
+// --------
 
 
 
@@ -301,6 +312,11 @@ impl CyclesPayoutDataTrait for VoidCyclesPosition {
 }
 
 
+
+// --------
+
+
+
 #[derive(CandidType, Deserialize, Clone)]
 pub struct VoidTokenPosition {
     pub position_id: PositionId,
@@ -310,6 +326,7 @@ pub struct VoidTokenPosition {
     pub token_payout_data: TokenPayoutData,
     pub timestamp_nanos: u128
 }
+
 impl TokenPayoutDataTrait for VoidTokenPosition {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
