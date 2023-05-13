@@ -128,7 +128,7 @@ pub struct TradeLog {
     pub purchaser: Principal, //taker
     pub tokens: Tokens,
     pub cycles: Cycles,
-    pub rate: CyclesPerTokenRate,
+    pub rate: CyclesPerToken,
     //but then how do we know whether the position is a cycles-position or a token-position & whether this is a cycles-position-purchase or a token-position-purchase?
     pub position_kind: PositionKind,
     pub timestamp_nanos: u128,
@@ -138,10 +138,21 @@ pub struct TradeLog {
     pub token_payout_data: TokenPayoutData
 }
 
+#[derive(Clone, CandidType, Deserialize)]
 pub enum PositionKind {
     Cycles,
     Token
 }
+
+impl TradeLog {
+    pub fn can_move_into_the_stable_memory_for_the_long_term_storage(&self) -> bool {
+        self.cycles_payout_lock == false
+        && self.token_payout_lock == false
+        && self.cycles_payout_data.is_complete() == true
+        && self.token_payout_data.is_complete() == true
+    }
+}
+
 
 impl CyclesPayoutDataTrait for TradeLog {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
@@ -163,20 +174,20 @@ impl CyclesPayoutDataTrait for TradeLog {
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePurchaserMessageQuest {
-                        cycles_position_id: self.cycles_position_id,
-                        cycles_position_positor: self.cycles_position_positor,
-                        cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
+                        cycles_position_id: self.position_id,
+                        cycles_position_positor: self.positor,
+                        cycles_position_cycles_per_token_rate: self.rate,
                         purchase_id: self.id,
                         purchase_timestamp_nanos: self.timestamp_nanos,
-                        token_payment: cycles_transform_tokens(self.cycles, self.cycles_position_cycles_per_token_rate),
+                        token_payment: self.tokens,
                     }
                 ) 
             }
             PositionKind::Token => {
                 encode_one(
                     CMTokenPositionPurchasePositorMessageQuest{
-                        token_position_id: self.token_position_id,
-                        token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
+                        token_position_id: self.position_id,
+                        token_position_cycles_per_token_rate: self.rate,
                         purchase_id: self.id,
                         purchaser: self.purchaser,
                         token_purchase: self.tokens,
@@ -214,19 +225,20 @@ impl TokenPayoutDataTrait for TradeLog {
         match self.position_kind { 
             PositionKind::Cycles => CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR,
             PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER,
+        }
     }
     fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
         match self.position_kind { 
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePositorMessageQuest {
-                        cycles_position_id: self.cycles_position_id,
+                        cycles_position_id: self.position_id,
                         purchase_id: self.id,
                         purchaser: self.purchaser,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         cycles_purchase: self.cycles,
-                        cycles_position_cycles_per_token_rate: self.cycles_position_cycles_per_token_rate,
-                        token_payment: self.tokens(),
+                        cycles_position_cycles_per_token_rate: self.rate,
+                        token_payment: self.tokens,
                         token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
                         token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
                     }    
@@ -235,13 +247,13 @@ impl TokenPayoutDataTrait for TradeLog {
             PositionKind::Token => {
                 encode_one(
                     CMTokenPositionPurchasePurchaserMessageQuest {
-                        token_position_id: self.token_position_id,
+                        token_position_id: self.position_id,
                         purchase_id: self.id, 
-                        positor: self.token_position_positor,
+                        positor: self.positor,
                         purchase_timestamp_nanos: self.timestamp_nanos,
-                        token_purchase: self.tokens(),
-                        token_position_cycles_per_token_rate: self.token_position_cycles_per_token_rate,
-                        cycles_payment: tokens_transform_cycles(self.tokens, self.token_position_cycles_per_token_rate),
+                        token_purchase: self.tokens,
+                        token_position_cycles_per_token_rate: self.rate,
+                        cycles_payment: self.cycles,
                         token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
                         token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
                     }
