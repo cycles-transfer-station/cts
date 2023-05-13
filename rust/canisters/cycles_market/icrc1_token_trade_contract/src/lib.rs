@@ -566,6 +566,20 @@ fn collect_items_for_the_move_into_the_stable_memory<T: CanSendIntoTheStableMemo
     move_items_into_stable_memory
 }
 
+fn move_complete_trades_into_the_stable_memory(cm_data: &mut CMData) {
+    // move complete purchases into the stable-memory
+    
+    let move_cycles_positions_purchases_into_stable_memory: Vec<CyclesPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.cycles_positions_purchases);
+    if move_cycles_positions_purchases_into_stable_memory.len() != 0 {
+    
+    }
+    let move_token_positions_purchases_into_stable_memory: Vec<TokenPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.token_positions_purchases);
+    if move_token_positions_purchases_into_stable_memory.len() != 0 {
+    
+    }
+
+}
+
 
 
 async fn do_payouts() {
@@ -583,16 +597,8 @@ async fn do_payouts() {
         (),
     ).await {
         Ok(()) => {
-            // move complete purchases into the stable-memory
             with_mut(&CM_DATA, |cm_data| {
-                let move_cycles_positions_purchases_into_stable_memory: Vec<CyclesPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.cycles_positions_purchases);
-                if move_cycles_positions_purchases_into_stable_memory.len() != 0 {
-                
-                }
-                let move_token_positions_purchases_into_stable_memory: Vec<TokenPositionPurchase> = collect_items_for_the_move_into_the_stable_memory(&mut cm_data.token_positions_purchases);
-                if move_token_positions_purchases_into_stable_memory.len() != 0 {
-                
-                }
+                move_complete_trades_into_the_stable_memory(cm_data);
             });
         },
         Err(call_error) => {
@@ -835,7 +841,6 @@ async fn create_token_position_(positor: Principal, q: CreateTokenPositionQuest)
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&positor); });
         return Err(CreateTokenPositionError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance });
     }
-    
     
     
     with_mut(&CM_DATA, |cm_data| {
@@ -1227,10 +1232,23 @@ async fn purchase_token_position_(purchaser: Principal, q: PurchaseTokenPosition
 
 
 #[update(manual_reply = true)]
-pub async fn void_position(q: VoidPositionQuest) {
-    match with_mut(&CM_DATA, |cm_data| {
+pub async fn void_position(q: VoidPositionQuest) { // -> VoidPositionResult
+    let caller: Principal = caller();
+    
+    let r: VoidPositionResult = void_position_(caller, q);
+    
+    reply::<(VoidPositionResult,)>((r,));
+    
+    do_payouts().await;
+    return; 
+
+}   
+    
+fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult {
+    
+    with_mut(&CM_DATA, |cm_data| {
         if let Ok(cycles_position_i) = cm_data.cycles_positions.binary_search_by_key(&q.position_id, |cycles_position| { cycles_position.id }) {
-            if cm_data.cycles_positions[cycles_position_i].positor != caller() {
+            if cm_data.cycles_positions[cycles_position_i].positor != caller {
                 return Err(VoidPositionError::WrongCaller);
             }
             if time_seconds().saturating_sub(cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
@@ -1254,7 +1272,7 @@ pub async fn void_position(q: VoidPositionQuest) {
             );
             Ok(())
         } else if let Ok(token_position_i) = cm_data.token_positions.binary_search_by_key(&q.position_id, |token_position| { token_position.id }) {
-            if cm_data.token_positions[token_position_i].positor != caller() {
+            if cm_data.token_positions[token_position_i].positor != caller {
                 return Err(VoidPositionError::WrongCaller);
             }
             if time_seconds().saturating_sub(cm_data.token_positions[token_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
@@ -1287,17 +1305,8 @@ pub async fn void_position(q: VoidPositionQuest) {
         } else {
             return Err(VoidPositionError::PositionNotFound);
         }
-    }) {
-        Ok(()) => {
-            reply::<(VoidPositionResult,)>((Ok(()),));
-        },
-        Err(void_position_error) => {
-            reply::<(VoidPositionResult,)>((Err(void_position_error),));
-        }
-    }
+    })
     
-    do_payouts().await;
-    return;    
 }
 
 
@@ -1318,14 +1327,22 @@ pub fn see_token_lock(q: SeeTokenLockQuest) -> Tokens {
 
 
 #[update(manual_reply = true)]
-pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
+pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) { // -> TransferTokenBalanceResult {
     
     let user_id: Principal = caller();
     
+    let r: TransferTokenBalanceResult = transfer_token_balance_(user_id, q).await;
+    
+    reply::<(TransferTokenBalanceResult,)>((r,));
+    
+    do_payouts().await;
+    return;
+}    
+    
+async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
+    
     if msg_cycles_available128() < TRANSFER_TOKEN_BALANCE_FEE {
-        reply::<(TransferTokenBalanceResult,)>((Err(TransferTokenBalanceError::MsgCyclesTooLow{ transfer_token_balance_fee: TRANSFER_TOKEN_BALANCE_FEE }),));
-        do_payouts().await;
-        return;
+        return Err(TransferTokenBalanceError::MsgCyclesTooLow{ transfer_token_balance_fee: TRANSFER_TOKEN_BALANCE_FEE });
     }
 
     match with_mut(&CM_DATA, |cm_data| {
@@ -1340,9 +1357,7 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
     }) {
         Ok(()) => {},
         Err(transfer_token_balance_error) => {
-            reply::<(TransferTokenBalanceResult,)>((Err(transfer_token_balance_error),));
-            do_payouts().await;
-            return;
+            return Err(transfer_token_balance_error);
         }
     }
     
@@ -1351,9 +1366,7 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
         Ok(token_ledger_balance) => token_ledger_balance,
         Err(call_error) => {
             with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-            reply::<(TransferTokenBalanceResult,)>((Err(TransferTokenBalanceError::CheckUserCyclesMarketTokenLedgerBalanceCallError((call_error.0 as u32, call_error.1))),));
-            do_payouts().await;
-            return;            
+            return Err(TransferTokenBalanceError::CheckUserCyclesMarketTokenLedgerBalanceCallError((call_error.0 as u32, call_error.1)));            
         }
     };
     
@@ -1363,12 +1376,11 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
     
     if usable_user_token_balance < q.tokens.saturating_add(q.token_fee) {
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-        reply::<(TransferTokenBalanceResult,)>((Err(TransferTokenBalanceError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance }),));
-        do_payouts().await;
-        return;          
+        return Err(TransferTokenBalanceError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance });          
     }
 
-    match token_transfer(
+    
+    let token_transfer_result = token_transfer(
         TokenTransferArg {
             memo: Some(IcrcMemo(ByteBuf::from(*TRANSFER_TOKEN_BALANCE_MEMO))),
             amount: q.tokens.into(),
@@ -1377,11 +1389,15 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
             to: q.to,
             created_at_time: Some(q.created_at_time.unwrap_or(time_nanos_u64()))
         }   
-    ).await {
+    ).await;
+    
+    with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
+
+    match token_transfer_result {
         Ok(token_transfer_result) => match token_transfer_result {
             Ok(token_transfer_block_height) => {
                 msg_cycles_accept128(TRANSFER_TOKEN_BALANCE_FEE);
-                reply::<(TransferTokenBalanceResult,)>((Ok(token_transfer_block_height),));
+                return Ok(token_transfer_block_height);
             },
             Err(token_transfer_error) => {
                 match token_transfer_error {
@@ -1390,17 +1406,14 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) {
                     },
                     _ => {}
                 }
-                reply::<(TransferTokenBalanceResult,)>((Err(TransferTokenBalanceError::TokenTransferError(token_transfer_error)),));
+                return Err(TransferTokenBalanceError::TokenTransferError(token_transfer_error));
             }
         },
         Err(token_transfer_call_error) => {
-            reply::<(TransferTokenBalanceResult,)>((Err(TransferTokenBalanceError::TokenTransferCallError(token_transfer_call_error)),));
+            return Err(TransferTokenBalanceError::TokenTransferCallError(token_transfer_call_error));
         }
     }
 
-    with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-    do_payouts().await;
-    return;
 }
 
 
