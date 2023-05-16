@@ -1,7 +1,9 @@
 use sha2::Digest;
 use crate::{
     ic_cdk::{
-        export::{Principal, candid::CandidType}
+        export::{Principal, candid::CandidType},
+        trap,
+        api::is_controller,
     },
     ic_ledger_types::{
         IcpIdSub,
@@ -265,6 +267,11 @@ pub fn rchunk_data<T: CandidType>(q: DownloadRChunkQuest, data: &[T]) -> RChunkD
 
 
 
+pub fn caller_is_controller_gaurd(caller: &Principal) {
+    if is_controller(caller) == false {
+        trap("Caller must be a controller for this method.");
+    }
+}
 
 
 

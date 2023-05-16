@@ -6,8 +6,7 @@ edition = "2021"
 
 
 [dependencies]
-ic-cdk = "0.6.8"
-ic-cdk-macros = "0.6.8"
+ic-cdk = { git = "https://github.com/dfinity/cdk-rs.git", rev = "24bdf5ee37399c4e27ad329880c79733f6454f27" } # "0.6.8"
 ic-certified-map = "0.3.0"
 ic-ledger-types = "0.2.0"
 candid = "0.8.4"
@@ -17,3 +16,5 @@ serde_bytes = "0.11.6"
 icrc-ledger-types = { git = "https://github.com/dfinity/ic.git", rev = "949407ea4a43cac19444e6da8f0ac08153946fbb" }
 #ic-icrc1-client-cdk = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
 #ic-icrc1 = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
+ic-stable-structures = "0.5.3"
+
