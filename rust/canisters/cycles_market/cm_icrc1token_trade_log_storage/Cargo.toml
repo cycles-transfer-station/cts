@@ -1,0 +1,18 @@
+[package]
+name = "cm_icrc1token_trade_log_storage"
+version = "0.1.0"
+edition = "2021"
+
+
+
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[dependencies]
+cts_lib = { path = "../../../cts_lib" }
+candid = "0.8.4"
+serde = "1.0.137"
+serde_bytes = "0.11.9"
+ic-stable-structures = "0.5.3"
