@@ -119,7 +119,6 @@ pub trait TokenPayoutDataTrait {
 // -----------------
 
 
-
 #[derive(Clone, CandidType, Deserialize)]
 pub struct TradeLog {
     pub position_id: PositionId,
@@ -151,6 +150,27 @@ impl TradeLog {
         && self.cycles_payout_data.is_complete() == true
         && self.token_payout_data.is_complete() == true
     }
+    
+    pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 157;
+    
+    pub fn stable_memory_serialize(&self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
+        let mut s: [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] = [0; Self::STABLE_MEMORY_SERIALIZE_SIZE];
+        s[0..16].copy_from_slice(&self.position_id.to_be_bytes());
+        s[16..32].copy_from_slice(&self.id.to_be_bytes());
+        s[32..62].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
+        s[62..92].copy_from_slice(&principal_as_thirty_bytes(&self.purchaser));
+        s[92..108].copy_from_slice(&self.tokens.to_be_bytes());
+        s[108..124].copy_from_slice(&self.cycles.to_be_bytes());
+        s[124..140].copy_from_slice(&self.rate.to_be_bytes());
+        s[140] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
+        s[141..157].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
+        s
+    }
+    
+    pub fn into_stable_memory_serialize(self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
+        self.stable_memory_serialize()
+    }
+    
 }
 
 

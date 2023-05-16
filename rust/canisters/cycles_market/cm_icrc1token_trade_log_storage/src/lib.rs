@@ -68,15 +68,19 @@ use serde_bytes::ByteBuf;
 #[derive(CandidType, Deserialize)]
 pub struct OldData {}
 
-#[derive(CandidType, Deserialize, Default)]
+#[derive(CandidType, Deserialize)]
 pub struct Data {
+    log_size: u32,
+    first_log_id: u128,
     trade_logs_memory_i: u64
 }
 
 impl Data {
     fn new() -> Self {
         Self {
-            trade_logs_memory_i: 0
+            log_size: 0u32,
+            first_log_id: 0u128,
+            trade_logs_memory_i: 0u64
         }
     }
 }
@@ -105,15 +109,23 @@ thread_local!{
 
 // -------------------------
 
-
-#[init]
-fn init() {
-
+#[derive(CandidType, Deserialize)]
+struct Icrc1TokenTradeLogStorageInit {
+    log_size: u32,
+    first_log_id: u128,
 }
 
+#[init]
+fn init(q: Icrc1TokenTradeLogStorageInit) {
+    with_mut(&DATA, |data| {
+        data.log_size = q.log_size;
+        data.first_log_id = q.first_log_id;
+    });
+}
+
+ 
 #[pre_upgrade]
 fn pre_upgrade() {
-
     with(&DATA, |data| {
         create_state_snapshot(data);
     });
@@ -121,13 +133,10 @@ fn pre_upgrade() {
         &get_memory(STABLE_MEMORY_ID_HEAP_SERIALIZATION),
         STABLE_MEMORY_HEADER_SIZE_BYTES,
     );
-
 }
-
 
 #[post_upgrade]
 fn post_upgrade() {
-
     read_stable_memory_bytes_with_length_onto_the_state_snapshot(
         &get_memory(STABLE_MEMORY_ID_HEAP_SERIALIZATION),
         STABLE_MEMORY_HEADER_SIZE_BYTES
@@ -136,7 +145,6 @@ fn post_upgrade() {
         *data = load_state_snapshot(None::<fn(OldData) -> Data>).unwrap();
         //*data = load_state_snapshot(Some(|old_data: OldData| { Data{ d: 5 } })).unwrap();
     });
-    
 }
 
 

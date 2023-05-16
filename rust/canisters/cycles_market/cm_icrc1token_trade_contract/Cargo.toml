@@ -1,5 +1,5 @@
 [package]
-name = "icrc1_token_trade_contract"
+name = "cm_icrc1token_trade_contract"
 version = "0.1.0"
 edition = "2021"
 

@@ -199,6 +199,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cm_icrc1token_trade_contract"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "futures",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "cm_icrc1token_trade_log_storage"
 version = "0.1.0"
 dependencies = [
@@ -637,18 +649,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "sha2 0.10.6",
-]
-
-[[package]]
-name = "icrc1_token_trade_contract"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cts_lib",
- "futures",
- "ic-stable-structures",
- "serde",
- "serde_bytes",
 ]
 
 [[package]]

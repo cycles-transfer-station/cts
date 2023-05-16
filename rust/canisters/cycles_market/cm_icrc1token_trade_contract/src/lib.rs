@@ -10,6 +10,7 @@ use cts_lib::{
             self,
             refcell::{with, with_mut}
         },
+        principal_as_thirty_bytes,
         user_icp_id,
         cycles_transform_tokens,
         tokens_transform_cycles,
@@ -87,15 +88,13 @@ use cts_lib::{
                 utils::{encode_one, decode_one},
                 error::Error as CandidError,
             }
-        }
-    },
-    ic_cdk_macros::{
+        },
         update,
         query,
         init,
         pre_upgrade,
         post_upgrade
-    }
+    },
 };
 
 use ic_stable_structures::{
@@ -144,6 +143,7 @@ struct CMData {
     void_cycles_positions: Vec<VoidCyclesPosition>,
     void_token_positions: Vec<VoidTokenPosition>,
     do_payouts_errors: Vec<(u32, String)>,
+    storage_canisters: Vec<StorageCanisterData>,
 }
 
 impl CMData {
@@ -161,12 +161,21 @@ impl CMData {
             trade_logs: Vec::new(),
             void_cycles_positions: Vec::new(),
             void_token_positions: Vec::new(),
-            do_payouts_errors: Vec::new()
+            do_payouts_errors: Vec::new(),
+            storage_canisters: Vec::new()
         }
     }
 }
 
-
+#[derive(CandidType, Deserialize)]
+pub struct StorageCanisterData {
+    log_size: u32,
+    first_log_id: u128,
+    length: u64, // number of logs current store on this storage canister
+    canister_id: Principal,
+    creation_timestamp: u128, // set once when storage canister is create.
+    module_hash: [u8; 32] // update this field when upgrading the storage canisters.
+}
 
 
 
@@ -440,7 +449,8 @@ fn canister_inspect_message() {
         "download_cycles_positions_rchunks",
         "download_token_positions_rchunks",
         "download_cycles_positions_purchases_rchunks",
-        "download_token_positions_purchases_rchunks"
+        "download_token_positions_purchases_rchunks",
+        "see_trade_logs",
     ].contains(&&method_name()[..]) {
         trap("this method must be call by a canister or a query call.");
     }
@@ -1327,6 +1337,115 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
     }
 
 }
+
+
+// -------------------------------
+
+
+#[derive(CandidType, Deserialize)]
+pub struct SeeTradeLogsQuest {
+    start_id: u128,
+    length: u128,
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct SeeTradeLogsSponse {
+    trade_logs_len: u128, // the last trade_log_id + 1
+    logs: ByteBuf, // a list of the encoded TradeLogs within the requested range that are still on this canister
+    storage_logs_structions: Vec<StorageLogsStructions>, // list of the storage-canisters callbacks to call for the requested ranges
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct StorageLogsStructions {
+    // The id of the first log in this storage-canister
+    start_id : u128,
+    // The numbe8r of logs in this storage-canister
+    length : u128,
+    // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
+    // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
+    log_size: u32,
+    // Callback to fetch the storage logs.
+    callback : candid::Func,//StorageSeeTradeLogsFunction
+}
+
+//candid::define_function!(pub StorageSeeTradeLogsFunction : (SeeTradeLogsQuest) -> (StorageLogs) query);
+
+
+
+
+#[derive(CandidType, Deserialize)]
+pub struct StorageLogs {
+    logs: ByteBuf
+}
+
+
+
+#[query]
+pub fn see_trade_logs(q: SeeTradeLogsQuest) -> SeeTradeLogsSponse {
+    
+    with(&CM_DATA, |cm_data| {
+        
+        let mut logs: ByteBuf = ByteBuf::new();
+        
+        let trade_logs_len: u128 = cm_data.trade_logs[cm_data.trade_logs.len() - 1].id + 1; 
+        
+        if q.start_id + q.length - 1 >= cm_data.trade_logs[0].id 
+        && q.start_id < trade_logs_len {
+            for s in cm_data.trade_logs.iter()
+                .skip_while(|tl: &&TradeLog| {
+                    tl.id < q.start_id
+                })
+                .take_while(|tl: &&TradeLog| {
+                    q.start_id + q.length > tl.id
+                })
+                .take(1*MiB / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                .map(|tl| {
+                    tl.stable_memory_serialize()
+                }) {
+                logs.extend(s);
+            }
+        }
+        
+        let mut storage_logs_structions: Vec<StorageLogsStructions> = Vec::new();
+        if q.start_id < cm_data.trade_logs[0].id {
+            // create storage logs structions
+            let mut continue_at_id: u128 = q.start_id;
+            for storage_canister in cm_data.storage_canisters.iter() {
+                if continue_at_id >= storage_canister.first_log_id 
+                && continue_at_id < storage_canister.first_log_id + storage_canister.length as u128 {
+                    let length: u128 = std::cmp::min(
+                        storage_canister.length as u128 - (continue_at_id - storage_canister.first_log_id),
+                        (q.start_id + q.length) - (continue_at_id - q.start_id)
+                    ); 
+                    storage_logs_structions.push(
+                        StorageLogsStructions{
+                            start_id : continue_at_id,
+                            length: length,
+                            log_size: storage_canister.log_size,
+                            callback : candid::Func{ principal: storage_canister.canister_id, method: "see_trade_logs".to_string() }
+                        }
+                    );
+                    continue_at_id += length;
+                }
+            }
+        }
+        
+        SeeTradeLogsSponse{
+            trade_logs_len,
+            logs,
+            storage_logs_structions          
+        }
+    })
+    
+}
+
+
+
+
+
+
 
 
 
