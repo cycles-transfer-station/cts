@@ -199,6 +199,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cm_icrc1token_trade_log_storage"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "cm_main"
 version = "0.1.0"
 dependencies = [
@@ -273,10 +284,10 @@ name = "cts_lib"
 version = "0.1.0"
 dependencies = [
  "candid",
- "ic-cdk",
- "ic-cdk-macros",
+ "ic-cdk 0.7.4",
  "ic-certified-map",
  "ic-ledger-types",
+ "ic-stable-structures",
  "icrc-ledger-types",
  "serde",
  "serde_bytes",
@@ -285,16 +296,6 @@ dependencies = [
 
 [[package]]
 name = "cycles_bank"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cts_lib",
- "futures",
- "serde",
-]
-
-[[package]]
-name = "cycles_market"
 version = "0.1.0"
 dependencies = [
  "candid",
@@ -537,8 +538,20 @@ checksum = "c98b304a2657bad15bcb547625a018e13cf596676d834cfd93023395a6e2e03a"
 dependencies = [
  "candid",
  "cfg-if",
- "ic-cdk-macros",
- "ic0",
+ "ic-cdk-macros 0.6.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ic0 0.18.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "ic-cdk"
+version = "0.7.4"
+source = "git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27#24bdf5ee37399c4e27ad329880c79733f6454f27"
+dependencies = [
+ "candid",
+ "ic-cdk-macros 0.6.10 (git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27)",
+ "ic0 0.18.9 (git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27)",
  "serde",
  "serde_bytes",
 ]
@@ -548,6 +561,19 @@ name = "ic-cdk-macros"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebf50458685a0fc6b0e414cdba487610aeb199ac94db52d9fd76270565debee7"
+dependencies = [
+ "candid",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "syn",
+]
+
+[[package]]
+name = "ic-cdk-macros"
+version = "0.6.10"
+source = "git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27#24bdf5ee37399c4e27ad329880c79733f6454f27"
 dependencies = [
  "candid",
  "proc-macro2",
@@ -577,7 +603,7 @@ dependencies = [
  "candid",
  "crc32fast",
  "hex",
- "ic-cdk",
+ "ic-cdk 0.6.10",
  "serde",
  "serde_bytes",
  "sha2 0.9.9",
@@ -594,6 +620,11 @@ name = "ic0"
 version = "0.18.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978b91fc78de9d2eb0144db717839cde3b35470199ea51aca362cb6310e93dfd"
+
+[[package]]
+name = "ic0"
+version = "0.18.9"
+source = "git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27#24bdf5ee37399c4e27ad329880c79733f6454f27"
 
 [[package]]
 name = "icrc-ledger-types"
