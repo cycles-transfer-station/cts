@@ -8,7 +8,7 @@ use crate::{
         caller,
         trap,
         export::{
-            candid::{CandidType, Deserialize, encode_one, decode_one, error::Error as CandidError},
+            candid::{CandidType, Deserialize, encode_one, decode_one},
         },
         api::{
             call::{
@@ -44,8 +44,8 @@ thread_local!{
     
     static STATE_SNAPSHOT: RefCell<Vec<u8>> = RefCell::new(Vec::new());
     
-    static PUT_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn(&[u8]) -> Result<(), CandidError>>> = RefCell::new(Box::new(|_b| { trap("call the stable_memory_tools::set_data function") }));
-    static GET_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn() -> Result<Vec<u8>, CandidError>>> = RefCell::new(Box::new(|| { trap("call the stable_memory_tools::set_data function") }));
+    static PUT_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn(&[u8]) -> Result<(), String>>> = RefCell::new(Box::new(|_b| { trap("call the stable_memory_tools::set_data function") }));
+    static GET_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn() -> Result<Vec<u8>, String>>> = RefCell::new(Box::new(|| { trap("call the stable_memory_tools::set_data function") }));
 
 
 }
@@ -62,22 +62,35 @@ fn get_state_snapshot_stable_memory() -> VirtualMemory<DefaultMemoryImpl> {
 }
 
 
+pub trait Serializable {
+    fn forward(&self) -> Result<Vec<u8>, String>;
+    fn backward(b: &[u8]) -> Result<Self, String> where Self: Sized;     
+}
+
+impl<T: CandidType + for<'a> Deserialize<'a>> Serializable for T {
+    fn forward(&self) -> Result<Vec<u8>, String> {
+        encode_one(self).map_err(|e| format!("{:?}", e))
+    }
+    fn backward(b: &[u8]) -> Result<Self, String> {
+        decode_one::<T>(b).map_err(|e| format!("{:?}", e))
+    }
+}
 
 
 pub fn set_data<Data, OldData, F>(s: &'static LocalKey<RefCell<Data>>, old_to_new_convert: F) 
     where 
-        Data: 'static + CandidType + for<'a> Deserialize<'a>,
-        OldData: CandidType + for<'a> Deserialize<'a>,
+        Data: 'static + Serializable,
+        OldData: Serializable,
         F: 'static + Fn(OldData) -> Option<Data> // return type here as option instead of set_data...(... , opt_old_to_new_convert: Option<F>) bc Option<Fn> cannot be moved into the put_data_bytes_fn Fn() closure bc Option<Fn> doesn't implement copy and Fn() closures can be called many times. but Fn itself without the option can be moved into the put_data_bytes_fn Fn closure
     {
     
     with_mut(&PUT_DATA_BYTES_FUNCTION, |put_data_bytes_fn| {
         *put_data_bytes_fn = Box::new(move |b| {
             with_mut(s, |data| {
-                *data = match decode_one::<Data>(b) {
+                *data = match <Data as Serializable>::backward(b) {
                     Ok(d) => d,
                     Err(e) => {
-                        let old_data: OldData = decode_one::<OldData>(b)?;
+                        let old_data: OldData = <OldData as Serializable>::backward(b)?;
                         let new_data: Data = old_to_new_convert(old_data).ok_or(e)?;
                         new_data
                     }
@@ -90,7 +103,7 @@ pub fn set_data<Data, OldData, F>(s: &'static LocalKey<RefCell<Data>>, old_to_ne
     with_mut(&GET_DATA_BYTES_FUNCTION, |get_data_bytes_fn| {
         *get_data_bytes_fn = Box::new(move || { 
             with(s, |data| {
-                encode_one(data)      
+                <Data as Serializable>::forward(data)
             })
         }); 
     });
@@ -117,7 +130,7 @@ pub fn post_upgrade() {
 
 
 
-fn create_state_snapshot() -> Result<u64, CandidError> {
+fn create_state_snapshot() -> Result<u64, String> {
     with_mut(&STATE_SNAPSHOT, |state_snapshot| {
         *state_snapshot = with(&GET_DATA_BYTES_FUNCTION, |f| { f() })?;
         Ok(state_snapshot.len() as u64)
@@ -126,7 +139,7 @@ fn create_state_snapshot() -> Result<u64, CandidError> {
 
 
 
-fn load_state_snapshot() -> Result<(), CandidError> {   
+fn load_state_snapshot() -> Result<(), String> {   
     with(&STATE_SNAPSHOT, |state_snapshot| {
         with(&PUT_DATA_BYTES_FUNCTION, |f| {
             f(state_snapshot)
