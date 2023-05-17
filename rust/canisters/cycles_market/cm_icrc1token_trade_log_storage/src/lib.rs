@@ -1,40 +1,27 @@
-use std::{
-    cell::{Cell, RefCell},
-};
+use std::cell::RefCell;
 use cts_lib::{
     tools::{
         localkey::{
-            self,
             refcell::{with, with_mut}
         },
         caller_is_controller_gaurd,
-    },
-    consts::{
-        MiB,
-        WASM_PAGE_SIZE_BYTES,
     },
     ic_cdk::{
         self,
         api::{
             trap,
             caller,
-            is_controller,
             call::{
                 reply,
                 msg_cycles_available128,
                 msg_cycles_accept128,
-                arg_data,
             },
             canister_balance128,
         },
         export::{
-            Principal,
             candid::{
-                self, 
                 CandidType,
                 Deserialize,
-                utils::{encode_one, decode_one},
-                error::Error as CandidError,
             }
         },
         update,
@@ -44,12 +31,9 @@ use cts_lib::{
         post_upgrade
     },
     stable_memory_tools::{
-        create_state_snapshot,
-        load_state_snapshot,
-        write_state_snapshot_with_length_onto_the_stable_memory,
-        read_stable_memory_bytes_with_length_onto_the_state_snapshot,
         locate_minimum_memory,
-        get_memory,
+        get_stable_memory,
+        self,
     }
 
 };
@@ -57,8 +41,7 @@ use cts_lib::{
 use ic_stable_structures::{
     Memory,
     DefaultMemoryImpl, 
-    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    
+    memory_manager::{MemoryId, VirtualMemory},
 };
 
 use serde_bytes::ByteBuf;
@@ -92,9 +75,9 @@ impl Data {
 
 
 
-const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
-const STABLE_MEMORY_ID_HEAP_SERIALIZATION: MemoryId = MemoryId::new(0);
+
+
 const STABLE_MEMORY_ID_TRADE_LOGS_STORAGE: MemoryId = MemoryId::new(1);
 
 
@@ -117,6 +100,8 @@ struct Icrc1TokenTradeLogStorageInit {
 
 #[init]
 fn init(q: Icrc1TokenTradeLogStorageInit) {
+    stable_memory_tools::set_data(&DATA, |_old_data: OldData| { None });
+    
     with_mut(&DATA, |data| {
         data.log_size = q.log_size;
         data.first_log_id = q.first_log_id;
@@ -126,25 +111,13 @@ fn init(q: Icrc1TokenTradeLogStorageInit) {
  
 #[pre_upgrade]
 fn pre_upgrade() {
-    with(&DATA, |data| {
-        create_state_snapshot(data);
-    });
-    write_state_snapshot_with_length_onto_the_stable_memory(
-        &get_memory(STABLE_MEMORY_ID_HEAP_SERIALIZATION),
-        STABLE_MEMORY_HEADER_SIZE_BYTES,
-    );
+    stable_memory_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    read_stable_memory_bytes_with_length_onto_the_state_snapshot(
-        &get_memory(STABLE_MEMORY_ID_HEAP_SERIALIZATION),
-        STABLE_MEMORY_HEADER_SIZE_BYTES
-    );
-    with_mut(&DATA, |data| {
-        *data = load_state_snapshot(None::<fn(OldData) -> Data>).unwrap();
-        //*data = load_state_snapshot(Some(|old_data: OldData| { Data{ d: 5 } })).unwrap();
-    });
+    stable_memory_tools::set_data(&DATA, |_old_data: OldData| { None });
+    stable_memory_tools::post_upgrade();
 }
 
 
@@ -170,7 +143,7 @@ pub enum FlushError {
 pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     caller_is_controller_gaurd(&caller());
     
-    let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_memory(STABLE_MEMORY_ID_TRADE_LOGS_STORAGE);
+    let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_stable_memory(STABLE_MEMORY_ID_TRADE_LOGS_STORAGE);
         
     with(&DATA, |data| {     
     
@@ -207,31 +180,4 @@ pub fn read_data() {}
 
 
 
-
-
-
-// -------- STATE-SNAPSHOT ---------
-
-
-
-#[update]
-pub fn controller_create_state_snapshot() -> u64/*len of the state_snapshot*/ {
-    caller_is_controller_gaurd(&caller());
-        
-    with(&DATA, |data| {
-        create_state_snapshot(data).unwrap()
-    })   
-}
-
-#[update]
-pub fn controller_load_state_snapshot_data() {
-    caller_is_controller_gaurd(&caller());
-    
-    with_mut(&DATA, |data| {
-        *data = load_state_snapshot(None::<fn(OldData) -> Data>).unwrap();
-    });
-}
-
-
-// ---------------------------------
 

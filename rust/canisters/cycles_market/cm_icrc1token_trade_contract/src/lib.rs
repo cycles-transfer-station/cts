@@ -1,5 +1,3 @@
-// make limit on how many on-the-market-positions each user can have at the same time. bc each user must be a canister, it helps stop "dos attack-attempts"
-
 use std::{
     cell::{Cell, RefCell},
     collections::{HashSet}
@@ -11,39 +9,31 @@ use cts_lib::{
             refcell::{with, with_mut}
         },
         principal_as_thirty_bytes,
-        user_icp_id,
         cycles_transform_tokens,
         tokens_transform_cycles,
         principal_token_subaccount,
-        round_robin,
         time_nanos,
         time_nanos_u64,
         time_seconds,
-        rchunk_data
+        caller_is_controller_gaurd
     },
     consts::{
         MiB,
-        WASM_PAGE_SIZE_BYTES,
         MANAGEMENT_CANISTER_ID,
         NANOS_IN_A_SECOND,
-        SECONDS_IN_A_MINUTE,
         SECONDS_IN_AN_HOUR,
-        SECONDS_IN_A_DAY
     },
     types::{
         Cycles,
-        CyclesTransferMemo,
         CyclesTransferRefund,
-        DownloadRChunkQuest,
-        cycles_transferrer,
         management_canister,
         cycles_market::icrc1_token_trade_contract::*,
         cm_caller::*,
     },
     icrc::{
         IcrcId, 
-        IcrcSub,
-        ICRC_DEFAULT_SUBACCOUNT,
+        //IcrcSub,
+        //ICRC_DEFAULT_SUBACCOUNT,
         IcrcMemo,
         Tokens,
         TokenTransferError,
@@ -62,11 +52,9 @@ use cts_lib::{
                 call_with_payment128,
                 call_raw128,
                 reply,
-                CallResult,
                 msg_cycles_refunded128,
                 msg_cycles_available128,
                 msg_cycles_accept128,
-                arg_data,
             },
             canister_balance128,
             /*
@@ -95,13 +83,7 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-};
-
-use ic_stable_structures::{
-    Memory,
-    DefaultMemoryImpl, 
-    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    
+    stable_memory_tools,
 };
 
 use serde_bytes::ByteBuf;
@@ -126,7 +108,8 @@ use payouts::_do_payouts;
 
 
 
-
+#[derive(CandidType, Deserialize)]
+struct OldCMData {}
 
 #[derive(CandidType, Deserialize)]
 struct CMData {
@@ -194,26 +177,29 @@ pub const MINIMUM_CYCLES_POSITION: Cycles = 1_000_000_000_000;
 
 pub const MINIMUM_TOKEN_POSITION: Tokens = 1;
 
+#[allow(non_upper_case_globals)]
+mod memory_location {
+    use crate::*;
+    
+    pub const CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: usize = 500; // multiple of 10
+    pub const CANISTER_DATA_STORAGE_SIZE_MiB: usize = CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 2 - 20/*memory-size at the start [re]placement*/; 
 
+    pub const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
+    pub const MAX_CYCLES_POSITIONS: usize = CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>();
 
-const CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: usize = 500; // multiple of 10
-const CANISTER_DATA_STORAGE_SIZE_MiB: usize = CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 2 - 20/*memory-size at the start [re]placement*/; 
+    pub const TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
+    pub const MAX_TOKEN_POSITIONS: usize = TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<TokenPosition>();
 
-const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
-const MAX_CYCLES_POSITIONS: usize = CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>();
+    pub const TRADE_LOGS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 2;
+    pub const MAX_TRADE_LOGS: usize = TRADE_LOGS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<TradeLog>();
 
-const TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
-const MAX_TOKEN_POSITIONS: usize = TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<TokenPosition>();
+    pub const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
+    pub const MAX_VOID_CYCLES_POSITIONS: usize = VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>();
 
-const TRADE_LOGS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 2;
-const MAX_TRADE_LOGS: usize = TRADE_LOGS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<TradeLog>();
-
-const VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
-const MAX_VOID_CYCLES_POSITIONS: usize = VOID_CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidCyclesPosition>();
-
-const VOID_TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
-const MAX_VOID_TOKEN_POSITIONS: usize = VOID_TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidTokenPosition>();
-
+    pub const VOID_TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
+    pub const MAX_VOID_TOKEN_POSITIONS: usize = VOID_TOKEN_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<VoidTokenPosition>();
+}
+use memory_location::*;
 
 const DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 5;
 const DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 5;
@@ -242,20 +228,13 @@ const CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO: &[u8; 8] = b"CM-CPP-0";
 
 const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 8] = b"CMTRNSFR";
 
-const SEE_CYCLES_POSITIONS_CHUNK_SIZE: usize = 300;
-const SEE_TOKEN_POSITIONS_CHUNK_SIZE: usize = 300;
-const SEE_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 300;
-const SEE_TOKEN_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 300;
-
 
 
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 
-const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
-const STABLE_MEMORY_ID_HEAP_SERIALIZATION: MemoryId = MemoryId::new(0);
-const STABLE_MEMORY_ID_: MemoryId = MemoryId::new(1);
+
 // think bout the position matches, maker is the position-positor, taker is the position-purchaser,
 // perhaps log each trade as a whole, 
 
@@ -282,22 +261,17 @@ enum PositionKind {
 
 
 thread_local! {
-    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
     
     static CM_DATA: RefCell<CMData> = RefCell::new(CMData::new()); 
-    
     
     // not save through the upgrades
     static TOKEN_LEDGER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static TOKEN_LEDGER_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
-    static STOP_CALLS: Cell<bool> = Cell::new(false);
-    static STATE_SNAPSHOT: RefCell<Vec<u8>> = RefCell::new(Vec::new());    
+    static STOP_CALLS: Cell<bool> = Cell::new(false);   
 }
 
 
-// -------------------------------------------------------------
-
+// ------------------ INIT ----------------------
 
 #[derive(CandidType, Deserialize)]
 struct CMInit {
@@ -310,6 +284,8 @@ struct CMInit {
 
 #[init]
 fn init(cm_init: CMInit) {
+    stable_memory_tools::set_data(&CM_DATA, |_old_data: OldCMData| { None });
+
     with_mut(&CM_DATA, |cm_data| { 
         cm_data.cts_id = cm_init.cts_id; 
         cm_data.cm_main_id = cm_init.cm_main_id; 
@@ -322,105 +298,23 @@ fn init(cm_init: CMInit) {
     localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_init.icrc1_token_ledger_transfer_fee);
 } 
 
-
-// -------------------------------------------------------------
-
-
-fn create_state_snapshot() {
-    let mut cm_data_candid_bytes: Vec<u8> = with(&CM_DATA, |cm_data| { encode_one(cm_data).unwrap() });
-    cm_data_candid_bytes.shrink_to_fit();
-    
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = cm_data_candid_bytes; 
-    });
-}
-
-fn load_state_snapshot_data() {
-    
-    let cm_data_of_the_state_snapshot: CMData = with(&STATE_SNAPSHOT, |state_snapshot| {
-        match decode_one::<CMData>(state_snapshot) {
-            Ok(cm_data) => cm_data,
-            Err(_) => {
-                trap("error decode of the state-snapshot CMData");
-                /*
-                let old_cm_data: OldCMData = decode_one::<OldCMData>(state_snapshot).unwrap();
-                let cm_data: CMData = CMData{
-                    cts_id: old_cm_data.cts_id,
-                    cm_caller: old_cm_data.cm_caller,
-                    id_counter: old_cm_data.id_counter,
-                    mid_call_user_token_balance_locks: old_cm_data.mid_call_user_token_balance_locks,
-                    cycles_positions: old_cm_data.cycles_positions,
-                    token_positions: old_cm_data.token_positions,
-                    cycles_positions_purchases: old_cm_data.cycles_positions_purchases,
-                    token_positions_purchases: old_cm_data.token_positions_purchases,
-                    void_cycles_positions: old_cm_data.void_cycles_positions,
-                    void_token_positions: old_cm_data.void_token_positions,
-                    do_payouts_errors: old_cm_data.do_payouts_errors
-                };
-                cm_data
-                */
-            }
-        }
-    });
-
-    localkey::cell::set(&TOKEN_LEDGER_ID, cm_data_of_the_state_snapshot.icrc1_token_ledger);
-    localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data_of_the_state_snapshot.icrc1_token_ledger_transfer_fee);
-
-    with_mut(&CM_DATA, |cm_data| {
-        *cm_data = cm_data_of_the_state_snapshot;    
-    });
-    
-}
-
-// -------------------------------------------------------------
-
-
-
-fn get_heap_serialization_memory() -> VirtualMemory<DefaultMemoryImpl> {
-    with(&MEMORY_MANAGER, |memory_manager| { memory_manager.get(STABLE_MEMORY_ID_HEAP_SERIALIZATION) })
-}
-
+// ------------------ UPGRADES ------------------------
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    
-    create_state_snapshot();
-    
-    let heap_serialization_memory: VirtualMemory<DefaultMemoryImpl> = get_heap_serialization_memory();
-    
-    let current_stable_size_wasm_pages: u64 = heap_serialization_memory.size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
-
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the state_snapshot*/ + state_snapshot.len() as u64; 
-        if current_stable_size_bytes < want_stable_memory_size_bytes {
-            let grow_result: i64 = heap_serialization_memory.grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1);
-            if grow_result == -1 {
-                trap("failed to grow heap_serialization_memory");
-            }
-        }
-        heap_serialization_memory.write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((state_snapshot.len() as u64).to_be_bytes()));
-        heap_serialization_memory.write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
-    });
+    stable_memory_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
+    stable_memory_tools::set_data(&CM_DATA, |_old_data: OldCMData| { None });
+    stable_memory_tools::post_upgrade();
     
-    let heap_serialization_memory: VirtualMemory<DefaultMemoryImpl> = get_heap_serialization_memory();
-
-    let mut state_snapshot_len_u64_be_bytes: [u8; 8] = [0; 8];
-    heap_serialization_memory.read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut state_snapshot_len_u64_be_bytes);
-    let state_snapshot_len_u64: u64 = u64::from_be_bytes(state_snapshot_len_u64_be_bytes); 
-    
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = vec![0; state_snapshot_len_u64.try_into().unwrap()]; 
-        heap_serialization_memory.read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, state_snapshot);
+    with(&CM_DATA, |cm_data| {
+        localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
+        localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data.icrc1_token_ledger_transfer_fee);
     });
-    
-    load_state_snapshot_data();
 } 
-
 
 // -------------------------------------------------------------
 
@@ -1339,8 +1233,10 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 }
 
 
-// -------------------------------
 
+
+
+// --------------- SEE-TRADE-LOGS -----------------
 
 #[derive(CandidType, Deserialize)]
 pub struct SeeTradeLogsQuest {
@@ -1348,14 +1244,12 @@ pub struct SeeTradeLogsQuest {
     length: u128,
 }
 
-
 #[derive(CandidType, Deserialize)]
 pub struct SeeTradeLogsSponse {
     trade_logs_len: u128, // the last trade_log_id + 1
     logs: ByteBuf, // a list of the encoded TradeLogs within the requested range that are still on this canister
     storage_logs_structions: Vec<StorageLogsStructions>, // list of the storage-canisters callbacks to call for the requested ranges
 }
-
 
 #[derive(CandidType, Deserialize)]
 pub struct StorageLogsStructions {
@@ -1372,15 +1266,10 @@ pub struct StorageLogsStructions {
 
 //candid::define_function!(pub StorageSeeTradeLogsFunction : (SeeTradeLogsQuest) -> (StorageLogs) query);
 
-
-
-
 #[derive(CandidType, Deserialize)]
 pub struct StorageLogs {
     logs: ByteBuf
 }
-
-
 
 #[query]
 pub fn see_trade_logs(q: SeeTradeLogsQuest) -> SeeTradeLogsSponse {
@@ -1449,74 +1338,7 @@ pub fn see_trade_logs(q: SeeTradeLogsQuest) -> SeeTradeLogsSponse {
 
 
 
-// -------------------------------
-
-#[query(manual_reply = true)]
-pub fn download_cycles_positions_rchunks(q: DownloadRChunkQuest) {
-    with(&CM_DATA, |cm_data| {
-        reply((rchunk_data(q, &cm_data.cycles_positions),));
-    });
-}
-
-#[query(manual_reply = true)]
-pub fn download_token_positions_rchunks(q: DownloadRChunkQuest) {
-    with(&CM_DATA, |cm_data| {
-        reply((rchunk_data(q, &cm_data.token_positions),));
-    });
-}
-
-
-
-
-// ----------------------
-
-
-
-#[derive(CandidType, Deserialize)]
-pub struct SeeCyclesPositionsQuest {
-    chunk_i: u128
-}
-
-#[query(manual_reply = true)]
-pub fn see_cycles_positions(q: SeeCyclesPositionsQuest) {
-    with(&CM_DATA, |cm_data| {
-        reply::<(Option<&[CyclesPosition]>,)>((
-            cm_data.cycles_positions.chunks(SEE_CYCLES_POSITIONS_CHUNK_SIZE).nth(q.chunk_i as usize)
-        ,));
-    });
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct SeeTokenPositionsQuest {
-    chunk_i: u128
-}
-
-#[query(manual_reply = true)]
-pub fn see_token_positions(q: SeeTokenPositionsQuest) {
-    with(&CM_DATA, |cm_data| {
-        reply::<(Option<&[TokenPosition]>,)>((
-            cm_data.token_positions.chunks(SEE_TOKEN_POSITIONS_CHUNK_SIZE).nth(q.chunk_i as usize)
-        ,));
-    });
-}
-
-
-
-
-
-// ---------------------------------
-
-
-#[update(manual_reply = true)]
-pub async fn trigger_payouts() {
-    reply::<()>(());
-    do_payouts().await;
-    return;
-}
-
-
-// -------------------------------------------------------------
-
+// ------------------ CMCALLER-CALLBACKS -----------------------
 
 #[update(manual_reply = true)]
 pub async fn cm_message_cycles_position_purchase_purchaser_cmcaller_callback(q: CMCallbackQuest) -> () {
@@ -1641,26 +1463,18 @@ pub async fn cm_message_void_token_position_positor_cmcaller_callback(q: CMCallb
 
 
 
-
-// -------------------------------------------------------------
-
-
-fn caller_is_cts_check() {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cts_id }) {
-        trap("Caller must be the CTS for this method.");
-    }
-}
+// --------------- STOP-CALLS-FLAG --------------------
 
 #[update]
-pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
-    caller_is_cts_check();
+pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
+    caller_is_controller_gaurd(&caller());
     
     localkey::cell::set(&STOP_CALLS, stop_calls_flag);
 }
 
 #[query]
-pub fn cts_see_stop_calls_flag() -> bool {
-    caller_is_cts_check();
+pub fn controller_see_stop_calls_flag() -> bool {
+    caller_is_controller_gaurd(&caller());
     
     localkey::cell::get(&STOP_CALLS)
 }
@@ -1668,85 +1482,26 @@ pub fn cts_see_stop_calls_flag() -> bool {
 
 
 
-
-#[update]
-pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot*/ {
-    caller_is_cts_check();
-    
-    create_state_snapshot();
-    
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        state_snapshot.len() as u64
-    })
-}
-
-
-
-
-
-#[export_name = "canister_query cts_download_state_snapshot"]
-pub fn cts_download_state_snapshot() {
-    caller_is_cts_check();
-    
-    let chunk_size: usize = 1 * MiB as usize;
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
-        reply::<(Option<&[u8]>,)>((state_snapshot.chunks(chunk_size).nth(chunk_i as usize),));
-    });
-}
-
-
-
-#[update]
-pub fn cts_clear_state_snapshot() {
-    caller_is_cts_check();
-    
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = Vec::new();
-    });    
-}
-
-#[update]
-pub fn cts_append_state_snapshot(mut append_bytes: Vec<u8>) {
-    caller_is_cts_check();
-    
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        state_snapshot.append(&mut append_bytes);
-    });
-}
-
-#[update]
-pub fn cts_load_state_snapshot_data() {
-    caller_is_cts_check();
-    
-    load_state_snapshot_data();
-}
-
-
-
-// -------------------------------------------------------------
-
-
+// --------------- PAYOUTS-ERRORS -------------------
 
 #[query(manual_reply = true)]
-pub fn cts_see_payouts_errors(chunk_i: u32) {
-    caller_is_cts_check();
+pub fn controller_see_payouts_errors(chunk_i: u32) {
+    caller_is_controller_gaurd(&caller());
     
     with(&CM_DATA, |cm_data| {
         reply::<(Option<&[(u32, String)]>,)>((cm_data.do_payouts_errors.chunks(100).nth(chunk_i as usize),));
     });
 }
 
-
-
 #[update]
-pub fn cts_clear_payouts_errors() {
-    caller_is_cts_check();
+pub fn controller_clear_payouts_errors() {
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.do_payouts_errors = Vec::new();
     });    
 }
+
 
 
 

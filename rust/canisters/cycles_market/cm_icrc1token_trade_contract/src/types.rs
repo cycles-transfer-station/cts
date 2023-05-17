@@ -5,8 +5,7 @@ use crate::*;
 
 pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
-pub type CyclesPositionPurchaseId = PurchaseId;
-pub type TokenPositionPurchaseId = PurchaseId;
+
 
 
 #[derive(CandidType, Deserialize)]

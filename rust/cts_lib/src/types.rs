@@ -9,10 +9,8 @@ use crate::{
         export::{
             Principal,
             candid::{
-                self,
                 CandidType,
-                Deserialize,   
-                Nat,
+                Deserialize,
             }
         }
     }
@@ -64,7 +62,7 @@ pub struct CyclesTransfer {
 
 
 pub mod canister_code {
-    use super::{candid, CandidType, Deserialize};
+    use super::{CandidType, Deserialize};
     
     #[derive(CandidType, Deserialize, Clone)]
     pub struct CanisterCode {
@@ -321,7 +319,7 @@ pub mod cycles_bank {
 
 
 pub mod cycles_transferrer {
-    use super::{Principal, CyclesTransferMemo, Cycles, candid, CandidType, Deserialize};
+    use super::{Principal, CyclesTransferMemo, Cycles, CandidType, Deserialize};
     
     #[derive(CandidType, Deserialize)]
     pub struct CyclesTransferrerCanisterInit {
@@ -382,6 +380,7 @@ pub mod cycles_market {
         MinimumPurchaseMustBeAMultipleOfTheXdrPerMyriadPerIcpRate,
         CyclesMarketIsBusy,
         CyclesMarketIsFull,
+        #[allow(non_camel_case_types)]
         CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_cycles_position_for_a_bump: Cycles },
         MinimumCyclesPosition(Cycles),
         MinimumPurchaseCannotBeZero
@@ -410,6 +409,7 @@ pub mod cycles_market {
         CallerIsInTheMiddleOfACreateIcpPositionOrPurchaseCyclesPositionOrTransferIcpBalanceCall,
         CheckUserCyclesMarketIcpLedgerBalanceError((u32, String)),
         UserIcpBalanceTooLow{ user_icp_balance: IcpTokens },
+        #[allow(non_camel_case_types)]
         CyclesMarketIsFull_MaximumRateAndMinimumIcpPositionForABump{ maximum_rate_for_a_bump: XdrPerMyriadPerIcp, minimum_icp_position_for_a_bump: IcpTokens },
         MinimumIcpPosition(IcpTokens),
         MinimumPurchaseCannotBeZero
@@ -592,6 +592,7 @@ pub mod cycles_market {
             MinimumPurchaseMustBeAMultipleOfTheCyclesPerTokenRate,
             CyclesMarketIsBusy,
             CyclesMarketIsFull,
+            #[allow(non_camel_case_types)]
             CyclesMarketIsFull_MinimumRateAndMinimumCyclesPositionForABump{ minimum_rate_for_a_bump: CyclesPerToken, minimum_cycles_position_for_a_bump: Cycles },
             MinimumCyclesPosition(Cycles),
             MinimumPurchaseCannotBeZero
@@ -620,6 +621,7 @@ pub mod cycles_market {
             CallerIsInTheMiddleOfACreateTokenPositionOrPurchaseCyclesPositionOrTransferTokenBalanceCall,
             CheckUserCyclesMarketTokenLedgerBalanceError((u32, String)),
             UserTokenBalanceTooLow{ user_token_balance: Tokens },
+            #[allow(non_camel_case_types)]
             CyclesMarketIsFull_MaximumRateAndMinimumTokenPositionForABump{ maximum_rate_for_a_bump: CyclesPerToken, minimum_token_position_for_a_bump: Tokens },
             MinimumTokenPosition(Tokens),
             MinimumPurchaseCannotBeZero
@@ -862,7 +864,7 @@ pub mod safe_caller {
 
 
 pub mod icrc1 {
-    use super::{Principal, CallResult, CandidType, Deserialize};
+    use super::{Principal, CandidType, Deserialize};
 
     #[derive(CandidType, Deserialize)]
     pub struct Account {

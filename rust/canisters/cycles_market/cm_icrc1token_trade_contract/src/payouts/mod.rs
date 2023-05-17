@@ -204,7 +204,7 @@ fn handle_do_cycles_payout_result(cpd: &mut CyclesPayoutData, do_cycles_payout_r
 
 fn handle_do_token_payout_sponse(tpd: &mut TokenPayoutData, do_token_payout_sponse: DoTokenPayoutSponse) {
     match do_token_payout_sponse {
-        DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType) => {
+        DoTokenPayoutSponse::TokenTransferError(_token_transfer_error_type) => {
             
         },
         DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_transfer, _cm_message_error_type) => {

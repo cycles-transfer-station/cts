@@ -8,9 +8,11 @@ use crate::{
     }
 };
  
-
+#[allow(non_upper_case_globals)]
 pub const KiB: usize = 1024;
+#[allow(non_upper_case_globals)]
 pub const MiB: usize = KiB * 1024;
+#[allow(non_upper_case_globals)]
 pub const GiB: usize = MiB * 1024;
 
 pub const NANOS_IN_A_SECOND: u128 = 1_000_000_000;
@@ -34,6 +36,7 @@ pub const NETWORK_XNET_CALL_FEE_CYCLES                          : Cycles = 260_0
 pub const NETWORK_XNET_BYTE_TRANSMISSION_FEE_CYCLES             : Cycles = 1_000;               // For every byte sent in an inter-canister call (for bytes sent in the request and response)
 pub const NETWORK_INGRESS_MESSAGE_CEPTION_FEE_CYCLES            : Cycles = 1_200_000;
 pub const NETWORK_INGRESS_BYTE_CEPTION_FEE_CYCLES               : Cycles = 2_000;               // what about bytes sent back as a sponse?
+#[allow(non_upper_case_globals)]
 pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES             : Cycles = 127_000;             // 4 SDR per GiB per year => 4e12 Cycles per year
 
 

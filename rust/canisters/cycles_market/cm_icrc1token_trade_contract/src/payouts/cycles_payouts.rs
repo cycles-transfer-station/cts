@@ -11,9 +11,7 @@ pub enum DoCyclesPayoutError {
     CandidError(CandidError),
     CMCallCallPerformError(u32),
     CMCallCallError((u32, String)),
-    CMCallError(CMCallError),
-    ManagementCanisterCallPerformError(u32),
-    ManagementCanisterCallError((u32, String)),
+    CMCallError(CMCallError)
 }
 impl From<CandidError> for DoCyclesPayoutError {
     fn from(ce: CandidError) -> DoCyclesPayoutError {
