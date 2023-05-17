@@ -12,11 +12,9 @@ use cts_lib::{
             trap,
             caller,
             call::{
-                reply,
                 msg_cycles_available128,
                 msg_cycles_accept128,
             },
-            canister_balance128,
         },
         export::{
             candid::{
@@ -31,11 +29,9 @@ use cts_lib::{
         post_upgrade
     },
     stable_memory_tools::{
-        locate_minimum_memory,
-        get_stable_memory,
         self,
+        locate_minimum_memory
     }
-
 };
 
 use ic_stable_structures::{
@@ -70,17 +66,7 @@ impl Data {
 
 
 
-
-
-
-
-
-
-
-
 const STABLE_MEMORY_ID_TRADE_LOGS_STORAGE: MemoryId = MemoryId::new(1);
-
-
 
 
 thread_local!{
@@ -124,6 +110,11 @@ fn post_upgrade() {
 // --------------------------------------
 
 
+fn get_trade_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
+    stable_memory_tools::get_stable_memory(STABLE_MEMORY_ID_TRADE_LOGS_STORAGE)
+}
+
+// ----------------
 
 #[derive(CandidType, Deserialize)]
 pub struct FlushQuest {
@@ -143,7 +134,9 @@ pub enum FlushError {
 pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     caller_is_controller_gaurd(&caller());
     
-    let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_stable_memory(STABLE_MEMORY_ID_TRADE_LOGS_STORAGE);
+    msg_cycles_accept128(msg_cycles_available128());
+    
+    let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_trade_logs_storage_memory();
         
     with(&DATA, |data| {     
     
@@ -173,10 +166,57 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
 
 // -----
 
+
+
+#[derive(CandidType, Deserialize)]
+pub struct SeeTradeLogsQuest {
+    start_id: u128,
+    length: u128,
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct StorageLogs {
+    logs: ByteBuf
+}
+
+
+// this function and then the move_complete_trade_logs_into_the_stable_memory function on the token_trade_contract
+// disable on replicated?
 #[query]
-pub fn read_data() {}
+pub fn see_trade_logs(q: SeeTradeLogsQuest) -> StorageLogs {
+    
+    let mut logs: ByteBuf = ByteBuf::new();
+
+    with(&DATA, |data| {
+        if q.start_id < data.first_log_id {
+            trap("start_id is less than the first_log_id in this storage canister")
+        }         
+        if q.start_id + q.length > data.first_log_id + logs_count(data) as u128 {
+            trap("out of range, the last log requested is out of the range of this storage canister")
+        }
+        
+        let start_i: u64 = (q.start_id - data.first_log_id) as u64 * data.log_size as u64;
+        let finish_i: u64 = start_i + (q.length as u64 * data.log_size as u64);
+        
+        let memory = get_trade_logs_storage_memory();
+        
+        *(&mut logs)/*so we don't move*/ = ByteBuf::from(vec![0; (finish_i - start_i) as usize]); 
+        
+        memory.read(start_i, &mut logs);
+        
+    });
+    
+    StorageLogs{
+        logs,
+    }
+
+}
 
 
+fn logs_count(data: &Data) -> u64 {
+    data.trade_logs_memory_i / data.log_size as u64
+}
 
 
 
