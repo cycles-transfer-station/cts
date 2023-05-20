@@ -68,7 +68,7 @@ impl Data {
 
 
 const STABLE_MEMORY_ID_TRADE_LOGS_STORAGE: MemoryId = MemoryId::new(1);
-const MAX_STORAGE_BYTES: u64 = 50 * GiB;
+const MAX_STORAGE_BYTES: u64 = 50 * GiB as u64;
 
 
 
@@ -89,7 +89,7 @@ struct Icrc1TokenTradeLogStorageInit {
 
 #[init]
 fn init(q: Icrc1TokenTradeLogStorageInit) {
-    stable_memory_tools::set_data(&DATA, |_old_data: OldData| { None });
+    stable_memory_tools::init(&DATA);
     
     with_mut(&DATA, |data| {
         data.log_size = q.log_size;
@@ -105,8 +105,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::set_data(&DATA, |_old_data: OldData| { None });
-    stable_memory_tools::post_upgrade();
+    stable_memory_tools::post_upgrade(&DATA, None::<fn(OldData) -> Data>);
 }
 
 
