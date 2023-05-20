@@ -86,7 +86,7 @@ use cts_lib::{
     stable_memory_tools,
 };
 
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteBuf, Bytes};
 
 // -------
 
@@ -126,7 +126,12 @@ struct CMData {
     void_cycles_positions: Vec<VoidCyclesPosition>,
     void_token_positions: Vec<VoidTokenPosition>,
     do_payouts_errors: Vec<(u32, String)>,
-    storage_canisters: Vec<StorageCanisterData>,
+    trade_log_storage_canisters: Vec<TradeLogStorageCanisterData>,
+    trade_log_storage_buffer: ByteBuf,
+    trade_log_storage_flush_lock: bool,
+    create_trade_log_storage_canister_temp_holder: Option<Principal>,
+    flush_trade_log_storage_errors: Vec<(FlushTradeLogStorageError, u64/*timestamp_nanos*/)>,
+    trade_log_storage_canister_code: CanisterCode,
 }
 
 impl CMData {
@@ -145,13 +150,18 @@ impl CMData {
             void_cycles_positions: Vec::new(),
             void_token_positions: Vec::new(),
             do_payouts_errors: Vec::new(),
-            storage_canisters: Vec::new()
+            trade_log_storage_canisters: Vec::new(),
+            trade_log_storage_buffer: ByteBuf::new(),
+            trade_log_storage_flush_lock: false,
+            create_trade_log_storage_canister_temp_holder: None,
+            flush_trade_log_storage_errors: Vec::new(),
+            trade_log_storage_canister_code: CanisterCode::new(),
         }
     }
 }
 
 #[derive(CandidType, Deserialize)]
-pub struct StorageCanisterData {
+pub struct TradeLogStorageCanisterData {
     log_size: u32,
     first_log_id: u128,
     length: u64, // number of logs current store on this storage canister
@@ -159,6 +169,23 @@ pub struct StorageCanisterData {
     creation_timestamp: u128, // set once when storage canister is create.
     module_hash: [u8; 32] // update this field when upgrading the storage canisters.
 }
+
+
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct CanisterCode {
+    hash: [u8; 32],
+    module: ByteBuf,
+}
+impl CanisterCode {
+    fn new() -> Self {
+        Self {
+            hash: [0; 32],
+            module: ByteBuf::new()
+        }
+    }
+}
+
 
 
 
@@ -228,11 +255,10 @@ const CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO: &[u8; 8] = b"CM-CPP-0";
 
 const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 8] = b"CMTRNSFR";
 
-
-
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 
+const FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE: usize = 1 * MiB;
 
 
 // think bout the position matches, maker is the position-positor, taker is the position-purchaser,
@@ -409,23 +435,93 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
 
 
 
-fn move_complete_trades_into_the_stable_memory(cm_data: &mut CMData) {
-    let mut move_items_into_the_stable_memory: Vec<TradeLog> = Vec::new();
-    while cm_data.trade_logs.len() > 0 {
-        if cm_data.trade_logs[0].can_move_into_the_stable_memory_for_the_long_term_storage() == true {
-            move_items_into_the_stable_memory.push(cm_data.trade_logs.remove(0));
-        } else {
-            break; // bc want to save into the stable-memory in the correct sequence.
-        }
-    }    
+#[derive(CandidType, Deserialize)]
+pub struct FlushQuestForward<'a> {
+    bytes: &'a Bytes
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum FlushTradeLogStorageError {
+    CreateTradeLogStorageCanisterError(CreateTradeLogStorageCanisterError),
+    TradeLogStorageCanisterCallError(u32, String),
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum CreateTradeLogStorageCanisterError {
+    CreateCanisterCallError(u32, String),
+    TradeLogStorageCanisterModuleNotFound,
+    InstallCodeCallError(u32, String),
+}
+
+async fn create_trade_log_storage_canister() -> Result<Principal/*saves the trade-log-storage-canister-data in the CM_DATA*/, CreateTradeLogStorageCanisterError> {
     
-    if move_items_into_the_stable_memory.len() > 0 {
-        // append items onto the stable-vec of the trade-logs
+    
+    
+    let canister_id: Principal = match with_mut(&CM_DATA, |data| { data.create_trade_log_storage_canister_temp_holder.take() }) {
+        Some(canister_id) => canister_id,
+        None => {
+            match call::<(ManagementCanisterCreateCanisterQuest,), (CanisterIdRecord,)>(
+                Principal::management_canister(),
+                "create_canister",
+                (ManagementCanisterCreateCanisterQuest{
+                    settings: None,
+                },),
+            ).await {
+                Ok(r) => r.canister_id,
+                Err(call_error) => {
+                    return Err(CreateTradeLogStorageCanisterError::CreateCanisterCallError(call_error_as_u32_and_string(call_error)));
+                }
+            }
+        }
+    };
+    
+    let module_hash: [32; u8];
+    
+    with(&CM_DATA, |data| {
+        module_hash = data.trade_log_storage_canister_code.hash.clone();
+        // module for install method
+    });
+    
+    match call::<(ManagementCanisterInstallCodeQuest,), ()>(
+        Principal::management_canister(),
+        "install_code",
+        (ManagementCanisterInstallCodeQuest{
+            mode : ManagementCanisterInstallCodeMode::install,
+            canister_id : canister_id,
+            wasm_module : &'a [u8],
+        #[serde(with = "serde_bytes")]
+        pub arg : &'a [u8],
+        },),
+    ).await {
+        Ok(()) => {
+            with_mut(&CM_DATA, |data| {
+                data.trade_log_storage_canisters.push(
+                    TradeLogStorageCanisterData {
+                        log_size: u32,
+                        first_log_id: u128,
+                        length: u64, // number of logs current store on this storage canister
+                        canister_id: Principal,
+                        creation_timestamp: u128, // set once when storage canister is create.
+                        module_hash: [u8; 32] // update this field when upgrading the storage canisters.
+                    }
+                );
+            });
+            Ok(canister_id)
+        }
+        Err(install_code_call_error) => {
+            with_mut(&CM_DATA, |data| { data.create_trade_log_storage_canister_temp_holder = Some(canister_id); });
+            return Err(CreateTradeLogStorageCanisterError::InstallCodeCallError(call_error_as_u32_and_string(install_code_call_error)));
+        }
     }
     
 }
 
 
+fn call_error_as_u32_and_string(t: (RejectionCode, String)) -> (u32, String) {
+    (t.0 as u32, t.1)
+}
 
 async fn do_payouts() {
     
@@ -441,13 +537,122 @@ async fn do_payouts() {
         (),
     ).await {
         Ok(()) => {
+            
+            let opt_flush_buffer: Option<ByteBuf> = None;
+        
             with_mut(&CM_DATA, |cm_data| {
-                move_complete_trades_into_the_stable_memory(cm_data);
+                while cm_data.trade_logs.len() > 0 {
+                    if cm_data.trade_logs[0].can_move_into_the_stable_memory_for_the_long_term_storage() == true {
+                        cm_data.trade_log_storage_buffer.extend(cm_data.trade_logs.remove(0).into_stable_memory_serialize());
+                    } else {
+                        break; // bc want to save into the stable-memory in the correct sequence.
+                    }
+                }
+                if cm_data.trade_log_storage_buffer.len() >= FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE 
+                && cm_data.trade_log_storage_flush_lock == false {
+                    opt_flush_buffer = Some(std::mem::take(&mut (cm_data.trade_log_storage_buffer)));
+                    cm_data.trade_log_storage_flush_lock = true;
+                }
             });
+            
+            if let Some(flush_buffer) = opt_flush_buffer {
+                
+                let mut trade_log_storage_canister_id: Principal = match with(&CM_DATA, |data| { data.trade_log_storage_canisters.last() }) {
+                    Some(canister_id) => canister_id,
+                    None => {
+                        match create_trade_log_storage_canister().await {
+                            Ok(p) => p,
+                            Err(e) => {
+                                with_mut(&CM_DATA, |data| {
+                                    data.trade_logs_storage_buffer = [flush_buffer, data.trade_logs_storage_buffer].concat();
+                                    data.trade_log_storage_flush_lock = false;
+                                    data.flush_trade_logs_storage_errors.push((FlushTradeLogStorageError::CreateTradeLogStorageCanisterError(e), time_nanos_u64()));
+                                });
+                                return;
+                            }
+                        }
+                    }
+                };
+                
+                let chunk_size: usize = with(&CM_DATA, |data| { (1*MiB) - ((1*MiB) % data.trade_log_storage_canisters.last().log_size) });
+                
+                let flush_buffer_chunks: Vec<&[u8]> = flush_buffer.chunks(chunk_size).collect();
+                
+                for (chunk_i: usize, chunk: &&[u8]) in flush_buffer_chunks.iter().enumerate() {
+                    
+                    match call::<(cm_trade_log_storage::FlushQuestForward,), (Result<FlushSuccess, FlushError>,)>(
+                        trade_log_storage_canister_id,
+                        "flush",
+                        (cm_trade_log_storage::FlushQuestForward{
+                            bytes: chunk,
+                        },),
+                    ).await {
+                        Ok(r) => match r {
+                            Ok(flush_success) => {
+                                with_mut(&CM_DATA, |cm_data| {
+                                    let trade_log_storage_canister_data: &mut TradeLogStorageCanisterData = cm_data.trade_log_storage_canisters.last_mut().unwrap();
+                                    trade_log_storage_canister_data.length += (chunk.len() / trade_log_storage_canister_data.log_size); 
+                                });
+                            },
+                            Err(flush_error) => match flush_error {
+                                cm_trade_log_storage::FlushError::StorageIsFull => {
+                                    match create_trade_log_storage_canister().await {
+                                        Ok(new_storage_canister) => {
+                                             match call::<(cm_trade_log_storage::FlushQuestForward,), (Result<FlushSuccess, FlushError>,)>(
+                                                new_storage_canister,
+                                                "flush",
+                                                (cm_trade_log_storage::FlushQuestForward{
+                                                    bytes: &logs
+                                                },),
+                                            ).await {
+                                                Ok(r) => match r {
+                                                    Ok(flush_success) => {
+                                                        trade_log_storage_canister_id = new_storage_canister;
+                                                        with_mut(&CM_DATA, |cm_data| {
+                                                            let trade_log_storage_canister_data: &mut TradeLogStorageCanisterData = cm_data.trade_log_storage_canisters.last_mut().unwrap();
+                                                            trade_log_storage_canister_data.length += (chunk.len() / trade_log_storage_canister_data.log_size); 
+                                                        });
+                                                    },
+                                                    Err(flush_error) => match flush_error {
+                                                        cm_trade_log_storage::FlushError::StorageIsFull => {}//shouldnt happpen
+                                                    }
+                                                }.
+                                                Err(flush_call_error) => {
+                                                    with_mut(&CM_DATA, |data| {
+                                                        data.trade_logs_storage_buffer = [flush_buffer.split_off(..chunk_i*chunk_size), data.trade_logs_storage_buffer].concat();
+                                                        data.flush_trade_logs_storage_errors.push((FlushTradeLogStorageError::TradeLogStorageCanisterCallError(call_error_as_u32_and_string(flush_call_error)), time_nanos_u64()));
+                                                    });
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            with_mut(&CM_DATA, |data| {
+                                                data.trade_logs_storage_buffer = [flush_buffer.split_off(..chunk_i*chunk_size), data.trade_logs_storage_buffer].concat();
+                                                data.flush_trade_logs_storage_errors.push((FlushTradeLogStorageError::CreateTradeLogStorageCanisterError(e), time_nanos_u64()));
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(flush_call_error) => {
+                            with_mut(&CM_DATA, |data| {
+                                data.trade_logs_storage_buffer = [flush_buffer.split_off(..chunk_i*chunk_size), data.trade_logs_storage_buffer].concat();
+                                data.flush_trade_logs_storage_errors.push((FlushTradeLogStorageError::TradeLogStorageCanisterCallError(call_error_as_u32_and_string(flush_call_error)), time_nanos_u64()));
+                            });
+                        }
+                    }
+                }
+                
+                with_mut(&CM_DATA, |data| {
+                    data.trade_log_storage_flush_lock = false;
+                });
+            }
+            
         },
         Err(call_error) => {
             with_mut(&CM_DATA, |cm_data| {
-                cm_data.do_payouts_errors.push((call_error.0 as u32, call_error.1));
+                cm_data.do_payouts_errors.push(call_error_as_u32_and_string(call_error));
             });
         }
     }

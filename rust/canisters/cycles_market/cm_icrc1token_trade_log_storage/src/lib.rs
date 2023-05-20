@@ -31,7 +31,8 @@ use cts_lib::{
     stable_memory_tools::{
         self,
         locate_minimum_memory
-    }
+    },
+    consts::GiB,
 };
 
 use ic_stable_structures::{
@@ -67,6 +68,8 @@ impl Data {
 
 
 const STABLE_MEMORY_ID_TRADE_LOGS_STORAGE: MemoryId = MemoryId::new(1);
+const MAX_STORAGE_BYTES: u64 = 50 * GiB;
+
 
 
 thread_local!{
@@ -139,7 +142,11 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_trade_logs_storage_memory();
         
     with(&DATA, |data| {     
-    
+        
+        if data.trade_logs_memory_i + q.bytes.len() as u64 > MAX_STORAGE_BYTES {
+            return Err(FlushError::StorageIsFull);
+        }
+            
         if let Err(_) = locate_minimum_memory(
             &trade_log_storage_memory,
             data.trade_logs_memory_i + q.bytes.len() as u64
