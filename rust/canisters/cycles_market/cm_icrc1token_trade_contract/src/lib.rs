@@ -261,7 +261,7 @@ const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 8] = b"CMTRNSFR";
 
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
-const FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE: usize = 1 * MiB;
+const FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE: usize = 1 * MiB; // can make this bigger 5 or 10 MiB, the flush logic handles flush chunks.
 
 const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 
@@ -447,6 +447,7 @@ type CallError = (u32, String);
 pub enum FlushTradeLogStorageError {
     CreateTradeLogStorageCanisterError(CreateTradeLogStorageCanisterError),
     TradeLogStorageCanisterCallError(CallError),
+    NewTradeLogStorageCanisterIsFull, // when a *new* trade-log-storage-canister returns StorageIsFull on the first flush call. 
 }
 
 
@@ -583,7 +584,7 @@ async fn do_payouts() {
                     }
                 };
                 
-                let chunk_size: usize = with(&CM_DATA, |data| { (1*MiB) - ((1*MiB) % data.trade_log_storage_canisters.last().unwrap().log_size as usize) }); // we know for sure there must be at least one trade-llog-storage-canister at this point.
+                let chunk_size: usize = (1*MiB+512*KiB) - ((1*MiB+512*KiB) % with(&CM_DATA, |data| { data.trade_log_storage_canisters.last().unwrap().log_size as usize }));
                                 
                 for (chunk_i, chunk) in flush_buffer.chunks(chunk_size).enumerate() {
                     
@@ -621,7 +622,14 @@ async fn do_payouts() {
                                                         });
                                                     },
                                                     Err(flush_error) => match flush_error {
-                                                        FlushError::StorageIsFull => {}//shouldnt happpen
+                                                        FlushError::StorageIsFull => {
+                                                            //what happens when a new canister storage is full? make new canister on a different subnet?
+                                                            with_mut(&CM_DATA, |data| {
+                                                                data.trade_log_storage_buffer = [flush_buffer.split_off(chunk_i*chunk_size), std::mem::take(&mut data.trade_log_storage_buffer)].concat();
+                                                                data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::NewTradeLogStorageCanisterIsFull, time_nanos_u64()));
+                                                            });
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                                 Err(flush_call_error) => {
