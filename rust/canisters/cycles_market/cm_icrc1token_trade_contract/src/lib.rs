@@ -27,6 +27,7 @@ use cts_lib::{
         Cycles,
         CyclesTransferRefund,
         management_canister,
+        canister_code::CanisterCode,
         cycles_market::{icrc1_token_trade_contract::*, icrc1token_trade_log_storage::*},
         cm_caller::*,
     },
@@ -84,10 +85,9 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-    stable_memory_tools,
+    stable_memory_tools::{self, MemoryId},
 };
 
-use ic_stable_structures::memory_manager::MemoryId;
 
 use serde_bytes::{ByteBuf, Bytes};
 
@@ -159,7 +159,7 @@ impl CMData {
             trade_log_storage_flush_lock: false,
             create_trade_log_storage_canister_temp_holder: None,
             flush_trade_log_storage_errors: Vec::new(),
-            trade_log_storage_canister_code: CanisterCode::new(),
+            trade_log_storage_canister_code: CanisterCode::empty(),
         }
     }
 }
@@ -175,20 +175,6 @@ pub struct TradeLogStorageCanisterData {
 }
 
 
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct CanisterCode {
-    hash: [u8; 32],
-    module: ByteBuf,
-}
-impl CanisterCode {
-    fn new() -> Self {
-        Self {
-            hash: [0; 32],
-            module: ByteBuf::new()
-        }
-    }
-}
 
 
 
@@ -307,17 +293,8 @@ thread_local! {
 
 // ------------------ INIT ----------------------
 
-#[derive(CandidType, Deserialize)]
-struct CMInit {
-    cts_id: Principal,
-    cm_main_id: Principal,
-    cm_caller: Principal,
-    icrc1_token_ledger: Principal,
-    icrc1_token_ledger_transfer_fee: Tokens,
-} 
-
 #[init]
-fn init(cm_init: CMInit) {
+fn init(cm_init: CMIcrc1TokenTradeContractInit) {
     stable_memory_tools::init(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION);
 
     with_mut(&CM_DATA, |cm_data| { 
@@ -326,6 +303,7 @@ fn init(cm_init: CMInit) {
         cm_data.cm_caller = cm_init.cm_caller;
         cm_data.icrc1_token_ledger = cm_init.icrc1_token_ledger; 
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
+        cm_data.trade_log_storage_canister_code = cm_init.trade_log_storage_canister_code;
     });
     
     localkey::cell::set(&TOKEN_LEDGER_ID, cm_init.icrc1_token_ledger);

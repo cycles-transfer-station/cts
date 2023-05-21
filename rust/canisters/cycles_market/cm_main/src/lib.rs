@@ -5,35 +5,17 @@ use cts_lib::{
             trap,
             caller,
             call::{
-                call_with_payment128,
-                call_raw128,
-                CallResult,
-                arg_data,
-                arg_data_raw_size,
                 reply,
-                RejectionCode,
-                msg_cycles_available128,
-                msg_cycles_accept128,
-                msg_cycles_refunded128    
             },
-            stable::{
-                stable64_grow,
-                stable64_read,
-                stable64_size,
-                stable64_write,
-            }
         },
         export::{
             Principal,
             candid::{
-                self, 
                 CandidType, 
                 Deserialize,
                 utils::{encode_one, decode_one}
             },
         },
-    },
-    ic_cdk_macros::{
         init,
         pre_upgrade,
         post_upgrade,
@@ -42,28 +24,22 @@ use cts_lib::{
     },
     types::{
         Cycles,
-        cm_caller::*
+        canister_code::CanisterCode
     },
     tools::{
         localkey::{
-            self,
             refcell::{
                 with, 
                 with_mut,
-            },
-            cell::{
-                get,
-                set
             }
-        }
+        },
+        caller_is_controller_gaurd,
+        sha256,
     },
-    consts::{
-        WASM_PAGE_SIZE_BYTES,
-        MANAGEMENT_CANISTER_ID,
-    }
+    stable_memory_tools::{self, MemoryId},
+    icrc::Tokens,
 };
-use std::cell::{Cell, RefCell};
-
+use std::cell::{RefCell};
 
 
 
@@ -91,26 +67,35 @@ impl Contracts {
 struct CMMainData {
     cts_id: Principal,
     contracts: Contracts,
+    icrc1token_trade_contract_canister_code: CanisterCode,
+    icrc1token_trade_log_storage_canister_code: CanisterCode,
+    cm_caller_canister_code: CanisterCode,
 }
 
 impl CMMainData {
     fn new() -> Self {
         Self {
             cts_id: Principal::from_slice(&[]),
-            contracts: Contracts::new()
+            contracts: Contracts::new(),
+            icrc1token_trade_contract_canister_code: CanisterCode::empty(),
+            icrc1token_trade_log_storage_canister_code: CanisterCode::empty(),
+            cm_caller_canister_code: CanisterCode::empty()
         }
     }
 }
 
+#[derive(CandidType, Deserialize)]
+struct OldCMMainData {}
 
 
 
 
 
 
-const NewIcrc1TokenTradeContractCycles: Cycles = 5_000_000_000_000;
-const NewIcrc1TokenTradeContractCMCallerCycles: Cycles = 5_000_000_000_000;
+const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 5_000_000_000_000;
+const NEW_ICRC1TOKEN_TRADE_CONTRACT_CM_CALLER_CYCLES: Cycles = 5_000_000_000_000;
 
+const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
 
 thread_local! {
@@ -125,37 +110,74 @@ struct CMMainInit {
 }
 
 #[init]
-fn init(init: CMMainInit) {
+fn init(cm_main_init: CMMainInit) {
+    stable_memory_tools::init(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID);
+
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
-        cm_main_data.cts_id = init.cts_id;
-        cm_main_data.contracts.icrc1_token_trade_contracts = init.icrc1_token_trade_contracts;
+        cm_main_data.cts_id = cm_main_init.cts_id;
+        cm_main_data.contracts.icrc1_token_trade_contracts = cm_main_init.icrc1_token_trade_contracts;
     });
 }
 
 
-
-
-// upgrades
-
-
-
-
-
-// ----------------------------
-
-
-
-#[query(manual_reply = true)]
-pub fn see_icrc1_token_trade_contracts() {
-    with(&CM_MAIN_DATA, |cm_main_data| {
-        reply::<(&Vec<Icrc1TokenTradeContract>,)>((&(cm_main_data.contracts.icrc1_token_trade_contracts),));
-    });
+#[pre_upgrade]
+fn pre_upgrade() {
+    stable_memory_tools::pre_upgrade();
 }
 
+#[post_upgrade]
+fn post_upgrade() {
+    stable_memory_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(OldCMMainData) -> CMMainData>);
+
+}
+
+
+
+// ----------------- UPLOAD-CANISTER-CODE --------------------
 
 #[update]
-pub fn create_icrc1_token_trade_contract(icrc1_ledger_id: Principal) -> Principal/*Icrc1TokenTradeContractId*/ {
-    //if authorized_callers.contains(caller()) == false { trap("caller is with a lack of an authorization."); }
+pub fn controller_upload_icrc1token_trade_contract_canister_code(canister_code: CanisterCode) {
+    caller_is_controller_gaurd(&caller());
+    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
+        trap("module hash is not as given");
+    } 
+    with_mut(&CM_MAIN_DATA, |data| {
+        data.icrc1token_trade_contract_canister_code = canister_code;
+    });
+}
+
+#[update]
+pub fn controller_upload_icrc1token_trade_log_storage_canister_code(canister_code: CanisterCode) {
+    caller_is_controller_gaurd(&caller());
+    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
+        trap("module hash is not as given");
+    } 
+    with_mut(&CM_MAIN_DATA, |data| {
+        data.icrc1token_trade_log_storage_canister_code = canister_code;
+    });
+}
+
+#[update]
+pub fn controller_upload_cm_caller_canister_code(canister_code: CanisterCode) {
+    caller_is_controller_gaurd(&caller());
+    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
+        trap("module hash is not as given");
+    } 
+    with_mut(&CM_MAIN_DATA, |data| {
+        data.cm_caller_canister_code = canister_code;
+    });
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct ControllerCreateIcrc1TokenTradeContractQuest {
+    pub icrc1_ledger_id: Principal,
+    pub icrc1_ledger_transfer_fee: Tokens,
+}
+
+#[update]
+pub fn controller_create_icrc1_token_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) -> Principal/*Icrc1TokenTradeContractId*/ {
+    caller_is_controller_gaurd(&caller());
     
     // create canister for the trade-contract
     // create canister for the cm_caller
@@ -163,6 +185,7 @@ pub fn create_icrc1_token_trade_contract(icrc1_ledger_id: Principal) -> Principa
     // install code onto the trade-contract
     // save
     // return
+    todo!();
 }
 
 
@@ -170,14 +193,14 @@ pub fn create_icrc1_token_trade_contract(icrc1_ledger_id: Principal) -> Principa
 
 
 
+// ------------
 
-
-
-
-
-
-
-
+#[query(manual_reply = true)]
+pub fn see_icrc1_token_trade_contracts() {
+    with(&CM_MAIN_DATA, |cm_main_data| {
+        reply::<(&Vec<Icrc1TokenTradeContract>,)>((&(cm_main_data.contracts.icrc1_token_trade_contracts),));
+    });
+}
 
 
 

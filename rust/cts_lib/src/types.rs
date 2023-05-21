@@ -64,7 +64,7 @@ pub struct CyclesTransfer {
 pub mod canister_code {
     use super::{CandidType, Deserialize};
     
-    #[derive(CandidType, Deserialize, Clone)]
+    #[derive(CandidType, Deserialize)]
     pub struct CanisterCode {
         #[serde(with = "serde_bytes")]
         module: Vec<u8>,
@@ -77,6 +77,12 @@ pub mod canister_code {
             Self {
                 module_hash: crate::tools::sha256(&module), // put this on the top if move error
                 module: module,
+            }
+        }
+        pub fn empty() -> Self {
+            Self {
+                module_hash: [0u8; 32],
+                module: Vec::new()
             }
         }
         pub fn module(&self) -> &Vec<u8> {
@@ -571,11 +577,22 @@ pub mod cycles_market {
     pub mod icrc1_token_trade_contract {
         use super::{CandidType, Deserialize, Cycles};
         use crate::icrc::{IcrcId, Tokens, TokenTransferError, BlockId};
+        use crate::types::canister_code::CanisterCode;
         use ic_cdk::export::Principal;
         
         pub type PositionId = u128;
         pub type PurchaseId = u128;
         pub type CyclesPerToken = Cycles;
+        
+        #[derive(CandidType, Deserialize)]
+        pub struct CMIcrc1TokenTradeContractInit {
+            pub cts_id: Principal,
+            pub cm_main_id: Principal,
+            pub cm_caller: Principal,
+            pub icrc1_token_ledger: Principal,
+            pub icrc1_token_ledger_transfer_fee: Tokens,
+            pub trade_log_storage_canister_code: CanisterCode,
+        }
 
         #[derive(CandidType, Deserialize)]
         pub struct CreateCyclesPositionQuest {
@@ -838,8 +855,7 @@ pub mod cm_caller {
     
     #[derive(CandidType, Deserialize)]
     pub struct CMCallerInit {
-        pub cycles_market_id: Principal,
-        pub cts_id: Principal
+        pub cycles_market_token_trade_contract: Principal,
     }
 
     #[derive(CandidType, Deserialize)]    

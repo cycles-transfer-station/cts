@@ -30,9 +30,9 @@ use crate::{
 use ic_stable_structures::{
     Memory,
     DefaultMemoryImpl, 
-    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
-    
+    memory_manager::{MemoryManager, VirtualMemory},  
 };
+pub use ic_stable_structures::memory_manager::MemoryId;
 
 use serde_bytes::{ByteBuf, Bytes};
 

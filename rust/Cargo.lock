@@ -228,6 +228,7 @@ dependencies = [
  "candid",
  "cts_lib",
  "futures",
+ "ic-stable-structures",
  "serde",
  "serde_bytes",
 ]

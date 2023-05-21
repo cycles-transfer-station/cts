@@ -72,9 +72,7 @@ const MAX_STORAGE_BYTES: u64 = 50 * GiB as u64;
 
 
 thread_local!{
-    
     static DATA: RefCell<Data> = RefCell::new(Data::new());
-    
 }
 
 
