@@ -257,8 +257,10 @@ const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 8] = b"CMTRNSFR";
 
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
-
 const FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE: usize = 1 * MiB;
+
+const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
+
 
 
 // think bout the position matches, maker is the position-positor, taker is the position-purchaser,
@@ -310,7 +312,7 @@ struct CMInit {
 
 #[init]
 fn init(cm_init: CMInit) {
-    stable_memory_tools::set_data(&CM_DATA, |_old_data: OldCMData| { None });
+    stable_memory_tools::init(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION);
 
     with_mut(&CM_DATA, |cm_data| { 
         cm_data.cts_id = cm_init.cts_id; 
@@ -333,8 +335,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::set_data(&CM_DATA, |_old_data: OldCMData| { None });
-    stable_memory_tools::post_upgrade();
+    stable_memory_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(OldCMData) -> CMData>);
     
     with(&CM_DATA, |cm_data| {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);

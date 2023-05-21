@@ -1,7 +1,7 @@
 
 use std::cell::RefCell;
 use std::thread::LocalKey;
-
+use std::collections::BTreeMap;
 
 use crate::{
     ic_cdk::{
@@ -38,17 +38,18 @@ use serde_bytes::{ByteBuf, Bytes};
 
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
-const STABLE_MEMORY_ID_STATE_SNAPSHOT_SERIALIZATION: MemoryId = MemoryId::new(0);
+
+type StateSnapshots = BTreeMap<MemoryId, (
+    Vec<u8>,
+    Box<dyn Fn(&[u8]) -> Result<(), String>>, // load data bytes function
+    Box<dyn Fn() -> Result<Vec<u8>, String>>, // get data bytes function
+)>;
 
 thread_local!{
     
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> = RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
     
-    static STATE_SNAPSHOT: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-    
-    static LOAD_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn(&[u8]) -> Result<(), String>>> = RefCell::new(Box::new(|_b| { trap("call the stable_memory_tools init and post_upgrade functions") }));
-    static GET_DATA_BYTES_FUNCTION: RefCell<Box<dyn Fn() -> Result<Vec<u8>, String>>> = RefCell::new(Box::new(|| { trap("call the stable_memory_tools init and post_upgrade functions") }));
-
+    static STATE_SNAPSHOTS: RefCell<StateSnapshots> = RefCell::new(StateSnapshots::new());
 
 }
 
@@ -57,11 +58,6 @@ pub fn get_stable_memory(memory_id: MemoryId) -> VirtualMemory<DefaultMemoryImpl
     with(&MEMORY_MANAGER, |mgr| mgr.get(memory_id))
 }
 
-
-
-fn get_state_snapshot_stable_memory() -> VirtualMemory<DefaultMemoryImpl> {
-    get_stable_memory(STABLE_MEMORY_ID_STATE_SNAPSHOT_SERIALIZATION)
-}
 
 
 pub trait Serializable {
@@ -80,71 +76,64 @@ impl<T: CandidType + for<'a> Deserialize<'a>> Serializable for T {
 
 
 
-pub fn init<Data: 'static + Serializable>(s: &'static LocalKey<RefCell<Data>>) {
-    with_mut(&LOAD_DATA_BYTES_FUNCTION, |load_data_bytes_fn| {
-        *load_data_bytes_fn = Box::new(move |b| {
-            with_mut(s, |data| {
-                *data = <Data as Serializable>::backward(b)?;
-                Ok(())
-            })
-        });
-    });
-    with_mut(&GET_DATA_BYTES_FUNCTION, |get_data_bytes_fn| {
-        *get_data_bytes_fn = Box::new(move || { 
-            with(s, |data| {
-                <Data as Serializable>::forward(data)
-            })
-        }); 
-    });
+pub fn init<Data: 'static + Serializable>(s: &'static LocalKey<RefCell<Data>>, memory_id: MemoryId) {
+    with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
+        state_snapshots.insert(
+            memory_id,
+            (
+                Vec::new(),
+                Box::new(move |b| {
+                    with_mut(s, |data| {
+                        *data = <Data as Serializable>::backward(b)?;
+                        Ok(())
+                    })
+                }),
+                Box::new(move || { 
+                    with(s, |data| {
+                        <Data as Serializable>::forward(data)
+                    })
+                })
+            )
+        ); 
+    });    
 }
 
 pub fn pre_upgrade() {
-    create_state_snapshot().unwrap();
-    write_state_snapshot_with_length_onto_the_stable_memory(
-        &get_state_snapshot_stable_memory(),
-        STABLE_MEMORY_HEADER_SIZE_BYTES
-    ).unwrap();
+    with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
+        for (memory_id, d) in state_snapshots.iter_mut() {
+            d.0 = d.2().unwrap();
+            write_data_with_length_onto_the_stable_memory(
+                &get_stable_memory(*memory_id/*.clone()*/),
+                STABLE_MEMORY_HEADER_SIZE_BYTES,
+                &d.0
+            ).unwrap();
+        }
+    });
 }
 
-pub fn post_upgrade<Data, OldData, F>(s: &'static LocalKey<RefCell<Data>>, opt_old_as_new_convert: Option<F>) 
+pub fn post_upgrade<Data, OldData, F>(s: &'static LocalKey<RefCell<Data>>, memory_id: MemoryId, opt_old_as_new_convert: Option<F>) 
     where 
         Data: 'static + Serializable,
         OldData: Serializable,
         F: Fn(OldData) -> Data
     {
-
-    read_stable_memory_bytes_with_length_onto_the_state_snapshot(
-        &get_state_snapshot_stable_memory(),
-        STABLE_MEMORY_HEADER_SIZE_BYTES
+                
+    let stable_data: Vec<u8> = read_stable_memory_bytes_with_length(
+        &get_stable_memory(memory_id),
+        STABLE_MEMORY_HEADER_SIZE_BYTES,
     );
 
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        with_mut(s, |data| {
-            *data = match opt_old_as_new_convert {
-                Some(ref old_as_new_convert) => old_as_new_convert(<OldData as Serializable>::backward(state_snapshot).unwrap()),
-                None => <Data as Serializable>::backward(state_snapshot).unwrap(),
-            };
-        });
+    with_mut(s, |data| {
+        *data = match opt_old_as_new_convert {
+            Some(ref old_as_new_convert) => old_as_new_convert(<OldData as Serializable>::backward(&stable_data).unwrap()),
+            None => <Data as Serializable>::backward(&stable_data).unwrap(),
+        };
     });
     
     // portant!
-    init(s);
+    init(s, memory_id);
     
 }
-
-
-
-
-
-
-fn create_state_snapshot() -> Result<u64, String> {
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = with(&GET_DATA_BYTES_FUNCTION, |f| { f() })?;
-        Ok(state_snapshot.len() as u64)
-    })
-}
-
-
 
 
 
@@ -167,28 +156,25 @@ pub fn locate_minimum_memory(memory: &VirtualMemory<DefaultMemoryImpl>, want_mem
 
 
 
-fn write_state_snapshot_with_length_onto_the_stable_memory(serialization_memory: &VirtualMemory<DefaultMemoryImpl>, offset: u64) -> Result<(), ()> {
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        locate_minimum_memory(
-            serialization_memory,
-            offset + 8/*len of the data*/ + state_snapshot.len() as u64
-        )?; 
-        serialization_memory.write(offset, &((state_snapshot.len() as u64).to_be_bytes()));
-        serialization_memory.write(offset + 8, state_snapshot);
-        Ok(())
-    })
+fn write_data_with_length_onto_the_stable_memory(serialization_memory: &VirtualMemory<DefaultMemoryImpl>, stable_memory_offset: u64, data: &[u8]) -> Result<(), ()> {
+    locate_minimum_memory(
+        serialization_memory,
+        stable_memory_offset + 8/*len of the data*/ + data.len() as u64
+    )?; 
+    serialization_memory.write(stable_memory_offset, &((data.len() as u64).to_be_bytes()));
+    serialization_memory.write(stable_memory_offset + 8, data);
+    Ok(())
 }
 
-fn read_stable_memory_bytes_with_length_onto_the_state_snapshot(serialization_memory: &VirtualMemory<DefaultMemoryImpl>, offset: u64) {
+fn read_stable_memory_bytes_with_length(serialization_memory: &VirtualMemory<DefaultMemoryImpl>, stable_memory_offset: u64) -> Vec<u8> {
     
     let mut data_len_u64_be_bytes: [u8; 8] = [0; 8];
-    serialization_memory.read(offset, &mut data_len_u64_be_bytes);
+    serialization_memory.read(stable_memory_offset, &mut data_len_u64_be_bytes);
     let data_len_u64: u64 = u64::from_be_bytes(data_len_u64_be_bytes); 
     
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = vec![0; data_len_u64.try_into().unwrap()]; 
-        serialization_memory.read(offset + 8, state_snapshot);
-    });
+    let mut data: Vec<u8> = vec![0; data_len_u64.try_into().unwrap()]; 
+    serialization_memory.read(stable_memory_offset + 8, &mut data);
+    data
 }
 
 
@@ -205,7 +191,19 @@ fn read_stable_memory_bytes_with_length_onto_the_state_snapshot(serialization_me
 fn controller_create_state_snapshot() { //-> u64/*len of the state_snapshot*/ {
     caller_is_controller_gaurd(&caller());
         
-    reply::<(u64,)>((create_state_snapshot().unwrap(),));
+    let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
+    
+    let state_snapshot_len: u64 = with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
+        match state_snapshots.get_mut(&memory_id) {
+            None => trap("no data associated with this memory_id"),
+            Some(d) => {
+                d.0 = d.2().unwrap();
+                d.0.len() as u64
+            }
+        }
+    });
+
+    reply::<(u64,)>((state_snapshot_len,));
 }
 
 #[export_name = "canister_query controller_download_state_snapshot"]
@@ -213,9 +211,15 @@ fn controller_download_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
     let chunk_size: usize = 1 * MiB as usize;
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
-        reply::<(Option<&Bytes/*&[u8]*/>,)>((state_snapshot.chunks(chunk_size).nth(chunk_i as usize).map(Bytes::new),));
+    let (chunk_i, memory_id) = arg_data::<(u64, u8)>();
+    
+    with(&STATE_SNAPSHOTS, |state_snapshots| {
+        match state_snapshots.get(&MemoryId::new(memory_id)) {
+            None => trap("no data associated with this memory_id"),
+            Some(d) => {
+                reply::<(Option<&Bytes/*&[u8]*/>,)>((d.0.chunks(chunk_size).nth(chunk_i as usize).map(Bytes::new),));
+            }
+        }
     });
 }
 
@@ -223,8 +227,15 @@ fn controller_download_state_snapshot() {
 fn controller_clear_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        *state_snapshot = Vec::new();
+    let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
+    
+    with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
+        match state_snapshots.get_mut(&memory_id) {
+            None => trap("no data associated with this memory_id"),
+            Some(d) => {
+                d.0 = Vec::new();
+            }
+        }
     });
     
     reply::<()>(());
@@ -234,8 +245,15 @@ fn controller_clear_state_snapshot() {
 fn controller_append_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
-    with_mut(&STATE_SNAPSHOT, |state_snapshot| {
-        state_snapshot.append(&mut arg_data::<(ByteBuf,)>().0);
+    let (memory_id, mut bytes) = arg_data::<(u8, ByteBuf)>();
+    
+    with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
+        match state_snapshots.get_mut(&MemoryId::new(memory_id)) {
+            None => trap("no data associated with this memory_id"),
+            Some(d) => {
+                d.0.append(&mut bytes);
+            }
+        }
     });
     
     reply::<()>(());
@@ -245,10 +263,15 @@ fn controller_append_state_snapshot() {
 fn controller_load_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
-    with(&STATE_SNAPSHOT, |state_snapshot| {
-        with(&LOAD_DATA_BYTES_FUNCTION, |f| {
-            f(state_snapshot).unwrap()
-        })
+    let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
+    
+    with(&STATE_SNAPSHOTS, |state_snapshots| {
+        match state_snapshots.get(&memory_id) {
+            None => trap("no data associated with this memory_id"),
+            Some(d) => {
+                d.1(&d.0).unwrap();
+            }
+        }
     });
     
     reply::<()>(());
