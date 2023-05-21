@@ -33,6 +33,7 @@ use cts_lib::{
         locate_minimum_memory
     },
     consts::GiB,
+    types::cycles_market::icrc1token_trade_log_storage::*,
 };
 
 use ic_stable_structures::{
@@ -40,8 +41,6 @@ use ic_stable_structures::{
     DefaultMemoryImpl, 
     memory_manager::{MemoryId, VirtualMemory},
 };
-
-use serde_bytes::ByteBuf;
 
 
 
@@ -81,11 +80,6 @@ thread_local!{
 
 // -------------------------
 
-#[derive(CandidType, Deserialize)]
-struct Icrc1TokenTradeLogStorageInit {
-    log_size: u32,
-    first_log_id: u128,
-}
 
 #[init]
 fn init(q: Icrc1TokenTradeLogStorageInit) {
@@ -93,7 +87,6 @@ fn init(q: Icrc1TokenTradeLogStorageInit) {
     
     with_mut(&DATA, |data| {
         data.log_size = q.log_size;
-        data.first_log_id = q.first_log_id;
     });
 }
 
@@ -118,20 +111,6 @@ fn get_trade_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
 
 // ----------------
 
-#[derive(CandidType, Deserialize)]
-pub struct FlushQuest {
-    bytes: ByteBuf
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct FlushSuccess {}
-
-
-#[derive(CandidType, Deserialize)]
-pub enum FlushError {
-    StorageIsFull,
-}
-
 #[update]
 pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     caller_is_controller_gaurd(&caller());
@@ -152,7 +131,7 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         ) {
             return Err(FlushError::StorageIsFull);
         }
-
+                
         trade_log_storage_memory.write(
             data.trade_logs_memory_i,
             &q.bytes
@@ -163,6 +142,9 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     })?;
     
     with_mut(&DATA, |data| {
+        if data.trade_logs_memory_i == 0 {
+            data.first_log_id = u128::from_be_bytes(q.bytes[16..32].try_into().unwrap());   
+        }
         data.trade_logs_memory_i += q.bytes.len() as u64
     });
     
@@ -174,26 +156,13 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct SeeTradeLogsQuest {
-    start_id: u128,
-    length: u128,
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub struct StorageLogs {
-    logs: ByteBuf
-}
-
-
 // this function and then the move_complete_trade_logs_into_the_stable_memory function on the token_trade_contract
 // disable on replicated?
 #[query]
 pub fn see_trade_logs(q: SeeTradeLogsQuest) -> StorageLogs {
     
-    let mut logs: ByteBuf = ByteBuf::new();
-
+    let mut logs: Vec<u8> = Vec::new();
+    
     with(&DATA, |data| {
         if q.start_id < data.first_log_id {
             trap("start_id is less than the first_log_id in this storage canister")
@@ -207,10 +176,10 @@ pub fn see_trade_logs(q: SeeTradeLogsQuest) -> StorageLogs {
         
         let memory = get_trade_logs_storage_memory();
         
-        *(&mut logs)/*so we don't move*/ = ByteBuf::from(vec![0; (finish_i - start_i) as usize]); 
+        logs = vec![0; (finish_i - start_i) as usize]; 
         
         memory.read(start_i, &mut logs);
-        
+       
     });
     
     StorageLogs{
