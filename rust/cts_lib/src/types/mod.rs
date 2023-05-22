@@ -25,6 +25,8 @@ pub type CTSFuel = Cycles;
 pub type XdrPerMyriadPerIcp = u64;
 
 
+pub type CallError = (u32, String);
+
 
 #[derive(CandidType, Deserialize)]
 pub struct DownloadRChunkQuest {
@@ -64,7 +66,7 @@ pub struct CyclesTransfer {
 pub mod canister_code {
     use super::{CandidType, Deserialize};
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Clone)]
     pub struct CanisterCode {
         #[serde(with = "serde_bytes")]
         module: Vec<u8>,
@@ -158,87 +160,6 @@ pub mod cycles_banks_cache {
 
 
 
-
-
-pub mod management_canister {
-    use super::*;
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct ManagementCanisterInstallCodeQuest<'a> {
-        pub mode : ManagementCanisterInstallCodeMode,
-        pub canister_id : Principal,
-        #[serde(with = "serde_bytes")]
-        pub wasm_module : &'a [u8],
-        #[serde(with = "serde_bytes")]
-        pub arg : &'a [u8],
-    }
-
-    #[allow(non_camel_case_types)]
-    #[derive(CandidType, Deserialize)]
-    pub enum ManagementCanisterInstallCodeMode {
-        install, 
-        reinstall, 
-        upgrade
-    }
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct ManagementCanisterCreateCanisterQuest {
-        pub settings : Option<ManagementCanisterOptionalCanisterSettings>
-    }
-
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct ManagementCanisterOptionalCanisterSettings {
-        pub controllers : Option<Vec<Principal>>,
-        pub compute_allocation : Option<u128>,
-        pub memory_allocation : Option<u128>,
-        pub freezing_threshold : Option<u128>,
-    }
-
-    #[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
-    pub struct ManagementCanisterCanisterSettings {
-        pub controllers : Vec<Principal>,
-        pub compute_allocation : u128,
-        pub memory_allocation : u128,
-        pub freezing_threshold : u128
-    }
-
-    #[derive(CandidType, Deserialize, Clone)]
-    pub struct ManagementCanisterCanisterStatusRecord {
-        pub status : ManagementCanisterCanisterStatusVariant,
-        pub settings: ManagementCanisterCanisterSettings,
-        pub module_hash: Option<[u8; 32]>,
-        pub memory_size: u128,
-        pub cycles: u128
-    }
-
-    #[allow(non_camel_case_types)]
-    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-    pub enum ManagementCanisterCanisterStatusVariant {
-        running,
-        stopping,
-        stopped,
-    }
-
-    #[derive(CandidType, Deserialize)]
-    pub struct CanisterIdRecord {
-        pub canister_id : Principal
-    }
-
-    #[derive(CandidType, Deserialize)]
-    pub struct ChangeCanisterSettingsRecord {
-        pub canister_id : Principal,
-        pub settings : ManagementCanisterOptionalCanisterSettings
-    }
-
-
-}
-
-
-
-
-
-
-
 pub mod cts {
     use super::*;
     
@@ -249,9 +170,6 @@ pub mod cts {
     }
     
 }
-
-
-
 
 
 

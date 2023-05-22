@@ -3,7 +3,7 @@ use crate::{
     ic_cdk::{
         export::{Principal, candid::CandidType},
         trap,
-        api::is_controller,
+        api::{is_controller, call::RejectionCode}
     },
     ic_ledger_types::{
         IcpIdSub,
@@ -19,6 +19,7 @@ use crate::{
         XdrPerMyriadPerIcp,
         DownloadRChunkQuest,
         RChunkData,
+        CallError,
     },
     icrc::{Tokens},
 };
@@ -275,6 +276,10 @@ pub fn caller_is_controller_gaurd(caller: &Principal) {
 
 
 
+
+pub fn call_error_as_u32_and_string(t: (RejectionCode, String)) -> CallError {
+    (t.0 as u32, t.1)
+}
 
 
 

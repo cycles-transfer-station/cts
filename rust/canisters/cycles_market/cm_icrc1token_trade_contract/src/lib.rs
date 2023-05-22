@@ -15,7 +15,8 @@ use cts_lib::{
         time_nanos,
         time_nanos_u64,
         time_seconds,
-        caller_is_controller_gaurd
+        caller_is_controller_gaurd,
+        call_error_as_u32_and_string,
     },
     consts::{
         MiB,
@@ -26,6 +27,7 @@ use cts_lib::{
     types::{
         Cycles,
         CyclesTransferRefund,
+        CallError,
         management_canister,
         canister_code::CanisterCode,
         cycles_market::{icrc1_token_trade_contract::*, icrc1token_trade_log_storage::*},
@@ -418,9 +420,6 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
 // ---------------
 
 
-
-type CallError = (u32, String);
-
 #[derive(CandidType, Deserialize)]
 pub enum FlushTradeLogStorageError {
     CreateTradeLogStorageCanisterError(CreateTradeLogStorageCanisterError),
@@ -507,9 +506,6 @@ async fn create_trade_log_storage_canister() -> Result<Principal/*saves the trad
 }
 
 
-fn call_error_as_u32_and_string(t: (RejectionCode, String)) -> CallError {
-    (t.0 as u32, t.1)
-}
 
 async fn do_payouts() {
     
