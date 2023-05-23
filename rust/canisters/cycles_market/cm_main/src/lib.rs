@@ -29,6 +29,7 @@ use cts_lib::{
         canister_code::CanisterCode,
         cm_caller::CMCallerInit,
         cycles_market::icrc1_token_trade_contract::CMIcrc1TokenTradeContractInit,
+        cm_main::*,
     },
     tools::{
         localkey::{
@@ -46,14 +47,6 @@ use cts_lib::{
 };
 use std::cell::{RefCell};
 
-
-
-#[derive(CandidType, Deserialize)]
-pub struct Icrc1TokenTradeContract {
-    icrc1_ledger_canister_id: Principal,
-    trade_contract_canister_id: Principal,
-    opt_cm_caller: Option<Principal>
-}
 
 
 #[derive(CandidType, Deserialize)]
