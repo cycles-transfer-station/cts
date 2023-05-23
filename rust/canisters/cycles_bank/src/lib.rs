@@ -1528,7 +1528,9 @@ fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData)
     cb_data.user_data.cm_trade_contracts
         .iter_mut()
         .find(|(k,_v): &(&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
-            k.opt_cm_caller.unwrap_or(k.trade_contract_canister_id) == caller()
+            let mut possible_callers: Vec<Principal> = vec![k.trade_contract_canister_id];
+            if let Some(cm_caller) = k.opt_cm_caller { possible_callers.push(cm_caller); }
+            possible_callers.contains(&caller())
         })
         .map(|(_k,v): (&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
             v
