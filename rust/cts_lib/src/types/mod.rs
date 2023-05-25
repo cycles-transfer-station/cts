@@ -65,8 +65,9 @@ pub struct CyclesTransfer {
 
 pub mod canister_code {
     use super::{CandidType, Deserialize};
+    use serde::Serialize;
     
-    #[derive(CandidType, Deserialize, Clone)]
+    #[derive(CandidType, Serialize, Deserialize, Clone)]
     pub struct CanisterCode {
         #[serde(with = "serde_bytes")]
         module: Vec<u8>,

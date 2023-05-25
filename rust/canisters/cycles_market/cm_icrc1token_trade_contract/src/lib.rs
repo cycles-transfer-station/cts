@@ -1,6 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashSet}
+    collections::{HashSet},
+    time::Duration,
 };
 use cts_lib::{
     tools::{
@@ -19,6 +20,7 @@ use cts_lib::{
         call_error_as_u32_and_string,
     },
     consts::{
+        KiB,
         MiB,
         MANAGEMENT_CANISTER_ID,
         NANOS_IN_A_SECOND,
@@ -28,11 +30,10 @@ use cts_lib::{
         Cycles,
         CyclesTransferRefund,
         CallError,
-        management_canister,
         canister_code::CanisterCode,
-        cycles_market::{icrc1_token_trade_contract::*, icrc1token_trade_log_storage::*},
-        cm_caller::*,
+        cycles_market::{icrc1token_trade_contract::{*, icrc1token_trade_log_storage::*}, cm_caller::*},
     },
+    management_canister,
     icrc::{
         IcrcId, 
         //IcrcSub,
@@ -51,7 +52,6 @@ use cts_lib::{
             trap,
             caller,
             call::{
-                RejectionCode,
                 call,
                 call_with_payment128,
                 call_raw128,
@@ -92,6 +92,7 @@ use cts_lib::{
 
 
 use serde_bytes::{ByteBuf, Bytes};
+use serde::Serialize;
 
 // -------
 
@@ -105,6 +106,7 @@ use payouts::_do_payouts;
 
 // ---------------
 
+// round robin on multiple cm_callers if the load gets heavy. scalable payouts!
 
 
 
@@ -112,11 +114,10 @@ use payouts::_do_payouts;
 
 
 
-
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct OldCMData {}
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CMData {
     cts_id: Principal,
     cm_main_id: Principal,
@@ -166,7 +167,7 @@ impl CMData {
     }
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TradeLogStorageCanisterData {
     log_size: u32,
     first_log_id: u128,
@@ -327,7 +328,34 @@ fn post_upgrade() {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
         localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data.icrc1_token_ledger_transfer_fee);
     });
-} 
+    
+    // ---------
+    
+    // when this token_trade_contract canister is upgrade, we stop the canister first then upgrade then start the canister. 
+    // if the cm_caller tries to name-call-back this canister it might be between after it stopped and before it started.
+    // so therefore after upgrade, call the cm_caller controller_do_try_callbacks to push through the name-call-backs.
+    // 2-minutes to make sure the cm_caller gets back it's system callback - which logs the try-name-callback result - from it's name-call-back call try.
+    //set_timer(2-minutes, call cm_caller controller_do_try_callbacks)
+    ic_cdk_timers::set_timer(Duration::from_secs(120), || ic_cdk::spawn(call_cm_caller_do_try_callbacks()));
+}
+
+async fn call_cm_caller_do_try_callbacks() {
+    match call_raw128(
+        with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
+        "controller_do_try_callbacks",
+        &[68, 73, 68, 76, 0, 0],
+        0
+    ).await {
+        Ok(_) => {
+            // can decode Vec<TryCallback> see if there are leftovers
+            // if leftovers can set the timer
+        },
+        Err(_call_error) => {
+            // can set the timer if need
+        }
+    };
+}
+
 
 // -------------------------------------------------------------
 
@@ -420,7 +448,7 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
 // ---------------
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum FlushTradeLogStorageError {
     CreateTradeLogStorageCanisterError(CreateTradeLogStorageCanisterError),
     TradeLogStorageCanisterCallError(CallError),
@@ -428,7 +456,7 @@ pub enum FlushTradeLogStorageError {
 }
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum CreateTradeLogStorageCanisterError {
     CreateCanisterCallError(CallError),
     InstallCodeCandidError(String),
@@ -461,7 +489,7 @@ async fn create_trade_log_storage_canister() -> Result<Principal/*saves the trad
     let mut module_hash: [u8; 32] = [0; 32]; // can't initalize an immutable variable from within a closure because the closure borrows it.
     
     match with(&CM_DATA, |data| {
-        module_hash = data.trade_log_storage_canister_code.hash.clone();
+        module_hash = data.trade_log_storage_canister_code.module_hash().clone();
         
         Ok(call_raw128(
             Principal::management_canister(),
@@ -470,7 +498,7 @@ async fn create_trade_log_storage_canister() -> Result<Principal/*saves the trad
                 ManagementCanisterInstallCodeQuest{
                     mode : ManagementCanisterInstallCodeMode::install,
                     canister_id : canister_id,
-                    wasm_module : &(data.trade_log_storage_canister_code.module),
+                    wasm_module : data.trade_log_storage_canister_code.module(),
                     arg : &encode_one(
                         Icrc1TokenTradeLogStorageInit{
                             log_size: TradeLog::STABLE_MEMORY_SERIALIZE_SIZE as u32,

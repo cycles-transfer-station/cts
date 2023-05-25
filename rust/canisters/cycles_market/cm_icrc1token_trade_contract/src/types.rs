@@ -1,14 +1,14 @@
 
 
 use crate::*;
-
+use serde::Serialize;
 
 pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct CyclesPosition {
     pub id: PositionId,   
     pub positor: Principal,
@@ -18,7 +18,7 @@ pub struct CyclesPosition {
     pub timestamp_nanos: u128,
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct TokenPosition {
     pub id: PositionId,   
     pub positor: Principal,
@@ -31,7 +31,7 @@ pub struct TokenPosition {
 
 
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {
     pub cmcaller_cycles_payout_call_success_timestamp_nanos: Option<u128>,
     pub cmcaller_cycles_payout_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
@@ -73,12 +73,12 @@ pub trait CyclesPayoutDataTrait {
 
 
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenTransferBlockHeightAndTimestampNanos {
     pub block_height: Option<BlockId>, // if None that means there was no transfer in this token-payout. it is an unlock of the funds within the same-token-id.
     pub timestamp_nanos: u128,
 }
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TokenPayoutData {
     pub token_transfer: Option<TokenTransferBlockHeightAndTimestampNanos>,
     pub cm_message_call_success_timestamp_nanos: Option<u128>,
@@ -118,7 +118,7 @@ pub trait TokenPayoutDataTrait {
 // -----------------
 
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TradeLog {
     pub position_id: PositionId,
     pub id: PurchaseId,
@@ -136,7 +136,7 @@ pub struct TradeLog {
     pub token_payout_data: TokenPayoutData
 }
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum PositionKind {
     Cycles,
     Token
@@ -302,7 +302,7 @@ impl TokenPayoutDataTrait for TradeLog {
 
 
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct VoidCyclesPosition {
     pub position_id: PositionId,
     pub positor: Principal,
@@ -348,7 +348,7 @@ impl CyclesPayoutDataTrait for VoidCyclesPosition {
 
 
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct VoidTokenPosition {
     pub position_id: PositionId,
     pub tokens: Tokens,
