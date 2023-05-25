@@ -205,6 +205,7 @@ dependencies = [
  "candid",
  "cts_lib",
  "futures",
+ "ic-cdk-timers",
  "ic-stable-structures",
  "serde",
  "serde_bytes",
@@ -297,11 +298,12 @@ name = "cts_lib"
 version = "0.1.0"
 dependencies = [
  "candid",
- "ic-cdk 0.7.4",
+ "ic-cdk 0.7.4 (git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27)",
  "ic-certified-map",
  "ic-ledger-types",
  "ic-stable-structures",
  "icrc-ledger-types",
+ "rmp-serde",
  "serde",
  "serde_bytes",
  "sha2 0.9.9",
@@ -560,6 +562,19 @@ dependencies = [
 [[package]]
 name = "ic-cdk"
 version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9beb0bf1dcd0639c313630e34aa547a2b19450ddf1969c176e13225ef3b29048"
+dependencies = [
+ "candid",
+ "ic-cdk-macros 0.6.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ic0 0.18.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "ic-cdk"
+version = "0.7.4"
 source = "git+https://github.com/dfinity/cdk-rs.git?rev=24bdf5ee37399c4e27ad329880c79733f6454f27#24bdf5ee37399c4e27ad329880c79733f6454f27"
 dependencies = [
  "candid",
@@ -594,6 +609,20 @@ dependencies = [
  "serde",
  "serde_tokenstream",
  "syn",
+]
+
+[[package]]
+name = "ic-cdk-timers"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c739e7c592cb66df4f15c6b6c4859b1195782f63923e2fb1b29553d9c0819bd4"
+dependencies = [
+ "futures",
+ "ic-cdk 0.7.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ic0 0.18.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_bytes",
+ "slotmap",
 ]
 
 [[package]]
@@ -987,6 +1016,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
 
 [[package]]
+name = "rmp"
+version = "0.8.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44519172358fd6d58656c86ab8e7fbc9e1490c3e8f14d35ed78ca0dd07403c9f"
+dependencies = [
+ "byteorder",
+ "num-traits",
+ "paste",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5b13be192e0220b8afb7222aa5813cb62cc269ebb5cac346ca6487681d2913e"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1085,6 +1136,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6528351c9bc8ab22353f9d776db39a20288e8d6c37ef8cfe3317cf875eecfc2d"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "slotmap"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1e08e261d0e8f5c43123b7adf3e4ca1690d655377ac93a03b2c9d3e98de1342"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]

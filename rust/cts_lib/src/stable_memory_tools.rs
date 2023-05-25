@@ -7,9 +7,6 @@ use crate::{
     ic_cdk::{
         caller,
         trap,
-        export::{
-            candid::{CandidType, Deserialize, encode_one, decode_one},
-        },
         api::{
             call::{
                 reply,
@@ -30,10 +27,11 @@ use crate::{
 use ic_stable_structures::{
     Memory,
     DefaultMemoryImpl, 
-    memory_manager::{MemoryManager, VirtualMemory},  
+    memory_manager::{MemoryManager, VirtualMemory},
 };
 pub use ic_stable_structures::memory_manager::MemoryId;
 
+use serde::{Serialize, Deserialize};
 use serde_bytes::{ByteBuf, Bytes};
 
 
@@ -65,12 +63,12 @@ pub trait Serializable {
     fn backward(b: &[u8]) -> Result<Self, String> where Self: Sized;     
 }
 
-impl<T: CandidType + for<'a> Deserialize<'a>> Serializable for T {
+impl<T: Serialize + for<'a> Deserialize<'a>> Serializable for T {
     fn forward(&self) -> Result<Vec<u8>, String> {
-        encode_one(self).map_err(|e| format!("{:?}", e))
+        rmp_serde::to_vec(self).map_err(|e| format!("{:?}", e))
     }
     fn backward(b: &[u8]) -> Result<Self, String> {
-        decode_one::<T>(b).map_err(|e| format!("{:?}", e))
+        rmp_serde::from_slice::<T>(b).map_err(|e| format!("{:?}", e))
     }
 }
 
@@ -101,6 +99,7 @@ pub fn init<Data: 'static + Serializable>(s: &'static LocalKey<RefCell<Data>>, m
 pub fn pre_upgrade() {
     with_mut(&STATE_SNAPSHOTS, |state_snapshots| {
         for (memory_id, d) in state_snapshots.iter_mut() {
+            d.0 = Vec::new(); // clear first so don't have to hold the deserialized data and old snapshot at the same time in the heap.
             d.0 = d.2().unwrap();
             write_data_with_length_onto_the_stable_memory(
                 &get_stable_memory(*memory_id/*.clone()*/),
@@ -197,6 +196,7 @@ fn controller_create_state_snapshot() { //-> u64/*len of the state_snapshot*/ {
         match state_snapshots.get_mut(&memory_id) {
             None => trap("no data associated with this memory_id"),
             Some(d) => {
+                d.0 = Vec::new(); // clear first so don't have to hold the deserialized data and old snapshot at the same time in the heap.
                 d.0 = d.2().unwrap();
                 d.0.len() as u64
             }

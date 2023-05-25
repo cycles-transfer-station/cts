@@ -17,4 +17,4 @@ icrc-ledger-types = { git = "https://github.com/dfinity/ic.git", rev = "949407ea
 #ic-icrc1-client-cdk = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
 #ic-icrc1 = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
 ic-stable-structures = "0.5.3"
-
+rmp-serde = "1.1.1"
