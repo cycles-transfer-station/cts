@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 cts_lib = { path = "../../cts_lib" }
-serde = "1.0.137"
-candid = "0.8.4"
-futures = "0.3.23"
-serde_bytes = "0.11.6"
+serde = { workspace = true }
+candid = { workspace = true }
+futures = { workspace = true }
+serde_bytes = { workspace = true }

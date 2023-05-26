@@ -8,8 +8,6 @@ use cts_lib::{
         api::{
             trap,
             caller,
-            canister_balance128,
-            performance_counter,
             call::{
                 reply,
                 arg_data,
@@ -33,21 +31,20 @@ use cts_lib::{
                     decode_one
                 }
             },
-        }
+        },
+        update, 
+        query, 
+        init, 
+        pre_upgrade, 
+        post_upgrade
     },
-    ic_cdk_macros::{update, query, init, pre_upgrade, post_upgrade},
     tools::{
         sha256,
         localkey::{
-            self,
             refcell::{
                 with, 
                 with_mut,
             },
-            cell::{
-                get,
-                set
-            }
         }
     },
     types::{
@@ -61,11 +58,11 @@ use cts_lib::{
             CBSMUpgradeCBErrorKind
         },
         cycles_bank,
-        management_canister::{
-            CanisterIdRecord,
-            ManagementCanisterInstallCodeQuest,
-            ManagementCanisterInstallCodeMode
-        }
+    },
+    management_canister::{
+        CanisterIdRecord,
+        ManagementCanisterInstallCodeQuest,
+        ManagementCanisterInstallCodeMode
     },
     consts::{
         WASM_PAGE_SIZE_BYTES,
@@ -602,7 +599,7 @@ pub async fn cts_upgrade_ucs_chunk() {
     
     // doing this outside of the async blocks. i seen memory corruption in a localkey refcell with(&) in the async blocks. i rather keep the with_mut(&) out of it
     with_mut(&CBSM_DATA, |cbsm_data| {
-        for ((user_id, user_canister_id), sponse)/*: ((Principal,Principal),Result<[u8; 32], CBSMUpgradeCBError>)*/ in upgrade_ucs.into_iter().zip(sponses.into_iter()) {    
+        for ((user_id, _user_canister_id), sponse)/*: ((Principal,Principal),Result<[u8; 32], CBSMUpgradeCBError>)*/ in upgrade_ucs.into_iter().zip(sponses.into_iter()) {    
             match sponse {
                 Ok(user_canister_code_module_hash) => {
                     match cbsm_data.users_map.get_mut(&user_id) {
