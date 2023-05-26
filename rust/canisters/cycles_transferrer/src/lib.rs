@@ -6,8 +6,6 @@ use cts_lib::{
         api::{
             trap,
             caller,
-            canister_balance128,
-            performance_counter,
             call::{
                 call_with_payment128,
                 call_raw128,
@@ -36,8 +34,6 @@ use cts_lib::{
                 utils::{encode_one, decode_one}
             },
         },
-    },
-    ic_cdk_macros::{
         init,
         pre_upgrade,
         post_upgrade,
@@ -46,10 +42,6 @@ use cts_lib::{
     },
     types::{
         Cycles,
-        CyclesTransferMemo,
-        cts::{
-
-        },
         cycles_transferrer::{
             CyclesTransferrerCanisterInit,
             CyclesTransfer,
@@ -57,13 +49,12 @@ use cts_lib::{
             TransferCyclesError,
             TransferCyclesCallbackQuest
         },
-        management_canister::{
-            CanisterIdRecord
-        }
+    },
+    management_canister::{
+        CanisterIdRecord
     },
     tools::{
         localkey::{
-            self,
             refcell::{
                 with, 
                 with_mut,
