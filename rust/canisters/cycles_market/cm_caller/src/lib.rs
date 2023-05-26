@@ -31,7 +31,8 @@ use cts_lib::{
     },
     types::{
         Cycles,
-        cm_caller::*
+        cycles_market::cm_caller::*,
+        CallError,
     },
     tools::{
         localkey::{
@@ -45,11 +46,13 @@ use cts_lib::{
             }
         },
         caller_is_controller_gaurd,
+        call_error_as_u32_and_string,
     },
     stable_memory_tools::{self, MemoryId},
 };
 use std::cell::{Cell, RefCell};
 use futures::task::Poll;
+use serde::Serialize;
 
 
 
@@ -58,23 +61,23 @@ type CyclesTransferRefund = Cycles;
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct TryCallback { 
     cm_callback_method: String,
     cm_callback_quest: CMCallbackQuest, 
     cycles_transfer_refund: CyclesTransferRefund,
     try_number: u32,
-    call_error_of_the_last_try: (RejectionCode, String)
+    call_error_of_the_last_try: CallError
 }
 
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct OldCMCallerData {}
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CMCallerData {
     cycles_market_token_trade_contract: Principal,
     ongoing_calls_count: u64,
@@ -222,7 +225,7 @@ async fn do_callback(cm_callback_method: String, cm_callback_quest: CMCallbackQu
                     cm_callback_quest, 
                     cycles_transfer_refund,
                     try_number: try_n,
-                    call_error_of_the_last_try: cm_callback_call_error,
+                    call_error_of_the_last_try: call_error_as_u32_and_string(cm_callback_call_error),
                 }
             );             
         });
