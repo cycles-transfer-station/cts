@@ -187,7 +187,7 @@ fn read_stable_memory_bytes_with_length(serialization_memory: &VirtualMemory<Def
 // ---- STATE-SNAPSHOT CONTROLLER METHODS ---------
 
 #[export_name = "canister_update controller_create_state_snapshot"]
-fn controller_create_state_snapshot() { //-> u64/*len of the state_snapshot*/ {
+extern "C" fn controller_create_state_snapshot() { //-> u64/*len of the state_snapshot*/ {
     caller_is_controller_gaurd(&caller());
         
     let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
@@ -207,7 +207,7 @@ fn controller_create_state_snapshot() { //-> u64/*len of the state_snapshot*/ {
 }
 
 #[export_name = "canister_query controller_download_state_snapshot"]
-fn controller_download_state_snapshot() {
+extern "C" fn controller_download_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
     let chunk_size: usize = 1 * MiB as usize;
@@ -224,7 +224,7 @@ fn controller_download_state_snapshot() {
 }
 
 #[export_name = "canister_update controller_clear_state_snapshot"]
-fn controller_clear_state_snapshot() {
+extern "C" fn controller_clear_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
     let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
@@ -242,7 +242,7 @@ fn controller_clear_state_snapshot() {
 }
 
 #[export_name = "canister_update controller_append_state_snapshot"]
-fn controller_append_state_snapshot() {
+extern "C" fn controller_append_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
     let (memory_id, mut bytes) = arg_data::<(u8, ByteBuf)>();
@@ -260,7 +260,7 @@ fn controller_append_state_snapshot() {
 }
 
 #[export_name = "canister_update controller_load_state_snapshot"]
-fn controller_load_state_snapshot() {
+extern "C" fn controller_load_state_snapshot() {
     caller_is_controller_gaurd(&caller());
     
     let memory_id: MemoryId = MemoryId::new(arg_data::<(u8,)>().0);
@@ -281,7 +281,7 @@ fn controller_load_state_snapshot() {
 // ----------- STABLE-MEMORY CONTROLLER METHODS -----------
 
 #[export_name = "canister_query controller_stable_memory_read"]
-fn controller_stable_memory_read() {
+extern "C" fn controller_stable_memory_read() {
     caller_is_controller_gaurd(&caller());
     
     let (memory_id, offset, length) = arg_data::<(u8, u64, u64)>();
@@ -295,7 +295,7 @@ fn controller_stable_memory_read() {
 }
 
 #[export_name = "canister_update controller_stable_memory_write"]
-fn controller_stable_memory_write() {
+extern "C" fn controller_stable_memory_write() {
     caller_is_controller_gaurd(&caller());
 
     let (memory_id, offset, b) = arg_data::<(u8, u64, ByteBuf)>();
@@ -308,7 +308,7 @@ fn controller_stable_memory_write() {
 
 
 #[export_name = "canister_query controller_stable_memory_size"]
-fn controller_stable_memory_size() {
+extern "C" fn controller_stable_memory_size() {
     caller_is_controller_gaurd(&caller());
 
     let (memory_id,) = arg_data::<(u8,)>();
@@ -319,7 +319,7 @@ fn controller_stable_memory_size() {
 
 
 #[export_name = "canister_update controller_stable_memory_grow"]
-fn controller_stable_memory_grow() {
+extern "C" fn controller_stable_memory_grow() {
     caller_is_controller_gaurd(&caller());
 
     let (memory_id, pages) = arg_data::<(u8, u64)>();
