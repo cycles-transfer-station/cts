@@ -16,12 +16,6 @@ use cts_lib::{
                 msg_cycles_accept128,
             },
         },
-        export::{
-            candid::{
-                CandidType,
-                Deserialize,
-            }
-        },
         update,
         query,
         init,
@@ -33,7 +27,7 @@ use cts_lib::{
         locate_minimum_memory
     },
     consts::GiB,
-    types::cycles_market::icrc1token_trade_log_storage::*,
+    types::cycles_market::icrc1token_trade_contract::icrc1token_trade_log_storage::*,
 };
 
 use ic_stable_structures::{
@@ -42,12 +36,13 @@ use ic_stable_structures::{
     memory_manager::{MemoryId, VirtualMemory},
 };
 
+use serde::{Serialize, Deserialize};
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct OldData {}
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Data {
     log_size: u32,
     first_log_id: u128,
