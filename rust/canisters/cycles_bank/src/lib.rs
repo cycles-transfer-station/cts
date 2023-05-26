@@ -314,10 +314,21 @@ impl CBData {
 
 // ------ old cb data -----------
 
+use cts_lib::{
+    types::{
+        XdrPerMyriadPerIcp,
+    },
+    ic_ledger_types::{
+        IcpTokens,
+        IcpId,
+        IcpBlockHeight,
+    }
+};
+use cts_lib::types::cycles_market::icrc1token_trade_contract::{PositionId, PurchaseId};
 
 #[derive(CandidType, Deserialize)]
 struct OldCMCyclesPosition{
-    id: cycles_market::PositionId,   
+    id: u128,   
     cycles: Cycles,
     minimum_purchase: Cycles,
     xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
@@ -327,7 +338,7 @@ struct OldCMCyclesPosition{
 
 #[derive(CandidType, Deserialize)]
 struct OldCMIcpPosition{
-    id: cycles_market::PositionId,   
+    id: u128,   
     icp: IcpTokens,
     minimum_purchase: IcpTokens,
     xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
@@ -337,10 +348,10 @@ struct OldCMIcpPosition{
 
 #[derive(CandidType, Deserialize)]
 struct OldCMCyclesPositionPurchase{
-    cycles_position_id: cycles_market::PositionId,
+    cycles_position_id: u128,
     cycles_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
     cycles_position_positor: Principal,
-    id: cycles_market::PurchaseId,
+    id: u128,
     cycles: Cycles,
     purchase_position_fee: u64,
     timestamp_nanos: u128,
@@ -348,10 +359,10 @@ struct OldCMCyclesPositionPurchase{
 
 #[derive(CandidType, Deserialize)]
 struct OldCMIcpPositionPurchase{
-    icp_position_id: cycles_market::PositionId,
+    icp_position_id: u128,
     icp_position_xdr_permyriad_per_icp_rate: XdrPerMyriadPerIcp,
     icp_position_positor: Principal,
-    id: cycles_market::PurchaseId,
+    id: u128,
     icp: IcpTokens,
     purchase_position_fee: u64,
     timestamp_nanos: u128,
@@ -650,76 +661,7 @@ fn post_upgrade() {
                         trade_contract_canister_id: Principal,
                         opt_cm_caller: Some(<Principal>)
                     },
-                    CMTradeContractLogs{
-                        cm_calls_out: CMCallsOut{
-                            cm_cycles_positions: old_cb_data.user_data.cm_calls_out.cm_cycles_positions.into_iter()
-                                .map(|old_cm_cycles_position: &OldCMCyclesPosition| {
-                                    CMCyclesPosition{
-                                        
-                                    }
-                                }).collect(),
-                            cm_token_positions: old_cb_data.user_data.cm_calls_out.cm_icp_positions.into_iter()
-                                .map(|old_cm_icp_position: &OldCMIcpPosition| {
-                                    CMTokenPosition{
-                                        
-                                    }
-                                }).collect(),
-                            cm_cycles_positions_purchases: old_cb_data.user_data.cm_calls_out.cm_cycles_positions_purchases.into_iter()
-                                .map(|old_cm_cycles_position_purchase: &OldCMCyclesPositionPurchase| {
-                                    CMCyclesPositionPurchase{
-                                        
-                                    }
-                                }).collect(),
-                            cm_token_positions_purchases: old_cb_data.user_data.cm_calls_out.cm_icp_positions_purchases.into_iter()
-                                .map(|old_cm_icp_position_purchase: &OldCMIcpPositionPurchase| {
-                                    CMTokenPositionPurchase{
-                                        
-                                    }
-                                }).collect(),
-                            cm_token_transfers_out: old_cb_data.user_data.cm_calls_out.cm_icp_transfers_out.into_iter()
-                                .map(|old_cm_icp_transfer_out: &OldCMIcpTransferOut| {
-                                    CMTokenTransferOut{
-                                        
-                                    }
-                                }).collect(),                            
-                        },
-                        cm_message_logs: CMMessageLogs{
-                            cm_message_cycles_position_purchase_positor_logs: old_cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_positor_logs
-                                .into_iter()
-                                .map(|old: OldCMMessageCyclesPositionPurchasePositorLog| {
-                                    CMMessageCyclesPositionPurchasePositorLog{
-                                    
-                                    }
-                                })
-                                .collect(),
-                            cm_message_cycles_position_purchase_purchaser_logs: old_cb_data.user_data.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs
-                                .into_iter()
-                                .map(|old: OldCMMessageCyclesPositionPurchasePurchaserLog| {
-                                    CMMessageCyclesPositionPurchasePurchaserLog{
-                                    
-                                    }
-                                })
-                                .collect(),
-                            cm_message_token_position_purchase_positor_logs: old_cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_positor_logs
-                                .into_iter()
-                                .map(|old: OldCMMessageIcpPositionPurchasePositorLog| {
-                                    CMMessageTokenPositionPurchasePositorLog{
-                                        
-                                    }
-                                })
-                                .collect(),
-                            cm_message_token_position_purchase_purchaser_logs: old_cb_data.user_data.cm_message_logs.cm_message_icp_position_purchase_purchaser_logs
-                                .into_iter()
-                                .map(|old: OldCMMessageIcpPositionPurchasePurchaserLog| {
-                                    CMMessageTokenPositionPurchasePurchaserLog{
-                                        
-                                    }
-                                })
-                                .collect(),
-                            cm_message_void_cycles_position_positor_logs: Vec<CMMessageVoidCyclesPositionPositorLog>,
-                            cm_message_void_token_position_positor_logs: Vec<CMMessageVoidTokenPositionPositorLog>,    
-                        }
-                    }
+                    CMTradeContractLogs::new()
                 )
             ].into() // HashMap<Icrc1TokenTradeContract, CMTradeContractLogs>,
         },
