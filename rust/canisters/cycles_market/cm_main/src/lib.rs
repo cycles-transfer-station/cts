@@ -27,9 +27,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cm_caller::CMCallerInit,
-        cycles_market::icrc1_token_trade_contract::CMIcrc1TokenTradeContractInit,
-        cm_main::*,
+        cycles_market::{cm_main::*, cm_caller::CMCallerInit, icrc1token_trade_contract::CMIcrc1TokenTradeContractInit}
     },
     tools::{
         localkey::{
@@ -46,10 +44,10 @@ use cts_lib::{
     icrc::Tokens,
 };
 use std::cell::{RefCell};
+use serde::Serialize;
 
 
-
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct TradeContracts {
     icrc1_token_trade_contracts: Vec<Icrc1TokenTradeContract>
 }
@@ -61,7 +59,7 @@ impl TradeContracts {
     }
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
     trade_contracts: TradeContracts,
@@ -84,7 +82,7 @@ impl CMMainData {
     }
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct OldCMMainData {}
 
 
@@ -187,7 +185,7 @@ pub enum ControllerIsInTheMiddleOfADifferentCallKind {
 
 // --------
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
     start_time_nanos: u64,
     lock: bool,
@@ -200,7 +198,7 @@ pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
 }
 
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct ControllerCreateIcrc1TokenTradeContractQuest {
     icrc1_ledger_id: Principal,
     icrc1_ledger_transfer_fee: Tokens,
