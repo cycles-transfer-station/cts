@@ -1,5 +1,6 @@
 use crate::ic_cdk::export::{Principal, candid::{CandidType, Deserialize}};
 use crate::types::Cycles;
+use serde::Serialize;
 
 #[derive(CandidType, Deserialize)]
 pub struct CMCallerInit {
@@ -24,7 +25,7 @@ pub enum CMCallError {
 
 pub type CMCallResult = Result<(), CMCallError>;
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct CMCallbackQuest {
     pub cm_call_id: u128,
     pub opt_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)> // None means callstatus == 'replied'
