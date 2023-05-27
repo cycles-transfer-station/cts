@@ -1,12 +1,10 @@
-//#![allow(unused)] 
-#![allow(non_camel_case_types)]
-
 use std::{
     cell::{Cell, RefCell}, 
-    collections::{HashMap, HashSet},
+    collections::{HashSet, HashMap},
 };
 use futures::task::Poll;
 
+use serde::Serialize;
 use serde_bytes::ByteBuf;
 use num_traits::cast::ToPrimitive;
 use sha2::Digest;
@@ -21,24 +19,9 @@ use cts_lib::{
         XdrPerMyriadPerIcp,
         canister_code::CanisterCode,
         cycles_banks_cache::CBSCache,
-        management_canister::{
-            ManagementCanisterInstallCodeMode,
-            ManagementCanisterInstallCodeQuest,
-            ManagementCanisterCanisterSettings,
-            ManagementCanisterOptionalCanisterSettings,
-            ManagementCanisterCanisterStatusRecord,
-            ManagementCanisterCanisterStatusVariant,
-            CanisterIdRecord,
-            ChangeCanisterSettingsRecord,
-            
-        },
-        cts::{
-            CyclesBankLifetimeTerminationQuest
-        },
         cbs_map::{
             CBSMUserData,
-            CBSMUpgradeCBError,
-            CBSMUpgradeCBErrorKind
+            CBSMUpgradeCBError
         },
         cycles_bank::{
             CyclesBankInit,
@@ -47,16 +30,24 @@ use cts_lib::{
             CyclesTransferrerCanisterInit,
         },
     },
+    management_canister::{
+        ManagementCanisterInstallCodeMode,
+        ManagementCanisterInstallCodeQuest,
+        ManagementCanisterCanisterSettings,
+        ManagementCanisterOptionalCanisterSettings,
+        ManagementCanisterCanisterStatusRecord,
+        ManagementCanisterCanisterStatusVariant,
+        CanisterIdRecord,
+        ChangeCanisterSettingsRecord,
+    },
     consts::{
         MiB,
-        WASM_PAGE_SIZE_BYTES,
         MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
         ICP_LEDGER_CREATE_CANISTER_MEMO,
         CTS_TRANSFER_ICP_FEE_ICP_MEMO,
         CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO
-
     },
     tools::{
         sha256,
@@ -68,12 +59,15 @@ use cts_lib::{
             },
             cell::{
                 get,
-                set
             }
         },
-        thirty_bytes_as_principal,
         principal_icp_subaccount,
-        cycles_to_icptokens
+        cycles_to_icptokens,
+        caller_is_controller_gaurd
+    },
+    stable_memory_tools::{
+        self,
+        MemoryId,
     },
     ic_cdk::{
         self,
@@ -82,10 +76,8 @@ use cts_lib::{
             caller, 
             time,
             id,
-            performance_counter,
             call::{
                 arg_data,
-                arg_data_raw,
                 arg_data_raw_size,
                 call_raw128,
                 call,
@@ -97,23 +89,17 @@ use cts_lib::{
                 msg_cycles_accept128,
                 reject,
                 reply,
-                reply_raw
             },
             stable::{
-                stable64_grow,
                 stable64_read,
-                stable64_size,
                 stable64_write,
-                stable_bytes
             }
         },
         export::{
             Principal,
             candid::{
-                self,
                 CandidType,
                 Deserialize,
-                Nat,
                 Func,
                 utils::{
                     encode_one, 
@@ -121,8 +107,6 @@ use cts_lib::{
                 },
             },
         },
-    },
-    ic_cdk_macros::{
         update, 
         query, 
         init, 
@@ -132,20 +116,15 @@ use cts_lib::{
     ic_ledger_types::{
         IcpMemo,
         IcpId,
-        IcpIdSub,
         IcpTokens,
         IcpBlockHeight,
         IcpTimestamp,
-        ICP_DEFAULT_SUBACCOUNT,
         ICP_LEDGER_TRANSFER_DEFAULT_FEE,
         MAINNET_CYCLES_MINTING_CANISTER_ID,
         MAINNET_LEDGER_CANISTER_ID, 
         icp_transfer,
         IcpTransferArgs, 
-        IcpTransferResult, 
         IcpTransferError,
-        icp_account_balance,
-        IcpAccountBalanceArgs
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -157,7 +136,6 @@ mod t;
 mod tools;
 use tools::{
     check_user_icp_ledger_balance,
-    main_cts_icp_id,
     CheckCurrentXdrPerMyriadPerIcpCmcRateError,
     CheckCurrentXdrPerMyriadPerIcpCmcRateSponse,
     check_current_xdr_permyriad_per_icp_cmc_rate,
@@ -174,9 +152,7 @@ use tools::{
     ledger_topup_cycles_cmc_icp_transfer,
     ledger_topup_cycles_cmc_notify,
     LedgerTopupCyclesCmcIcpTransferError,
-    LedgerTopupCyclesCmcNotifyError,
-
-    
+    LedgerTopupCyclesCmcNotifyError,  
 };
 
 mod frontcode;
@@ -192,36 +168,13 @@ use frontcode::{
     StreamStrategy,
     StreamCallbackTokenBackwards,
     StreamCallbackHttpResponse,
-    OldFile,
-    OldFiles
 };
 
 
+// -------
 
 #[derive(CandidType, Deserialize)]
 pub struct OldCTSData {
-    controllers: Vec<Principal>,
-    cycles_market_id: Principal,
-    cycles_market_cmcaller: Principal,
-    cycles_bank_canister_code: CanisterCode,
-    cbs_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
-    frontcode_files: OldFiles,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
-    cbs_maps: Vec<Principal>,
-    create_new_cbs_map_lock: bool,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
-    canisters_for_the_use: HashSet<Principal>,
-    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
-    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
-    users_transfer_icp: HashMap<Principal, TransferIcpData>
-
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub struct CTSData {
     controllers: Vec<Principal>,
     cycles_market_id: Principal,
     cycles_market_cmcaller: Principal,
@@ -238,19 +191,36 @@ pub struct CTSData {
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
     users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
     users_transfer_icp: HashMap<Principal, TransferIcpData>
+}
 
+// --------
+
+#[derive(Serialize, Deserialize)]
+pub struct CTSData {
+    cycles_market_main: Principal,
+    cycles_bank_canister_code: CanisterCode,
+    cbs_map_canister_code: CanisterCode,
+    cycles_transferrer_canister_code: CanisterCode,
+    frontcode_files: Files,
+    frontcode_files_hashes: FilesHashes,
+    cbs_maps: Vec<Principal>,
+    create_new_cbs_map_lock: bool,
+    cycles_transferrer_canisters: Vec<Principal>,
+    cycles_transferrer_canisters_round_robin_counter: u32,
+    canisters_for_the_use: HashSet<Principal>,
+    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
+    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
+    users_transfer_icp: HashMap<Principal, TransferIcpData>
 }
 impl CTSData {
     fn new() -> Self {
         Self {
-            controllers: Vec::new(),
-            cycles_market_id: Principal::from_slice(&[]),
-            cycles_market_cmcaller: Principal::from_slice(&[]),
+            cycles_market_main: Principal::from_slice(&[]),
             cycles_bank_canister_code: CanisterCode::new(Vec::new()),
             cbs_map_canister_code: CanisterCode::new(Vec::new()),
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
-            frontcode_files_hashes: Vec::new(), // field is [only] use for the upgrades.
+            frontcode_files_hashes: FilesHashes::new(), // field is [only] use for the upgrades.
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
             cycles_transferrer_canisters: Vec::new(),
@@ -268,7 +238,9 @@ impl CTSData {
 pub const NEW_CYCLES_BANK_COST_CYCLES: Cycles = 5_000_000_000_000;
 pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year
 pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 2_000_000_000_000;
+#[allow(non_upper_case_globals)]
 pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 10;
+#[allow(non_upper_case_globals)]
 pub const NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB: u128 = cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(NEW_CYCLES_BANK_STORAGE_SIZE_MiB);
 pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 1_000_000_000_000;
 pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
@@ -298,17 +270,18 @@ pub const MINIMUM_CTS_CYCLES_TRANSFER_IN_CYCLES: Cycles = 5_000_000_000;
 
 const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
+const STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID: MemoryId = MemoryId::new(0);
+
+
 
 thread_local! {
     
     pub static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
     // not save through the upgrades
-    pub static FRONTCODE_FILES_HASHES: RefCell<FilesHashes> = RefCell::new(FilesHashes::new()); // is with the save through the upgrades by the frontcode_files_hashes field on the CTSData
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     static     CYCLES_BANKS_CACHE: RefCell<CBSCache> = RefCell::new(CBSCache::new(1400));
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
-    static     STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
     
 }
 
@@ -319,17 +292,15 @@ thread_local! {
 
 #[derive(CandidType, Deserialize)]
 struct CTSInit {
-    controllers: Vec<Principal>,
-    cycles_market_id: Principal,
-    cycles_market_cmcaller: Principal,
+    cycles_market_main: Principal,
 } 
 
 #[init]
 fn init(cts_init: CTSInit) {
+    stable_memory_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID);
+
     with_mut(&CTS_DATA, |cts_data| { 
-        cts_data.controllers = cts_init.controllers; 
-        cts_data.cycles_market_id = cts_init.cycles_market_id;
-        cts_data.cycles_market_cmcaller = cts_init.cycles_market_cmcaller;
+        cts_data.cycles_market_main = cts_init.cycles_market_main; 
     });
 } 
 
@@ -337,96 +308,9 @@ fn init(cts_init: CTSInit) {
 // -------------------------------------------------------------
 
 
-fn create_cts_data_candid_bytes() -> Vec<u8> {
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        cts_data.frontcode_files_hashes = with(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| { 
-            frontcode_files_hashes.iter().map(
-                |(name, hash)| { (name.clone(), hash.clone()) }
-            ).collect::<Vec<(String, [u8; 32])>>() 
-        });
-    });
-
-    let mut cts_data_candid_bytes: Vec<u8> = with(&CTS_DATA, |cts_data| { encode_one(cts_data).unwrap() });
-    cts_data_candid_bytes.shrink_to_fit();
-    cts_data_candid_bytes
-}
-
-fn re_store_cts_data_candid_bytes(cts_data_candid_bytes: Vec<u8>) {
-    
-    let mut cts_data: CTSData = match decode_one::<CTSData>(&cts_data_candid_bytes) {
-        Ok(cts_data) => cts_data,
-        Err(e) => {
-            //trap(&format!("error decode of the CTSData: {:?}", e));
-            
-            let old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_data_candid_bytes).unwrap();
-            let cts_data: CTSData = CTSData{
-                controllers: old_cts_data.controllers,
-                cycles_market_id: old_cts_data.cycles_market_id,
-                cycles_market_cmcaller: old_cts_data.cycles_market_cmcaller,
-                cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
-                cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
-                cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
-                frontcode_files: old_cts_data.frontcode_files
-                    .into_iter().map(|(k,f): (String, OldFile)| { 
-                        (   
-                            k, 
-                            File{
-                                headers: vec![
-                                    ("Content-Encoding".to_string(), 
-                                    f.content_encoding),
-                                    ("Content-Type".to_string(), 
-                                    f.content_type)
-                                ],
-                                content_chunks: f.content_chunks
-                            }
-                        ) 
-                    }).collect::<Files>(),
-                frontcode_files_hashes: old_cts_data.frontcode_files_hashes,
-                cbs_maps: old_cts_data.cbs_maps,
-                create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
-                cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
-                cycles_transferrer_canisters_round_robin_counter: old_cts_data.cycles_transferrer_canisters_round_robin_counter,
-                canisters_for_the_use: old_cts_data.canisters_for_the_use,
-                users_purchase_cycles_bank: old_cts_data.users_purchase_cycles_bank,
-                users_burn_icp_mint_cycles: old_cts_data.users_burn_icp_mint_cycles,
-                users_transfer_icp: old_cts_data.users_transfer_icp
-            };
-            cts_data
-            
-        }
-    };
-
-    std::mem::drop(cts_data_candid_bytes);
-    
-    with_mut(&FRONTCODE_FILES_HASHES, |frontcode_files_hashes| {
-        *frontcode_files_hashes = FilesHashes::from_iter(cts_data.frontcode_files_hashes.drain(..));
-        set_root_hash(frontcode_files_hashes);
-    });
-    
-    with_mut(&CTS_DATA, |ctsd| {
-        *ctsd = cts_data;    
-    });
-    
-}
-
-
 #[pre_upgrade]
 fn pre_upgrade() {
-    
-    let cts_upgrade_data_candid_bytes: Vec<u8> = create_cts_data_candid_bytes();
-    
-    let current_stable_size_wasm_pages: u64 = stable64_size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
-    
-    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*len of the cts_upgrade_data_candid_bytes*/ + cts_upgrade_data_candid_bytes.len() as u64; 
-    if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
-    }
-    
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((cts_upgrade_data_candid_bytes.len() as u64).to_be_bytes()));
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &cts_upgrade_data_candid_bytes);
-    
+    stable_memory_tools::pre_upgrade();
 }
 
 #[post_upgrade]
@@ -438,10 +322,45 @@ fn post_upgrade() {
     let mut cts_upgrade_data_candid_bytes: Vec<u8> = vec![0; cts_upgrade_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
     stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut cts_upgrade_data_candid_bytes);
     
-    re_store_cts_data_candid_bytes(cts_upgrade_data_candid_bytes);
+    let mut old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_upgrade_data_candid_bytes).unwrap(); 
     
-    // ------
+    let frontcode_files_hashes: FilesHashes = FilesHashes::from_iter(old_cts_data.frontcode_files_hashes.drain(..));
+    set_root_hash(&frontcode_files_hashes);
+            
+    let new_cts_data: CTSData = CTSData{
+        cycles_market_main: Principal::from_text("").unwrap(),
+        cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
+        cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
+        cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
+        frontcode_files: old_cts_data.frontcode_files,
+        frontcode_files_hashes,
+        cbs_maps: old_cts_data.cbs_maps,
+        create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
+        cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
+        cycles_transferrer_canisters_round_robin_counter: old_cts_data.cycles_transferrer_canisters_round_robin_counter,
+        canisters_for_the_use: old_cts_data.canisters_for_the_use,
+        users_purchase_cycles_bank: old_cts_data.users_purchase_cycles_bank,
+        users_burn_icp_mint_cycles: old_cts_data.users_burn_icp_mint_cycles,
+        users_transfer_icp: old_cts_data.users_transfer_icp
+    };
     
+    with_mut(&CTS_DATA, |cts_data| {
+        *cts_data = new_cts_data;    
+    });
+    
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; cts_upgrade_data_candid_bytes_len_u64 as usize * 2 + 8]);
+    
+    
+    stable_memory_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID); 
+    
+    
+    // change into post_upgrade for the next upgrade
+    /*
+    stable_memory_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(OldCTSData) -> CTSData>);
+    with(&CTS_DATA, |cts_data| {
+        set_root_hash(&cts_data.frontcode_files_hashes);
+    });
+    */
 } 
 
 
@@ -464,9 +383,7 @@ pub fn canister_inspect_message() {
     }
     
     if method_name()[..].starts_with("controller") {
-        if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-            trap("Caller must be a controller for this method.");
-        }
+        caller_is_controller_gaurd(&caller());
     }
 
     accept_message();
@@ -571,7 +488,7 @@ pub fn see_fees() -> Fees {
 
 // save the fees in the purchase_cycles_bank_data so the fees cant change while creating a new user
 
-#[derive(Clone, CandidType, Deserialize)]
+#[derive(Clone, CandidType, Serialize, Deserialize)]
 pub struct PurchaseCyclesBankData {
     start_time_nanos: u128,
     lock: bool,    
@@ -640,7 +557,7 @@ pub enum PurchaseCyclesBankError{
 }
 
 
-#[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct PurchaseCyclesBankQuest {
     opt_referral_user_id: Option<Principal>,
 }
@@ -991,8 +908,6 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                     arg : &encode_one(&CyclesBankInit{ 
                         cts_id: id(), 
                         cbsm_id: purchase_cycles_bank_data.cbs_map.unwrap(),
-                        cycles_market_id: cts_data.cycles_market_id,
-                        cycles_market_cmcaller: cts_data.cycles_market_cmcaller,
                         user_id: user_id,
                         storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                         lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
@@ -1281,7 +1196,7 @@ async fn find_cycles_bank_canister_of_the_specific_user(user_id: Principal) -> R
 
 // options are for the memberance of the steps
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(Serialize, CandidType, Deserialize, Clone)]
 pub struct BurnIcpMintCyclesData {
     start_time_nanos: u64,
     lock: bool,
@@ -1295,7 +1210,7 @@ pub struct BurnIcpMintCyclesData {
 }
 
 
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+#[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct BurnIcpMintCyclesQuest {
     burn_icp: IcpTokens,    
 }
@@ -1501,7 +1416,7 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
             return Err(BurnIcpMintCyclesError::MidCallError(BurnIcpMintCyclesMidCallError::CallCyclesBankCallPerformError(call_error.0 as u32)));    
         }
         
-        cycles_transfer_call_future.await; 
+        let _r: CallResult<Vec<u8>> = cycles_transfer_call_future.await; 
         burn_icp_mint_cycles_data.call_cycles_bank_canister_cycles_transfer_refund = Some(msg_cycles_refunded128());
     }
     
@@ -1547,7 +1462,7 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
 
 // ---------------------------------------
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct TransferIcpData{
     start_time_nanos: u64,
     lock: bool,
@@ -1557,7 +1472,7 @@ pub struct TransferIcpData{
     cts_fee_taken: bool,
 }
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct TransferIcpQuest {
     memo: IcpMemo,
     icp: IcpTokens,
@@ -1826,9 +1741,7 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
 
 #[update]
 pub fn controller_put_umc_code(canister_code: CanisterCode) -> () {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if sha256(canister_code.module()) != *canister_code.module_hash() {
         trap("Given canister_code.module_hash is different than the manual compute module hash");
@@ -1845,9 +1758,8 @@ pub fn controller_put_umc_code(canister_code: CanisterCode) -> () {
 // certification? or replication-calls?
 #[export_name = "canister_query controller_see_cbsms"]
 pub fn controller_see_cbsms() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
+    
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cbs_maps),));
     });
@@ -1868,9 +1780,8 @@ pub enum ControllerUpgradeUMCCallErrorType {
 
 #[update]
 pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Vec<ControllerUpgradeUMCError>/*umcs that upgrade call-fail*/ {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
+    
     if with(&CTS_DATA, |cts_data| cts_data.cbs_map_canister_code.module().len() == 0 ) {
         trap("USERS_MAP_CANISTER_CODE.module().len() is 0.")
     }
@@ -1960,9 +1871,7 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, p
 
 #[update]
 pub fn controller_put_cycles_bank_canister_code(canister_code: CanisterCode) -> () {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if sha256(canister_code.module()) != *canister_code.module_hash() {
         trap("Given canister_code.module_hash is different than the manual compute module hash");
@@ -1979,9 +1888,7 @@ pub type ControllerPutUCCodeOntoTheUMCError = (Principal, (u32, String));
 
 #[update]
 pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal>>) -> Vec<ControllerPutUCCodeOntoTheUMCError>/*umcs that the put_uc_code call fail*/ {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
         
     if with(&CTS_DATA, |cts_data| cts_data.cycles_bank_canister_code.module().len() == 0 ) {
         trap("CYCLES_BANK_CODE.module().len() is 0.")
@@ -2042,9 +1949,7 @@ pub enum ControllerUpgradeUCSOnAUMCError {
 
 #[update]
 pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<CBSMUpgradeCBError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.contains(&umc) }) == false {
         trap(&format!("cts cbs_maps does not contain: {:?}", umc));
@@ -2071,9 +1976,7 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Op
 
 #[update]
 pub fn controller_put_ctc_code(canister_code: CanisterCode) -> () {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if sha256(canister_code.module()) != *canister_code.module_hash() {
         trap("Given canister_code.module_hash is different than the manual compute module hash");
@@ -2089,9 +1992,7 @@ pub fn controller_put_ctc_code(canister_code: CanisterCode) -> () {
 
 #[export_name = "canister_query controller_see_cycles_transferrer_canisters"]
 pub fn controller_see_cycles_transferrer_canisters() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cycles_transferrer_canisters),));
     });
@@ -2103,9 +2004,7 @@ pub fn controller_see_cycles_transferrer_canisters() {
 #[update]
 pub fn controller_put_cycles_transferrer_canisters(mut put_cycles_transferrer_canisters: Vec<Principal>) {
     
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         for put_cycles_transferrer_canister in put_cycles_transferrer_canisters.iter() {
@@ -2129,9 +2028,7 @@ pub enum ControllerCreateNewCyclesTransferrerCanisterError {
 
 #[update]
 pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Principal, ControllerCreateNewCyclesTransferrerCanisterError> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     let new_cycles_transferrer_canister_id: Principal = match get_new_canister(
         None,
@@ -2178,9 +2075,7 @@ pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Princ
 /*
 #[update]
 pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Principal>) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with_mut(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| {
         for take_away_ctc in take_away_ctcs.iter() {
             match ctcs.binary_search(take_away_ctc) {
@@ -2200,9 +2095,7 @@ pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Pri
 
 #[update]
 pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
         trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
@@ -2222,9 +2115,7 @@ pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferre
 
 #[update]
 pub async fn controller_do_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
         trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id))
@@ -2245,9 +2136,7 @@ pub async fn controller_do_cycles_transferrer_canister_re_try_cycles_transferrer
 
 #[update]
 pub async fn controller_drain_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
         trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
@@ -2285,9 +2174,7 @@ pub enum ControllerUpgradeCTCCallErrorType {
 // we upgrade the ctcs one at a time because if one of them takes too long to stop, we dont want to wait for it to come back, we will stop_calls on the cycles_transferrer, wait an hour, uninstall, and reinstall
 #[update]
 pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Vec<u8>) -> Result<(), ControllerUpgradeCTCError> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
 
     if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
         trap("CYCLES_TRANSFERRER_CANISTER_CODE.module().len() is 0.")
@@ -2359,9 +2246,7 @@ pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Ve
 
 #[export_name = "canister_query controller_see_users_purchase_cycles_bank"]
 pub fn controller_see_users_purchase_cycles_bank() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(Vec<(&Principal, &PurchaseCyclesBankData)>,)>((cts_data.users_purchase_cycles_bank.iter().collect::<Vec<(&Principal, &PurchaseCyclesBankData)>>(),));
     });
@@ -2370,9 +2255,7 @@ pub fn controller_see_users_purchase_cycles_bank() {
 // put new user data
 #[update]
 pub fn controller_put_purchase_cycles_bank_data(new_user_id: Principal, put_data: PurchaseCyclesBankData, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(purchase_cycles_bank_data) = cts_data.users_purchase_cycles_bank.get(&new_user_id) {
@@ -2389,9 +2272,7 @@ pub fn controller_put_purchase_cycles_bank_data(new_user_id: Principal, put_data
 // remove new user
 #[update]
 pub fn controller_remove_new_user(new_user_id: Principal, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(purchase_cycles_bank_data) = cts_data.users_purchase_cycles_bank.get(&new_user_id) {
@@ -2408,9 +2289,7 @@ pub fn controller_remove_new_user(new_user_id: Principal, override_lock: bool) {
 
 #[update]
 pub async fn controller_complete_users_purchase_cycles_bank(opt_complete_users_purchase_cycles_bank_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError>)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
 
     let complete_users_purchase_cycles_bank_ids: Vec<Principal> = match opt_complete_users_purchase_cycles_bank_ids {
         Some(complete_users_purchase_cycles_bank_ids) => complete_users_purchase_cycles_bank_ids,
@@ -2448,9 +2327,7 @@ pub async fn controller_complete_users_purchase_cycles_bank(opt_complete_users_p
 
 #[export_name = "canister_query controller_see_users_burn_icp_mint_cycles"]
 pub fn controller_see_users_burn_icp_mint_cycles() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(Vec<(&Principal, &BurnIcpMintCyclesData)>,)>((cts_data.users_burn_icp_mint_cycles.iter().collect::<Vec<(&Principal, &BurnIcpMintCyclesData)>>(),));
     });
@@ -2458,9 +2335,7 @@ pub fn controller_see_users_burn_icp_mint_cycles() {
 
 #[update]
 pub fn controller_put_burn_icp_mint_cycles_data(user_id: Principal, put_data: BurnIcpMintCyclesData, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
@@ -2477,9 +2352,7 @@ pub fn controller_put_burn_icp_mint_cycles_data(user_id: Principal, put_data: Bu
 
 #[update]
 pub fn controller_remove_burn_icp_mint_cycles(user_id: Principal, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(burn_icp_mint_cycles_data) = cts_data.users_burn_icp_mint_cycles.get(&user_id) {
@@ -2496,9 +2369,7 @@ pub fn controller_remove_burn_icp_mint_cycles(user_id: Principal, override_lock:
 
 #[update]
 pub async fn controller_complete_users_burn_icp_mint_cycles(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<BurnIcpMintCyclesSuccess, CompleteBurnIcpMintCyclesError>)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
 
     let complete_users_ids: Vec<Principal> = match opt_complete_users_ids {
         Some(complete_users_ids) => complete_users_ids,
@@ -2535,9 +2406,7 @@ pub async fn controller_complete_users_burn_icp_mint_cycles(opt_complete_users_i
 
 #[export_name = "canister_query controller_see_users_transfer_icp"]
 pub fn controller_see_users_transfer_icp() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(Vec<(&Principal, &TransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&Principal, &TransferIcpData)>>(),));
     });
@@ -2545,9 +2414,7 @@ pub fn controller_see_users_transfer_icp() {
 
 #[update]
 pub fn controller_put_transfer_icp_data(user_id: Principal, put_data: TransferIcpData, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
@@ -2564,9 +2431,7 @@ pub fn controller_put_transfer_icp_data(user_id: Principal, put_data: TransferIc
 
 #[update]
 pub fn controller_remove_transfer_icp(user_id: Principal, override_lock: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         if let Some(transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
@@ -2583,9 +2448,7 @@ pub fn controller_remove_transfer_icp(user_id: Principal, override_lock: bool) {
 
 #[update]
 pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<TransferIcpSuccess, CompleteTransferIcpError>)> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
 
     let complete_users_ids: Vec<Principal> = match opt_complete_users_ids {
         Some(complete_users_ids) => complete_users_ids,
@@ -2625,9 +2488,7 @@ pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Opti
 
 #[update]
 pub fn controller_put_canisters_for_the_use(canisters_for_the_use: Vec<Principal>) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with_mut(&CTS_DATA, |cts_data| {
         for canister_for_the_use in canisters_for_the_use.into_iter() {
             cts_data.canisters_for_the_use.insert(canister_for_the_use);
@@ -2637,9 +2498,7 @@ pub fn controller_put_canisters_for_the_use(canisters_for_the_use: Vec<Principal
 
 #[export_name = "canister_query controller_see_canisters_for_the_use"]
 pub fn controller_see_canisters_for_the_use() -> () {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(&HashSet<Principal>,)>((&(cts_data.canisters_for_the_use),));
     });
@@ -2656,17 +2515,13 @@ pub fn controller_see_canisters_for_the_use() -> () {
 
 #[update]
 pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     STOP_CALLS.with(|stop_calls| { stop_calls.set(stop_calls_flag); });
 }
 
 #[query]
 pub fn controller_see_stop_calls_flag() -> bool {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     STOP_CALLS.with(|stop_calls| { stop_calls.get() })
 }
 
@@ -2674,95 +2529,6 @@ pub fn controller_see_stop_calls_flag() -> bool {
 
 
 
-
-
-// ----- STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES-METHODS --------------------------
-
-#[update]
-pub fn controller_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        *state_snapshot_cts_data_candid_bytes = create_cts_data_candid_bytes();
-        state_snapshot_cts_data_candid_bytes.len() as u64
-    })
-}
-
-
-// chunk_size = 1mib
-#[export_name = "canister_query controller_download_state_snapshot"]
-pub fn controller_download_state_snapshot() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    let chunk_size: usize = 1024*1024;
-    with(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        let (chunk_i,): (u64,) = arg_data::<(u64,)>(); // starts at 0
-        reply::<(Option<&[u8]>,)>((state_snapshot_cts_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
-    });
-}
-
-
-
-#[update]
-pub fn controller_clear_state_snapshot() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        *state_snapshot_cts_data_candid_bytes = Vec::new();
-    });    
-}
-
-#[update]
-pub fn controller_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-        state_snapshot_cts_data_candid_bytes.append(&mut append_bytes);
-    });
-}
-
-#[update]
-pub fn controller_re_store_cts_data_out_of_the_state_snapshot() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    re_store_cts_data_candid_bytes(
-        with_mut(&STATE_SNAPSHOT_CTS_DATA_CANDID_BYTES, |state_snapshot_cts_data_candid_bytes| {
-            let mut v: Vec<u8> = Vec::new();
-            v.append(state_snapshot_cts_data_candid_bytes);  // moves the bytes out of the state_snapshot vec
-            v
-        })
-    );
-
-}
-
-
-
-
-// ----- SET_&_SEE_CTS_CONTROLLERS-METHODS --------------------------
-
-#[query(manual_reply = true)]
-pub fn controller_see_controllers() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    with(&CTS_DATA, |cts_data| { 
-        reply::<(&Vec<Principal>,)>((&(cts_data.controllers),)); 
-    })
-}
-
-
-#[update]
-pub fn controller_set_new_controller(set_controller: Principal) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
-    with_mut(&CTS_DATA, |cts_data| { cts_data.controllers.push(set_controller); });
-}
 
 
 
@@ -2784,9 +2550,7 @@ pub struct ControllerCallCanisterQuest {
 
 #[update(manual_reply = true)]
 pub async fn controller_call_canister() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     let (q,): (ControllerCallCanisterQuest,) = arg_data::<(ControllerCallCanisterQuest,)>(); 
     
@@ -2833,9 +2597,7 @@ pub struct CTSMetrics {
 
 #[query]
 pub fn controller_see_metrics() -> CTSMetrics {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with(&CTS_DATA, |cts_data| {
         CTSMetrics {
@@ -2872,25 +2634,20 @@ pub struct UploadFile {
 
 #[update]
 pub fn controller_upload_file(q: UploadFile) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     if q.chunks == 0 {
         trap("there must be at least 1 chunk.");
     }
     
-    if q.chunks == 1 {
-        with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-            ffhs.insert(
+    with_mut(&CTS_DATA, |cts_data| {
+        if q.chunks == 1 {
+            cts_data.frontcode_files_hashes.insert(
                 q.filename.clone(), 
                 sha256(&q.first_chunk)
             );
-            set_root_hash(ffhs);
-        });
-    }
-
-    with_mut(&CTS_DATA, |cts_data| {        
+            set_root_hash(&cts_data.frontcode_files_hashes);
+        }
         cts_data.frontcode_files.insert(
             q.filename, 
             File{
@@ -2904,13 +2661,12 @@ pub fn controller_upload_file(q: UploadFile) {
         ); 
     });
 
+
 }
 
 #[update]
 pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: ByteBuf) -> () {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         match cts_data.frontcode_files.get_mut(&file_path) {
@@ -2925,8 +2681,8 @@ pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: Byt
                     }
                 }
                 if is_upload_complete == true {
-                    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-                        ffhs.insert(
+                    with_mut(&CTS_DATA, |cts_data| {
+                        cts_data.frontcode_files_hashes.insert(
                             file_path.clone(), 
                             {
                                 let mut hasher: sha2::Sha256 = sha2::Sha256::new();
@@ -2936,7 +2692,7 @@ pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: Byt
                                 hasher.finalize().into()
                             }
                         );
-                        set_root_hash(ffhs);
+                        set_root_hash(&cts_data.frontcode_files_hashes);
                     });
                 }
             },
@@ -2953,33 +2709,26 @@ pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: Byt
 
 #[update]
 pub fn controller_clear_files() {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files = Files::new();
     });
 
-    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-        *ffhs = FilesHashes::new();
-        set_root_hash(ffhs);
+    with_mut(&CTS_DATA, |cts_data| {
+        cts_data.frontcode_files_hashes = FilesHashes::new();
+        set_root_hash(&cts_data.frontcode_files_hashes);
     });
 }
 
 #[update]
 pub fn controller_clear_file(filename: String) {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files.remove(&filename);
-    });
-
-    with_mut(&FRONTCODE_FILES_HASHES, |ffhs| {
-        ffhs.delete(filename.as_bytes());
-        set_root_hash(ffhs);
+        cts_data.frontcode_files_hashes.delete(filename.as_bytes());
+        set_root_hash(&cts_data.frontcode_files_hashes);
     });
 }
 
@@ -2987,13 +2736,11 @@ pub fn controller_clear_file(filename: String) {
 
 #[query]
 pub fn controller_get_file_hashes() -> Vec<(String, [u8; 32])> {
-    if with(&CTS_DATA, |cts_data| { cts_data.controllers.contains(&caller()) }) == false {
-        trap("Caller must be a controller for this method.")
-    }
+    caller_is_controller_gaurd(&caller());
     
-    with(&FRONTCODE_FILES_HASHES, |file_hashes| { 
+    with(&CTS_DATA, |cts_data| { 
         let mut vec = Vec::<(String, [u8; 32])>::new();
-        file_hashes.for_each(|k,v| {
+        cts_data.frontcode_files_hashes.for_each(|k,v| {
             vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
         });
         vec

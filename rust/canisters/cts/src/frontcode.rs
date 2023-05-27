@@ -1,43 +1,32 @@
 use std::collections::HashMap;
-use std::borrow::{BorrowMut, Borrow};
 
 use cts_lib::{
-    ic_cdk_macros::{update, query},
     ic_cdk::{
         export::candid::{CandidType, Deserialize, Func, Nat},
         api::{data_certificate, set_certified_data}
     },
     ic_certified_map::{self, RbTree, HashTree, AsHashTree},
     tools::{
-        sha256,
-        localkey::refcell::{with, with_mut},
+        localkey::refcell::{with},
     },
 };
 
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 
-use crate::FRONTCODE_FILES_HASHES;
+use crate::CTS_DATA;
+
 
 
 const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct File {
     pub headers: Vec<(String, String)>,
     pub content_chunks: Vec<ByteBuf>
 }
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct OldFile {
-    pub content_type: String,
-    pub content_encoding: String,
-    pub content_chunks: Vec<ByteBuf>
-}
-pub type OldFiles = HashMap<String, OldFile>;
-
 
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -99,8 +88,8 @@ pub fn set_root_hash(tree: &FilesHashes) {
 
 pub fn make_file_certificate_header(file_name: &str) -> (String, String) {
     let certificate: Vec<u8> = data_certificate().unwrap_or(vec![]);
-    with(&FRONTCODE_FILES_HASHES, |ffhs| {
-        let witness: HashTree = ffhs.witness(file_name.as_bytes());
+    with(&CTS_DATA, |cts_data| {
+        let witness: HashTree = cts_data.frontcode_files_hashes.witness(file_name.as_bytes());
         let tree: HashTree = ic_certified_map::labeled(LABEL_ASSETS, witness);
         let mut serializer = serde_cbor::ser::Serializer::new(vec![]);
         serializer.self_describe().unwrap();
@@ -123,8 +112,8 @@ pub fn create_opt_stream_callback_token<'a>(file_name: &'a str, file: &'a File, 
             content_encoding: file.headers.iter().find(|header| { header.0.eq_ignore_ascii_case("Content-Encoding") }).map(|header| { &*(header.1) }).unwrap_or(""),
             index: Nat::from(chunk_i + 1),
             sha256: {
-                with(&FRONTCODE_FILES_HASHES, |ffhs| {
-                    ffhs.get(file_name.as_bytes())
+                with(&CTS_DATA, |cts_data| {
+                    cts_data.frontcode_files_hashes.get(file_name.as_bytes())
                     .map(|hash| { hash.clone() })
                 })  
             }

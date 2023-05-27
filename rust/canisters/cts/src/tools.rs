@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-// use sha2::Digest;
-
 use crate::{
     CTS_DATA,
     LATEST_KNOWN_CMC_RATE,
@@ -9,58 +6,46 @@ use crate::{
 //use candid::{CandidType,Deserialize};
 use cts_lib::{
     types::{
-        canister_code::CanisterCode,
         Cycles,
         cbs_map::{
             CBSMInit,
             CBSMUserData,
             PutNewUserError as CBSMPutNewUserError
         },
-        management_canister::{
-            ManagementCanisterInstallCodeMode,
-            ManagementCanisterInstallCodeQuest,
-            ManagementCanisterCreateCanisterQuest,
-            ManagementCanisterCanisterSettings,
-            ManagementCanisterOptionalCanisterSettings,
-            ManagementCanisterCanisterStatusRecord,
-            ManagementCanisterCanisterStatusVariant,
-            CanisterIdRecord,
-            ChangeCanisterSettingsRecord,
-            
-        }
+    },
+     management_canister::{
+        ManagementCanisterInstallCodeMode,
+        ManagementCanisterInstallCodeQuest,
+        ManagementCanisterCreateCanisterQuest,
+        ManagementCanisterOptionalCanisterSettings,
+        ManagementCanisterCanisterStatusRecord,
+        ManagementCanisterCanisterStatusVariant,
+        CanisterIdRecord,
+        ChangeCanisterSettingsRecord,    
     },
     consts::{
         MiB,
         MANAGEMENT_CANISTER_ID,
-        ICP_LEDGER_CREATE_CANISTER_MEMO,
         ICP_LEDGER_TOP_UP_CANISTER_MEMO,
         NETWORK_CANISTER_CREATION_FEE_CYCLES
         
     },
     tools::{
-        sha256,
         localkey::{
-            self,
             refcell::{with, with_mut},
-            cell::{},
         },
         user_icp_id,
         principal_icp_subaccount,
-        principal_as_thirty_bytes,
-        icptokens_to_cycles,
-        cycles_to_icptokens,
     },
     ic_cdk::{
         api::{
             id,
             time,
-            trap,
             call::{
                 CallResult,
                 call_raw128,
                 call,
                 call_with_payment128,
-                RejectionCode,
             },
         },
         export::{
@@ -314,7 +299,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
      
         match set_canister(new_canister, optional_canister_settings.clone(), with_cycles).await {
             Ok(canister_id) => return Ok(canister_id),
-            Err(set_canister_error) => {
+            Err(_set_canister_error) => {
                 with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_canister); });
                 // continue
             }

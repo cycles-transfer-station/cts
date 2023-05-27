@@ -28,7 +28,7 @@ debug = false
 
 [workspace.dependencies]
 ic-cdk = { git = "https://github.com/dfinity/cdk-rs.git", rev = "24bdf5ee37399c4e27ad329880c79733f6454f27" }
-ic-certified-map = "0.3.0"
+ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "5a8a90c1734b2802e2166ce14e73df75aac61a22" } # "0.3.0"
 ic-ledger-types = "0.2.0"
 candid = "0.8.4"
 sha2 = "0.9.1"

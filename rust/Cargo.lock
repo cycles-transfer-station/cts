@@ -628,8 +628,7 @@ dependencies = [
 [[package]]
 name = "ic-certified-map"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6adc65afeffc619a7cd19553c66c79820908c12f42191af90cfb39e2e93c4431"
+source = "git+https://github.com/levifeldman/cdk-rs.git?rev=5a8a90c1734b2802e2166ce14e73df75aac61a22#5a8a90c1734b2802e2166ce14e73df75aac61a22"
 dependencies = [
  "serde",
  "serde_bytes",
