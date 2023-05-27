@@ -23,6 +23,10 @@ use cts_lib::{
                 call,
                 call_with_payment128,
                 call_raw128
+            },
+            stable::{
+                stable64_read,
+                stable64_write
             }
         },
         export::{
@@ -504,7 +508,7 @@ struct OldCMMessageLogs{
     cm_message_void_icp_position_positor_logs: Vec<OldCMMessageVoidIcpPositionPositorLog>,    
 }
 
-#[derive(Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct OldUserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
@@ -514,7 +518,7 @@ struct OldUserData {
     known_icrc1_ledgers: HashSet<Principal>
 }
 
-#[derive(Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct OldCBData {
     user_canister_creation_timestamp_nanos: u128,
     cts_id: Principal,
@@ -570,7 +574,7 @@ const MAXIMUM_STORAGE_SIZE_MiB: u128 = 1024;
 
 const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY * 45;
 
-const STABLE_MEMORY_ID_HEAP_SERIALIZATION: MemoryId = MemoryId::new(0);
+const STABLE_MEMORY_ID_CB_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 
 const USER_CANISTER_BACKUP_CYCLES: Cycles = 1_000_000_000_000;
 
@@ -597,7 +601,7 @@ thread_local! {
 #[init]
 fn canister_init(user_canister_init: CyclesBankInit) {
     
-    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_HEAP_SERIALIZATION);
+    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION);
     
     with_mut(&CB_DATA, |cb_data| {
         *cb_data = CBData{
@@ -658,8 +662,8 @@ fn post_upgrade() {
                 (
                     Icrc1TokenTradeContract{
                         icrc1_ledger_canister_id: MAINNET_LEDGER_CANISTER_ID,
-                        trade_contract_canister_id: Principal,
-                        opt_cm_caller: Some(<Principal>)
+                        trade_contract_canister_id: Principal::from_text("").unwrap(),
+                        opt_cm_caller: Some(Principal::from_text("").unwrap())
                     },
                     CMTradeContractLogs::new()
                 )
@@ -672,11 +676,13 @@ fn post_upgrade() {
         *cb_data = new_cb_data;
     });
     
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; uc_upgrade_data_candid_bytes_len_u64 as usize * 2]);
+    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; uc_upgrade_data_candid_bytes_len_u64 as usize * 2 + 8]);
     
-      
     
-    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_HEAP_SERIALIZATION);
+    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION); 
+    
+    // change for the post_upgrade for the next upgrade
+    // stable_memory_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(OldCTSData) -> CTSData>);
 }
 
 // ---------------------------
