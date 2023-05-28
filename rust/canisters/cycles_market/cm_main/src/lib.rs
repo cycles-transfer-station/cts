@@ -462,7 +462,7 @@ async fn continue_controller_create_icrc1token_trade_contract_()
 // ------------
 
 #[query(manual_reply = true)]
-pub fn see_icrc1_token_trade_contracts() {
+pub fn view_icrc1_token_trade_contracts() {
     with(&CM_MAIN_DATA, |cm_main_data| {
         reply::<(&Vec<Icrc1TokenTradeContract>,)>((&(cm_main_data.trade_contracts.icrc1_token_trade_contracts),));
     });
