@@ -28,8 +28,27 @@ pub struct TokenPosition {
     pub timestamp_nanos: u128,
 }
 
+pub trait PositionTrait {
+    fn id(&self) -> PositionId;
+    fn positor(&self) -> Principal;
+    fn cycles_per_token_rate(&self) -> CyclesPerToken;
+    fn timestamp_nanos(&self) -> u128;
+}
+impl PositionTrait for CyclesPosition {
+    fn id(&self) -> PositionId { self.id }
+    fn positor(&self) -> Principal { self.positor }
+    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
+    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+}
+impl PositionTrait for TokenPosition {
+    fn id(&self) -> PositionId { self.id }
+    fn positor(&self) -> Principal { self.positor }
+    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
+    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+}
 
 
+// ------------
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {
@@ -126,7 +145,7 @@ pub struct TradeLog {
     pub purchaser: Principal, //taker
     pub tokens: Tokens,
     pub cycles: Cycles,
-    pub rate: CyclesPerToken,
+    pub cycles_per_token_rate: CyclesPerToken,
     //but then how do we know whether the position is a cycles-position or a token-position & whether this is a cycles-position-purchase or a token-position-purchase?
     pub position_kind: PositionKind,
     pub timestamp_nanos: u128,
@@ -160,7 +179,7 @@ impl TradeLog {
         s[62..92].copy_from_slice(&principal_as_thirty_bytes(&self.purchaser));
         s[92..108].copy_from_slice(&self.tokens.to_be_bytes());
         s[108..124].copy_from_slice(&self.cycles.to_be_bytes());
-        s[124..140].copy_from_slice(&self.rate.to_be_bytes());
+        s[124..140].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
         s[140] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
         s[141..157].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
         s
@@ -195,7 +214,7 @@ impl CyclesPayoutDataTrait for TradeLog {
                     CMCyclesPositionPurchasePurchaserMessageQuest {
                         cycles_position_id: self.position_id,
                         cycles_position_positor: self.positor,
-                        cycles_position_cycles_per_token_rate: self.rate,
+                        cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         token_payment: self.tokens,
@@ -206,7 +225,7 @@ impl CyclesPayoutDataTrait for TradeLog {
                 encode_one(
                     CMTokenPositionPurchasePositorMessageQuest{
                         token_position_id: self.position_id,
-                        token_position_cycles_per_token_rate: self.rate,
+                        token_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
                         purchaser: self.purchaser,
                         token_purchase: self.tokens,
@@ -256,7 +275,7 @@ impl TokenPayoutDataTrait for TradeLog {
                         purchaser: self.purchaser,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         cycles_purchase: self.cycles,
-                        cycles_position_cycles_per_token_rate: self.rate,
+                        cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         token_payment: self.tokens,
                         token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
                         token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
@@ -271,7 +290,7 @@ impl TokenPayoutDataTrait for TradeLog {
                         positor: self.positor,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         token_purchase: self.tokens,
-                        token_position_cycles_per_token_rate: self.rate,
+                        token_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         cycles_payment: self.cycles,
                         token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
                         token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,

@@ -1085,7 +1085,7 @@ async fn purchase_cycles_position_(purchaser: Principal, q: PurchaseCyclesPositi
                 purchaser, 
                 tokens: cycles_transform_tokens(q.cycles, cycles_position_ref.cycles_per_token_rate),
                 cycles: q.cycles,
-                rate: cycles_position_ref.cycles_per_token_rate,
+                cycles_per_token_rate: cycles_position_ref.cycles_per_token_rate,
                 position_kind: PositionKind::Cycles,
                 timestamp_nanos: time_nanos(),
                 cycles_payout_lock: false,
@@ -1209,7 +1209,7 @@ async fn purchase_token_position_(purchaser: Principal, q: PurchaseTokenPosition
                 purchaser,
                 tokens: q.tokens,
                 cycles: tokens_transform_cycles(q.tokens, token_position_ref.cycles_per_token_rate),
-                rate: token_position_ref.cycles_per_token_rate,
+                cycles_per_token_rate: token_position_ref.cycles_per_token_rate,
                 position_kind: PositionKind::Token,
                 timestamp_nanos: time_nanos(),
                 cycles_payout_lock: false,
@@ -1459,14 +1459,75 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 
 
 
+// --------------- VIEW-POSITONS -----------------
+
+const VIEW_POSITIONS_CHUNK_SIZE: usize = 1000;
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewPositionsQuest {
+    opt_start_after_position_id: Option<PositionId>, // if none, start at the earliest position-id
+}
+
+#[derive(CandidType)]
+pub struct ViewPositionsSponse<'a, T: 'a> {
+    positions: &'a [T],
+    is_last_chunk: bool // true if there are no current positions
+}
 
 
-// --------------- SEE-TRADE-LOGS -----------------
+#[query(manual_reply = true)]
+pub fn view_cycles_positions(q: ViewPositionsQuest) {
+    with(&CM_DATA, |cm_data| {
+        view_positions(q, &cm_data.cycles_positions);
+    });
+}
 
+#[query(manual_reply = true)]
+pub fn view_token_positions(q: ViewPositionsQuest) {
+    with(&CM_DATA, |cm_data| {
+        view_positions(q, &cm_data.token_positions);
+    });
+}
+
+
+fn view_positions<T: CandidType + PositionTrait>(q: ViewPositionsQuest, positions: &Vec<T>) {
+    
+    let mut positions_chunk: &[T] = &[];
+    let mut is_last_chunk = true;
+    
+    if positions.len() > 0 {
+        let start_position_i: usize = match q.opt_start_after_position_id {
+            None => 0,
+            Some(start_after_position_id) => {
+                match positions.binary_search_by_key(&start_after_position_id, |p| p.id()) {
+                    Ok(i) => i + 1,
+                    Err(i) => i
+                }
+            }
+        };
+        let positions_with_start = &positions[start_position_i..]; 
+        let min_of_position_with_start_len_and_chunk_size: usize = std::cmp::min(positions_with_start.len(), VIEW_POSITIONS_CHUNK_SIZE); 
+        positions_chunk = &positions_with_start[..min_of_position_with_start_len_and_chunk_size];    
+        is_last_chunk = min_of_position_with_start_len_and_chunk_size == positions_with_start.len(); 
+    }
+    
+
+    reply::<(ViewPositionsSponse<T>,)>((
+        ViewPositionsSponse{
+            positions: positions_chunk,
+            is_last_chunk: is_last_chunk
+        }
+    ,));
+    
+}
+
+
+
+// --------------- VIEW-TRADE-LOGS -----------------
 
 
 #[derive(CandidType, Deserialize)]
-pub struct SeeTradeLogsSponse {
+pub struct ViewTradeLogsSponse {
     trade_logs_len: u128, // the last trade_log_id + 1
     logs: ByteBuf, // a list of the encoded TradeLogs within the requested range that are still on this canister
     storage_logs_structions: Vec<StorageLogsStructions>, // list of the storage-canisters callbacks to call for the requested ranges
@@ -1489,7 +1550,7 @@ pub struct StorageLogsStructions {
 
 
 #[query]
-pub fn see_trade_logs(q: SeeTradeLogsQuest) -> SeeTradeLogsSponse {
+pub fn view_trade_logs(q: ViewTradeLogsQuest) -> ViewTradeLogsSponse {
     
     with(&CM_DATA, |cm_data| {
         
@@ -1538,7 +1599,7 @@ pub fn see_trade_logs(q: SeeTradeLogsQuest) -> SeeTradeLogsSponse {
             }
         }
         
-        SeeTradeLogsSponse{
+        ViewTradeLogsSponse{
             trade_logs_len,
             logs,
             storage_logs_structions          
