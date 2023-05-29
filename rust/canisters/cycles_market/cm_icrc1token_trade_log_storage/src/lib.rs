@@ -14,8 +14,10 @@ use cts_lib::{
             call::{
                 msg_cycles_available128,
                 msg_cycles_accept128,
+                reply,
             },
         },
+        export::{candid::{CandidType}},
         update,
         query,
         init,
@@ -37,7 +39,7 @@ use ic_stable_structures::{
 };
 
 use serde::{Serialize, Deserialize};
-
+use serde_bytes::Bytes;
 
 #[derive(Serialize, Deserialize)]
 pub struct OldData {}
@@ -149,10 +151,23 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
 
 
 
+#[derive(CandidType, Deserialize)]
+pub struct ViewTradeLogsQuest {
+    pub start_id: u128,
+    pub length: u128,
+}
+
+#[derive(CandidType)]
+pub struct ViewTradeLogsSponse<'a> {
+    pub logs: &'a Bytes
+}
+
+
+
 // this function and then the move_complete_trade_logs_into_the_stable_memory function on the token_trade_contract
 // disable on replicated?
-#[query]
-pub fn see_trade_logs(q: SeeTradeLogsQuest) -> StorageLogs {
+#[query(manual_reply = true)]
+pub fn view_trade_logs(q: ViewTradeLogsQuest) { //-> ViewTradeLogsSponse {
     
     let mut logs: Vec<u8> = Vec::new();
     
@@ -175,9 +190,11 @@ pub fn see_trade_logs(q: SeeTradeLogsQuest) -> StorageLogs {
        
     });
     
-    StorageLogs{
-        logs,
-    }
+    reply::<(ViewTradeLogsSponse,)>((
+        ViewTradeLogsSponse{
+            logs: &Bytes::new(&logs),
+        }
+    ,));
 
 }
 
