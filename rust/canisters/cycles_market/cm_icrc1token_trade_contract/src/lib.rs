@@ -124,7 +124,8 @@ struct CMData {
     cm_caller: Principal,
     icrc1_token_ledger: Principal,
     icrc1_token_ledger_transfer_fee: Tokens,
-    id_counter: u128,
+    positions_id_counter: u128,
+    trade_logs_id_counter: u128,
     mid_call_user_token_balance_locks: HashSet<Principal>,
     cycles_positions: Vec<CyclesPosition>,
     token_positions: Vec<TokenPosition>,
@@ -149,7 +150,8 @@ impl CMData {
             cm_caller: Principal::from_slice(&[]),
             icrc1_token_ledger: Principal::from_slice(&[]),
             icrc1_token_ledger_transfer_fee: 0,
-            id_counter: 0,
+            positions_id_counter: 0,
+            trade_logs_id_counter: 0,
             mid_call_user_token_balance_locks: HashSet::new(),
             cycles_positions: Vec::new(),
             token_positions: Vec::new(),
@@ -810,7 +812,7 @@ async fn create_cycles_position_(positor: Principal, q: CreateCyclesPositionQues
     })?;
     
     let position_id: PositionId = with_mut(&CM_DATA, |cm_data| {
-        let id: PositionId = new_id(&mut cm_data.id_counter); 
+        let id: PositionId = new_id(&mut cm_data.positions_id_counter); 
         cm_data.cycles_positions.push(
             CyclesPosition{
                 id,   
@@ -971,7 +973,7 @@ async fn create_token_position_(positor: Principal, q: CreateTokenPositionQuest)
     })?;
     
     let position_id: PositionId = with_mut(&CM_DATA, |cm_data| {
-        let id: PositionId = new_id(&mut cm_data.id_counter); 
+        let id: PositionId = new_id(&mut cm_data.positions_id_counter); 
         cm_data.token_positions.push(
             TokenPosition{
                 id,   
@@ -1076,7 +1078,7 @@ async fn purchase_cycles_position_(purchaser: Principal, q: PurchaseCyclesPositi
             return Err(PurchaseCyclesPositionError::CyclesMarketIsBusy);
         }
                 
-        let cycles_position_purchase_id: PurchaseId = new_id(&mut cm_data.id_counter);
+        let cycles_position_purchase_id: PurchaseId = new_id(&mut cm_data.trade_logs_id_counter);
         cm_data.trade_logs.push(
             TradeLog{
                 position_id: cycles_position_ref.id,
@@ -1199,7 +1201,7 @@ async fn purchase_token_position_(purchaser: Principal, q: PurchaseTokenPosition
         }
         msg_cycles_accept128(msg_cycles_quirement);
                 
-        let token_position_purchase_id: PurchaseId = new_id(&mut cm_data.id_counter);
+        let token_position_purchase_id: PurchaseId = new_id(&mut cm_data.trade_logs_id_counter);
         
         cm_data.trade_logs.push(
             TradeLog{
@@ -1526,87 +1528,140 @@ fn view_positions<T: CandidType + PositionTrait>(q: ViewPositionsQuest, position
 // --------------- VIEW-TRADE-LOGS -----------------
 
 
-#[derive(CandidType, Deserialize)]
-pub struct ViewTradeLogsSponse {
-    trade_logs_len: u128, // the last trade_log_id + 1
-    logs: ByteBuf, // a list of the encoded TradeLogs within the requested range that are still on this canister
-    storage_logs_structions: Vec<StorageLogsStructions>, // list of the storage-canisters callbacks to call for the requested ranges
-}
+const VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
+const VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES: usize = VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE * TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
+
 
 #[derive(CandidType, Deserialize)]
-pub struct StorageLogsStructions {
+pub struct ViewLatestTradeLogsQuest {
+    opt_start_before_id: Option<PurchaseId>
+}
+
+#[derive(CandidType)]
+pub struct ViewLatestTradeLogsSponse<'a> {
+    trade_logs_len: u128, // the last trade_log_id + 1
+    logs: &'a Bytes, // a list of the latest ( before the q.opt_start_before if Some) TradeLogs that are still on this canister
+    storage_canisters: Vec<StorageCanister>, // list of the storage-canisters and their logs ranges
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct StorageCanister {
     // The id of the first log in this storage-canister
-    start_id : u128,
+    first_log_id : u128,
     // The numbe8r of logs in this storage-canister
     length : u128,
     // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
     // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
     log_size: u32,
-    // Callback to fetch the storage logs.
-    callback : candid::Func,//StorageSeeTradeLogsFunction
+    // Callback to fetch the storage logs in this storage canister.
+    callback : candid::Func,
 }
 
 //candid::define_function!(pub StorageSeeTradeLogsFunction : (SeeTradeLogsQuest) -> (StorageLogs) query);
 
+#[query(manual_reply = true)]
+pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsSponse {
+        
 
-#[query]
-pub fn view_trade_logs(q: ViewTradeLogsQuest) -> ViewTradeLogsSponse {
-    
     with(&CM_DATA, |cm_data| {
         
-        let mut logs: ByteBuf = ByteBuf::new();
+        let trade_logs_len: u128 = cm_data.trade_logs_id_counter;        
         
-        let trade_logs_len: u128 = cm_data.trade_logs[cm_data.trade_logs.len() - 1].id + 1; 
-        
-        if q.start_id + q.length - 1 >= cm_data.trade_logs[0].id 
-        && q.start_id < trade_logs_len {
-            for s in cm_data.trade_logs.iter()
-                .skip_while(|tl: &&TradeLog| {
-                    tl.id < q.start_id
-                })
-                .take_while(|tl: &&TradeLog| {
-                    q.start_id + q.length > tl.id
-                })
-                .take(1*MiB / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
-                .map(|tl| {
-                    tl.stable_memory_serialize()
-                }) {
-                logs.extend(s);
-            }
-        }
-        
-        let mut storage_logs_structions: Vec<StorageLogsStructions> = Vec::new();
-        if q.start_id < cm_data.trade_logs[0].id {
-            // create storage logs structions
-            let mut continue_at_id: u128 = q.start_id;
-            for storage_canister in cm_data.trade_log_storage_canisters.iter() {
-                if continue_at_id >= storage_canister.first_log_id 
-                && continue_at_id < storage_canister.first_log_id + storage_canister.length as u128 {
-                    let length: u128 = std::cmp::min(
-                        storage_canister.length as u128 - (continue_at_id - storage_canister.first_log_id),
-                        (q.start_id + q.length) - (continue_at_id - q.start_id)
-                    ); 
-                    storage_logs_structions.push(
-                        StorageLogsStructions{
-                            start_id : continue_at_id,
-                            length: length,
-                            log_size: storage_canister.log_size,
-                            callback : candid::Func{ principal: storage_canister.canister_id, method: "see_trade_logs".to_string() }
+        let mut logs_bytes: Vec<u8> = Vec::new();
+
+        let first_trade_log_id_on_this_canister: Option<PurchaseId>/*none if there are no trade-logs on this canister*/ = if cm_data.trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+            Some(u128::from_be_bytes((&cm_data.trade_log_storage_buffer[16..32]).try_into().unwrap()))
+        } else {
+            cm_data.trade_logs.first().map(|l| l.id)
+        };
+        if let Some(first_trade_log_id_on_this_canister) = first_trade_log_id_on_this_canister {
+            
+            let last_trade_log_id_on_this_canister: PurchaseId = {
+                cm_data.trade_logs.last().map(|p| p.id)
+                .unwrap_or(u128::from_be_bytes((&cm_data.trade_log_storage_buffer[
+                    cm_data.trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+16
+                    ..
+                    cm_data.trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+32
+                ]).try_into().unwrap())) // we know there is at least one trade-log on this canister at this point and if it's not in the cm_data.trade_logs it must be in the flush buffer
+            };
+            let start_before_id: PurchaseId = match q.opt_start_before_id {
+                None => {
+                    last_trade_log_id_on_this_canister + 1
+                }
+                Some(q_start_before_id) => {
+                    if q_start_before_id > last_trade_log_id_on_this_canister {
+                        last_trade_log_id_on_this_canister + 1
+                    } else {
+                        q_start_before_id
+                    }
+                }
+            };
+            if start_before_id > first_trade_log_id_on_this_canister {
+                let cm_data_trade_logs_till_i: usize = {
+                    match cm_data.trade_logs.binary_search_by_key(&start_before_id, |l| l.id) {
+                        Ok(i) => i,
+                        Err(i) => {
+                            if i == cm_data.trade_logs.len() {
+                                cm_data.trade_logs.len()
+                            } else {
+                                0
+                            }
                         }
-                    );
-                    continue_at_id += length;
+                    }
+                };
+                let cm_data_trade_logs_till_stop = &cm_data.trade_logs[..cm_data_trade_logs_till_i];
+                if cm_data_trade_logs_till_stop.len() > 0 {
+                    let cm_data_trade_logs_bytes: Vec<u8> = cm_data_trade_logs_till_stop.rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE).next().unwrap()
+                        .iter().map(|tl| { tl.stable_memory_serialize() })
+                        .collect::<Vec<[u8; TradeLog::STABLE_MEMORY_SERIALIZE_SIZE]>>()
+                        .concat();
+                    logs_bytes = cm_data_trade_logs_bytes;
+                }
+                if logs_bytes.len() < VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES 
+                && cm_data.trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+                    let trade_log_storage_buffer_first_log_id: PurchaseId = first_trade_log_id_on_this_canister; // since we are in cm_data.trade_log_storage_buffer.len() > 0 we know that the first_trade_log_id_on_this_canister is in the trade_log_storage_buffer  
+                    let trade_log_storage_buffer_trade_logs_len: usize = cm_data.trade_log_storage_buffer.len() / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
+                    let trade_log_storage_buffer_till_i: usize = {
+                        if start_before_id >= trade_log_storage_buffer_first_log_id + trade_log_storage_buffer_trade_logs_len as u128 {
+                            cm_data.trade_log_storage_buffer.len()
+                        } else {
+                            // start_before_id must by within [1..] trade-logs in the trade_log_storage_buffer
+                            (start_before_id - trade_log_storage_buffer_first_log_id) as usize * TradeLog::STABLE_MEMORY_SERIALIZE_SIZE
+                        }
+                    };
+                    logs_bytes = vec![
+                        cm_data.trade_log_storage_buffer[..trade_log_storage_buffer_till_i].rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES - logs_bytes.len()).next().unwrap(), // unwrap is safe here bc we know that trade_log_storage_buffer is not empty and we know that start_before_id > first_trade_log_id_on_this_canister so trade_log_storage_buffer_till_i cannot be zero
+                        &logs_bytes
+                    ].concat();
                 }
             }
         }
         
-        ViewTradeLogsSponse{
-            trade_logs_len,
-            logs,
-            storage_logs_structions          
+        let mut storage_canisters: Vec<StorageCanister> = Vec::new();
+        for storage_canister in cm_data.trade_log_storage_canisters.iter() {
+            storage_canisters.push(
+                StorageCanister{
+                    first_log_id : storage_canister.first_log_id,
+                    length: storage_canister.length as u128,
+                    log_size: storage_canister.log_size,
+                    callback : candid::Func{ principal: storage_canister.canister_id, method: "view_trade_logs".to_string() }
+                }
+            );
         }
+        
+        reply::<(ViewLatestTradeLogsSponse,)>((
+            ViewLatestTradeLogsSponse{
+                trade_logs_len,
+                logs: &Bytes::new(&logs_bytes),
+                storage_canisters          
+            }
+        ,));
     })
-    
+
 }
+
+
 
 
 
