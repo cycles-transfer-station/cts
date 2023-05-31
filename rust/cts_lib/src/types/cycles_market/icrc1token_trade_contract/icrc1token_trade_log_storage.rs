@@ -26,3 +26,5 @@ pub enum FlushError {
     StorageIsFull,
 }
 
+pub type FlushResult = Result<FlushSuccess, FlushError>;
+

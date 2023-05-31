@@ -174,6 +174,7 @@ pub struct TradeLogStorageCanisterData {
     log_size: u32,
     first_log_id: u128,
     length: u64, // number of logs current store on this storage canister
+    is_full: bool,
     canister_id: Principal,
     creation_timestamp: u128, // set once when storage canister is create.
     module_hash: [u8; 32] // update this field when upgrading the storage canisters.
@@ -253,6 +254,11 @@ const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 8] = b"CMTRNSFR";
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 const FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE: usize = 1 * MiB; // can make this bigger 5 or 10 MiB, the flush logic handles flush chunks.
+
+const FLUSH_TRADE_LOGS_STORAGE_BUFFER_CHUNK_SIZE: usize = {
+    let before_modulo = 1*MiB+512*KiB; 
+    before_modulo - (before_modulo % TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
+};
 
 const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 
@@ -519,6 +525,7 @@ async fn create_trade_log_storage_canister() -> Result<Principal/*saves the trad
                         log_size: TradeLog::STABLE_MEMORY_SERIALIZE_SIZE as u32,
                         first_log_id: data.trade_log_storage_canisters.last().map(|c| c.first_log_id + c.length as u128).unwrap_or(0),
                         length: 0,
+                        is_full: false,
                         canister_id: canister_id,
                         creation_timestamp: time_nanos(),
                         module_hash,
@@ -551,9 +558,7 @@ async fn do_payouts() {
         (),
     ).await {
         Ok(()) => {
-            
-            let mut opt_flush_buffer: Option<Vec<u8>> = None; // move the flush buffer out of the closure so we can send it on the .await call
-        
+                    
             with_mut(&CM_DATA, |cm_data| {
                 while cm_data.trade_logs.len() > 0 {
                     if cm_data.trade_logs[0].can_move_into_the_stable_memory_for_the_long_term_storage() == true {
@@ -562,110 +567,84 @@ async fn do_payouts() {
                         break; // bc want to save into the stable-memory in the correct sequence.
                     }
                 }
+                
                 if cm_data.trade_log_storage_buffer.len() >= FLUSH_TRADE_LOGS_STORAGE_BUFFER_AT_SIZE 
                 && cm_data.trade_log_storage_flush_lock == false {
-                    opt_flush_buffer = Some(std::mem::take(&mut (cm_data.trade_log_storage_buffer)));
                     cm_data.trade_log_storage_flush_lock = true;
                 }
             });
             
-            if let Some(mut flush_buffer) = opt_flush_buffer {
+            if with(&CM_DATA, |cm_data| { cm_data.trade_log_storage_flush_lock == true }) {
                 
-                let mut trade_log_storage_canister_id: Principal = match with(&CM_DATA, |data| { data.trade_log_storage_canisters.last().map(|d| d.canister_id) }) {
-                    Some(c_id) => c_id,
-                    None => {
-                        match create_trade_log_storage_canister().await {
-                            Ok(p) => p,
-                            Err(e) => {
-                                with_mut(&CM_DATA, |data| {
-                                    data.trade_log_storage_buffer = [flush_buffer, std::mem::take(&mut data.trade_log_storage_buffer)].concat();
-                                    data.trade_log_storage_flush_lock = false;
-                                    data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::CreateTradeLogStorageCanisterError(e), time_nanos_u64()));
-                                });
-                                return;
+                let trade_log_storage_canister_id: Principal = {
+                    match with(&CM_DATA, |data| { 
+                        data.trade_log_storage_canisters
+                            .last()
+                            .and_then(|storage_canister| { 
+                                if storage_canister.is_full { None } else { Some(storage_canister.canister_id) }
+                            })
+                    }) {
+                        Some(c_id) => c_id,
+                        None => {
+                            match create_trade_log_storage_canister().await {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    with_mut(&CM_DATA, |data| {
+                                        data.trade_log_storage_flush_lock = false;
+                                        data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::CreateTradeLogStorageCanisterError(e), time_nanos_u64()));
+                                    });
+                                    return;
+                                }
                             }
                         }
                     }
                 };
                 
-                let chunk_size: usize = (1*MiB+512*KiB) - ((1*MiB+512*KiB) % with(&CM_DATA, |data| { data.trade_log_storage_canisters.last().unwrap().log_size as usize }));
-                                
-                for (chunk_i, chunk) in flush_buffer.chunks(chunk_size).enumerate() {
+                let chunk_sizes: Vec<usize>/*vec len is the num_of_chunks*/ = with(&CM_DATA, |cm_data| {
+                    cm_data.trade_log_storage_buffer.chunks(FLUSH_TRADE_LOGS_STORAGE_BUFFER_CHUNK_SIZE).map(|c| c.len()).collect::<Vec<usize>>()
+                });
+                
+                for chunk_size in chunk_sizes.into_iter() {
+
+                    let chunk_future = with(&CM_DATA, |cm_data| {
+                        call_raw128( // <(FlushQuestForward,), (FlushResult,)>
+                            trade_log_storage_canister_id,
+                            "flush",
+                            &encode_one(&
+                                FlushQuestForward{
+                                    bytes: Bytes::new(&cm_data.trade_log_storage_buffer[..chunk_size]),
+                                }
+                            ).unwrap(),
+                            10_000_000_000 // put some cycles for the trade-log-storage-canister
+                        )
+                    });
                     
-                    match call::<(FlushQuestForward,), (Result<FlushSuccess, FlushError>,)>(
-                        trade_log_storage_canister_id,
-                        "flush",
-                        (FlushQuestForward{
-                            bytes: Bytes::new(chunk),
-                        },),
-                    ).await {
-                        Ok(r) => match r.0 {
+                    match chunk_future.await {
+                        Ok(sb) => match decode_one::<FlushResult>(&sb).unwrap() {
                             Ok(_flush_success) => {
                                 with_mut(&CM_DATA, |cm_data| {
-                                    let trade_log_storage_canister_data: &mut TradeLogStorageCanisterData = cm_data.trade_log_storage_canisters.last_mut().unwrap();
-                                    trade_log_storage_canister_data.length += chunk.len() as u64 / trade_log_storage_canister_data.log_size as u64; 
+                                    cm_data.trade_log_storage_canisters.last_mut().unwrap().length += (chunk_size / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE) as u64;
+                                    cm_data.trade_log_storage_buffer.drain(..chunk_size);
                                 });
                             },
                             Err(flush_error) => match flush_error {
                                 FlushError::StorageIsFull => {
-                                    match create_trade_log_storage_canister().await {
-                                        Ok(new_storage_canister) => {
-                                            trade_log_storage_canister_id = new_storage_canister;
-                                            match call::<(FlushQuestForward,), (Result<FlushSuccess, FlushError>,)>(
-                                                trade_log_storage_canister_id,
-                                                "flush",
-                                                (FlushQuestForward{
-                                                    bytes: Bytes::new(chunk)
-                                                },),
-                                            ).await {
-                                                Ok(r) => match r.0 {
-                                                    Ok(_flush_success) => {
-                                                        with_mut(&CM_DATA, |cm_data| {
-                                                            let trade_log_storage_canister_data: &mut TradeLogStorageCanisterData = cm_data.trade_log_storage_canisters.last_mut().unwrap();
-                                                            trade_log_storage_canister_data.length += chunk.len() as u64 / trade_log_storage_canister_data.log_size as u64; 
-                                                        });
-                                                    },
-                                                    Err(flush_error) => match flush_error {
-                                                        FlushError::StorageIsFull => {
-                                                            //what happens when a new canister storage is full? make new canister on a different subnet?
-                                                            with_mut(&CM_DATA, |data| {
-                                                                data.trade_log_storage_buffer = [flush_buffer.split_off(chunk_i*chunk_size), std::mem::take(&mut data.trade_log_storage_buffer)].concat();
-                                                                data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::NewTradeLogStorageCanisterIsFull, time_nanos_u64()));
-                                                            });
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                Err(flush_call_error) => {
-                                                    with_mut(&CM_DATA, |data| {
-                                                        data.trade_log_storage_buffer = [flush_buffer.split_off(chunk_i*chunk_size), std::mem::take(&mut data.trade_log_storage_buffer)].concat();
-                                                        data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::TradeLogStorageCanisterCallError(call_error_as_u32_and_string(flush_call_error)), time_nanos_u64()));
-                                                    });
-                                                    break;
-                                                }
-                                            }
-                                        },
-                                        Err(e) => {
-                                            with_mut(&CM_DATA, |data| {
-                                                data.trade_log_storage_buffer = [flush_buffer.split_off(chunk_i*chunk_size), std::mem::take(&mut data.trade_log_storage_buffer)].concat();
-                                                data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::CreateTradeLogStorageCanisterError(e), time_nanos_u64()));
-                                            });
-                                            break;
-                                        }
-                                    }
+                                    with_mut(&CM_DATA, |cm_data| {
+                                        cm_data.trade_log_storage_canisters.last_mut().unwrap().is_full = true;
+                                    });
+                                    break;
                                 }
                             }
                         }
                         Err(flush_call_error) => {
                             with_mut(&CM_DATA, |data| {
-                                data.trade_log_storage_buffer = [flush_buffer.split_off(chunk_i*chunk_size), std::mem::take(&mut data.trade_log_storage_buffer)].concat();
                                 data.flush_trade_log_storage_errors.push((FlushTradeLogStorageError::TradeLogStorageCanisterCallError(call_error_as_u32_and_string(flush_call_error)), time_nanos_u64()));
                             });
                             break;
                         }
                     }
                 }
-                
+
                 with_mut(&CM_DATA, |data| {
                     data.trade_log_storage_flush_lock = false;
                 });
