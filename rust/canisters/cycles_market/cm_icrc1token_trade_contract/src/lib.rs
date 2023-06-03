@@ -1335,12 +1335,12 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
 // ----------------
 
 #[derive(CandidType, Deserialize)]
-pub struct SeeTokenLockQuest {
+pub struct ViewTokenLockQuest {
     principal_id: Principal,
 }
 
 #[query]
-pub fn see_token_lock(q: SeeTokenLockQuest) -> Tokens {
+pub fn view_token_lock(q: ViewTokenLockQuest) -> Tokens {
     with(&CM_DATA, |cm_data| { check_user_token_balance_in_the_lock(cm_data, &q.principal_id) })
 }
 
