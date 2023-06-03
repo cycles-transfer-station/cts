@@ -56,7 +56,6 @@ use cts_lib::{
         CTSFuel,
         CyclesTransfer,
         CyclesTransferMemo,
-        DownloadRChunkQuest,
         cycles_transferrer,
         cycles_bank::{
             CyclesBankInit,
@@ -87,7 +86,6 @@ use cts_lib::{
             }
         },
         tokens_transform_cycles,
-        rchunk_data
     },
     icrc::{Tokens,IcrcId, BlockId},
     global_allocator_counter::get_allocated_bytes_count,
@@ -546,22 +544,6 @@ const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 10_000_000_000;
 const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 
-const USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE: usize = 500usize;
-const USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE: usize = 500usize;
-
-const USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_TOKEN_POSITIONS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_TOKEN_POSITIONS_PURCHASES_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_TOKEN_TRANSFERS_OUT_CHUNK_SIZE: usize = 500;
-
-
-const USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
-const USER_DOWNLOAD_CM_MESSAGE_VOID_TOKEN_POSITION_POSITOR_LOGS_CHUNK_SIZE: usize = 500;
 
 
 
@@ -828,12 +810,28 @@ fn maintenance_check() {
 }
 
 
-// ---------------------------------------------------------------------------------
+// -------------- DOWNLOAD-LOGS-MECHANISM ------------------
 
+#[derive(CandidType, Deserialize)]
+pub struct DownloadCBLogsQuest {
+    pub opt_start_before_i: Option<u64>,
+    pub chunk_size: u64
+}
 
+#[derive(CandidType)]
+pub struct DownloadCBLogsSponse<'a, T: 'a> {
+    pub logs_len: u64,
+    pub logs: Option<&'a [T]>
+}
 
+fn download_logs<T: CandidType>(q: DownloadCBLogsQuest, data: &Vec<T>/*not a slice here bc want to make sure we always pass the whole vec into this function*/) -> DownloadCBLogsSponse<T> {
+    DownloadCBLogsSponse{
+        logs_len: data.len() as u64,
+        logs: data[..q.opt_start_before_i.map(|i| i as usize).unwrap_or(data.len())].rchunks(q.chunk_size as usize).next()
+    }
+}
 
-
+// ---------------------------------------------
 
 
 #[export_name = "canister_update cycles_transfer"]
@@ -900,29 +898,8 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
 
 
 
-
-#[export_name = "canister_query download_cycles_transfers_in"]
-pub fn download_cycles_transfers_in() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }    
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CyclesTransferIn]>,)>((cb_data.user_data.cycles_transfers_in.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-    
-}
-
 #[query(manual_reply = true)]
-pub fn download_cycles_transfers_in_rchunks(q: DownloadRChunkQuest) {
+pub fn download_cycles_transfers_in(q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -935,7 +912,7 @@ pub fn download_cycles_transfers_in_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cycles_transfers_in),)); 
+        reply((download_logs(q, &cb_data.user_data.cycles_transfers_in),)); 
     });
 } 
 
@@ -1132,29 +1109,8 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
 
 
 
-
-
-#[export_name = "canister_query download_cycles_transfers_out"]
-pub fn download_cycles_transfers_out() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[CyclesTransferOut]>,)>((cb_data.user_data.cycles_transfers_out.chunks(USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
 #[query(manual_reply = true)]
-pub fn download_cycles_transfers_out_rchunks(q: DownloadRChunkQuest) {
+pub fn download_cycles_transfers_out(q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1167,7 +1123,7 @@ pub fn download_cycles_transfers_out_rchunks(q: DownloadRChunkQuest) {
     maintenance_check();
 
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cycles_transfers_out),)); 
+        reply((download_logs(q, &cb_data.user_data.cycles_transfers_out),)); 
     });
 }
 
@@ -1865,15 +1821,16 @@ pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::C
 
 
 
-
-
-
-
 // -------------------------------
+// download cm data
+
+
+
+
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_cycles_positions_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_cycles_positions(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1886,12 +1843,12 @@ pub fn download_cm_cycles_positions_rchunks(icrc1token_trade_contract: Icrc1Toke
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions),));
     });    
 }
 
 #[query(manual_reply = true)]
-pub fn download_cm_token_positions_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_token_positions(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1904,12 +1861,12 @@ pub fn download_cm_token_positions_rchunks(icrc1token_trade_contract: Icrc1Token
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions),));
     });
 }
 
 #[query(manual_reply = true)]
-pub fn download_cm_cycles_positions_purchases_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_cycles_positions_purchases(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1922,116 +1879,14 @@ pub fn download_cm_cycles_positions_purchases_rchunks(icrc1token_trade_contract:
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions_purchases),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_positions_purchases_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions_purchases),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_transfers_out_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_transfers_out),));
-    });
-}
-
-
-// ---
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_cycles_positions() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMCyclesPosition]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_positions() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMTokenPosition]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions.chunks(USER_DOWNLOAD_CM_TOKEN_POSITIONS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_cycles_positions_purchases() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMCyclesPositionPurchase]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions_purchases.chunks(USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions_purchases),));
     });
 }
 
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_token_positions_purchases() {
+pub fn download_cm_token_positions_purchases(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2044,14 +1899,13 @@ pub fn download_cm_token_positions_purchases() {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMTokenPositionPurchase]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions_purchases.chunks(USER_DOWNLOAD_CM_TOKEN_POSITIONS_PURCHASES_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions_purchases),));
     });
 }
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_token_transfers_out() {
+pub fn download_cm_token_transfers_out(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2064,8 +1918,7 @@ pub fn download_cm_token_transfers_out() {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMTokenTransferOut]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_transfers_out.chunks(USER_DOWNLOAD_CM_TOKEN_TRANSFERS_OUT_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_transfers_out),));
     });
 }
 
@@ -2074,7 +1927,7 @@ pub fn download_cm_token_transfers_out() {
 // -----------------
 
 #[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_positor_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_message_cycles_position_purchase_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2087,13 +1940,13 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs_rchunks(icrc1to
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_positor_logs),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_positor_logs),));
     });
 }
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_purchaser_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_message_cycles_position_purchase_purchaser_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2106,13 +1959,13 @@ pub fn download_cm_message_cycles_position_purchase_purchaser_logs_rchunks(icrc1
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs),));
     });
 }
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_positor_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_message_token_position_purchase_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2125,52 +1978,14 @@ pub fn download_cm_message_token_position_purchase_positor_logs_rchunks(icrc1tok
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_positor_logs),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_purchaser_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_purchaser_logs),));
-    });
-}
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_void_cycles_position_positor_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_cycles_position_positor_logs),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_positor_logs),));
     });
 }
 
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_message_void_token_position_positor_logs_rchunks(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadRChunkQuest) {
+pub fn download_cm_message_token_position_purchase_purchaser_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2183,18 +1998,12 @@ pub fn download_cm_message_void_token_position_positor_logs_rchunks(icrc1token_t
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((rchunk_data(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_token_position_positor_logs),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_purchaser_logs),));
     });
 }
 
-
-
-
-// ---
-
-
 #[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_positor_logs() {
+pub fn download_cm_message_void_cycles_position_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2207,55 +2016,14 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs() {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageCyclesPositionPurchasePositorLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_purchaser_logs() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageCyclesPositionPurchasePurchaserLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_positor_logs() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageTokenPositionPurchasePositorLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_cycles_position_positor_logs),));
     });
 }
 
 
 
 #[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_purchaser_logs() {
+pub fn download_cm_message_void_token_position_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -2268,56 +2036,13 @@ pub fn download_cm_message_token_position_purchase_purchaser_logs() {
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageTokenPositionPurchasePurchaserLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_purchaser_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
+        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_token_position_positor_logs),));
     });
 }
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_void_cycles_position_positor_logs() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageVoidCyclesPositionPositorLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_cycles_position_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_void_token_position_positor_logs() {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        let (icrc1token_trade_contract, chunk_i) = arg_data::<(Icrc1TokenTradeContract, u128)>();
-        reply::<(Option<&[CMMessageVoidTokenPositionPositorLog]>,)>((cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_token_position_positor_logs.chunks(USER_DOWNLOAD_CM_MESSAGE_VOID_TOKEN_POSITION_POSITOR_LOGS_CHUNK_SIZE).nth(chunk_i as usize),));
-    });
-}
-
 
 
 
 // ----------------------------------------------------------
-
 
 
 
@@ -2336,21 +2061,8 @@ pub struct UserUCMetrics<'a> {
     cycles_transfers_id_counter: u128,
     cycles_transfers_in_len: u128,
     cycles_transfers_out_len: u128,
-    download_cycles_transfers_in_chunk_size: u128,
-    download_cycles_transfers_out_chunk_size: u128,
     cm_trade_contracts_logs_lengths: HashMap<&'a Icrc1TokenTradeContract, CMTradeContractLogsLengths>,    
-    download_cm_cycles_positions_chunk_size: u128,
-    download_cm_token_positions_chunk_size: u128,
-    download_cm_cycles_positions_purchases_chunk_size: u128,
-    download_cm_token_positions_purchases_chunk_size: u128,
-    download_cm_token_transfers_out_chunk_size: u128,
-    download_cm_message_cycles_position_purchase_positor_logs_chunk_size: u128,
-    download_cm_message_cycles_position_purchase_purchaser_logs_chunk_size: u128,
-    download_cm_message_token_position_purchase_positor_logs_chunk_size: u128,
-    download_cm_message_token_position_purchase_purchaser_logs_chunk_size: u128,
-    download_cm_message_void_cycles_position_positor_logs_chunk_size: u128,
-    download_cm_message_void_token_position_positor_logs_chunk_size: u128,
-
+    
 }
 
 
@@ -2418,21 +2130,7 @@ pub fn metrics() { //-> UserUCMetrics {
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
-            download_cycles_transfers_in_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_IN_CHUNK_SIZE as u128,
-            download_cycles_transfers_out_chunk_size: USER_DOWNLOAD_CYCLES_TRANSFERS_OUT_CHUNK_SIZE as u128,
-            cm_trade_contracts_logs_lengths: cb_data.user_data.cm_trade_contracts.iter().map(|(k,v)| { (k, cm_trade_contract_logs_lengths(v)) }).collect(),             
-            download_cm_cycles_positions_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_CHUNK_SIZE as u128,
-            download_cm_token_positions_chunk_size: USER_DOWNLOAD_CM_TOKEN_POSITIONS_CHUNK_SIZE as u128,
-            download_cm_cycles_positions_purchases_chunk_size: USER_DOWNLOAD_CM_CYCLES_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
-            download_cm_token_positions_purchases_chunk_size: USER_DOWNLOAD_CM_TOKEN_POSITIONS_PURCHASES_CHUNK_SIZE as u128,
-            download_cm_token_transfers_out_chunk_size: USER_DOWNLOAD_CM_TOKEN_TRANSFERS_OUT_CHUNK_SIZE as u128,
-            download_cm_message_cycles_position_purchase_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE as u128,
-            download_cm_message_cycles_position_purchase_purchaser_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_CYCLES_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE as u128,
-            download_cm_message_token_position_purchase_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_POSITOR_LOGS_CHUNK_SIZE as u128,
-            download_cm_message_token_position_purchase_purchaser_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_TOKEN_POSITION_PURCHASE_PURCHASER_LOGS_CHUNK_SIZE as u128,
-            download_cm_message_void_cycles_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_CYCLES_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
-            download_cm_message_void_token_position_positor_logs_chunk_size: USER_DOWNLOAD_CM_MESSAGE_VOID_TOKEN_POSITION_POSITOR_LOGS_CHUNK_SIZE as u128,
-            
+            cm_trade_contracts_logs_lengths: cb_data.user_data.cm_trade_contracts.iter().map(|(k,v)| { (k, cm_trade_contract_logs_lengths(v)) }).collect(),
         },));
     });
 }

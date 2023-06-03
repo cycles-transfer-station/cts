@@ -1,7 +1,7 @@
 use sha2::Digest;
 use crate::{
     ic_cdk::{
-        export::{Principal, candid::CandidType},
+        export::{Principal},
         trap,
         api::{is_controller, call::RejectionCode}
     },
@@ -17,8 +17,6 @@ use crate::{
     types::{
         Cycles,
         XdrPerMyriadPerIcp,
-        DownloadRChunkQuest,
-        RChunkData,
         CallError,
     },
     icrc::{Tokens},
@@ -250,19 +248,6 @@ pub const fn cb_storage_size_mib_as_cb_network_memory_allocation_mib(storage_siz
 
 
 
-
-
-/// works for data-logs that can be put into a slice
-pub fn rchunk_data<T: CandidType>(q: DownloadRChunkQuest, data: &[T]) -> RChunkData<T> {
-    RChunkData{
-        latest_height: data.len() as u64,
-        data: {
-            let height: usize = if let Some(height) = q.opt_height { height.try_into().unwrap() } else { data.len() };
-            let data: &[T] = &data[..height];
-            data.rchunks(q.chunk_size.try_into().unwrap()).nth(q.chunk_i.try_into().unwrap()) 
-        }
-    }
-}
 
 
 
