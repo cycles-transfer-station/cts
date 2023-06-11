@@ -220,7 +220,7 @@ impl CTSData {
             cbs_map_canister_code: CanisterCode::new(Vec::new()),
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
-            frontcode_files_hashes: FilesHashes::new(), // field is [only] use for the upgrades.
+            frontcode_files_hashes: FilesHashes::new(),
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
             cycles_transferrer_canisters: Vec::new(),
