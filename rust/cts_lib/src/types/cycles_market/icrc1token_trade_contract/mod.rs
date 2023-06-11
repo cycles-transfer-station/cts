@@ -124,7 +124,7 @@ pub enum PurchaseTokenPositionError {
     MsgCyclesTooLow{ purchase_position_fee: Cycles },
     CyclesMarketIsBusy,
     TokenPositionNotFound,
-    TokenPositionTokenIsLessThanThePurchaseQuest{ token_position_tokens: Tokens },
+    TokenPositionTokensIsLessThanThePurchaseQuest{ token_position_tokens: Tokens },
     TokenPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ token_position_minimum_purchase: Tokens }
 }
 

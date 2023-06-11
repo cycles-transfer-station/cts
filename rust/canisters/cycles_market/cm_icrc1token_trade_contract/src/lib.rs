@@ -1161,7 +1161,7 @@ async fn purchase_token_position_(purchaser: Principal, q: PurchaseTokenPosition
         };
         let token_position_ref: &TokenPosition = &cm_data.token_positions[token_position_token_positions_i];
         if token_position_ref.tokens < q.tokens {
-            return Err(PurchaseTokenPositionError::TokenPositionTokenIsLessThanThePurchaseQuest{ token_position_tokens: token_position_ref.tokens.clone() });
+            return Err(PurchaseTokenPositionError::TokenPositionTokensIsLessThanThePurchaseQuest{ token_position_tokens: token_position_ref.tokens.clone() });
         }
         if token_position_ref.minimum_purchase > q.tokens {
             return Err(PurchaseTokenPositionError::TokenPositionMinimumPurchaseIsGreaterThanThePurchaseQuest{ token_position_minimum_purchase: token_position_ref.minimum_purchase.clone() });
