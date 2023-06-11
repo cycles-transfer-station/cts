@@ -371,7 +371,7 @@ pub fn canister_inspect_message() {
     use ic_cdk::api::call::{method_name,accept_message};
     
     if caller() == Principal::anonymous() 
-        && !["see_fees"].contains(&&method_name()[..])
+        && !["view_fees"].contains(&&method_name()[..])
         {
         trap("caller cannot be anonymous for this method.");
     }
@@ -466,7 +466,7 @@ pub struct Fees {
 }
 
 #[query]
-pub fn see_fees() -> Fees {
+pub fn view_fees() -> Fees {
     Fees {
         cycles_bank_cost_cycles: NEW_CYCLES_BANK_COST_CYCLES,
         cts_transfer_icp_fee: CTS_TRANSFER_ICP_FEE,
