@@ -26,11 +26,6 @@ pub async fn _do_payouts() {
         while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
             let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
             if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() {
-                if time_nanos().saturating_sub(vcp.cycles_payout_data.cmcaller_cycles_payout_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK {
-                    std::mem::drop(vcp);
-                    cm_data.void_cycles_positions.remove(i);
-                    continue;
-                }
                 // skip
             } else if vcp.cycles_payout_lock == true { 
                 // skip
@@ -50,11 +45,6 @@ pub async fn _do_payouts() {
         while i < cm_data.void_token_positions.len() && void_token_positions_token_payouts_chunk.len() < DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE {
             let vip: &mut VoidTokenPosition = &mut cm_data.void_token_positions[i];
             if vip.token_payout_data.is_waiting_for_the_cmcaller_callback() {
-                if time_nanos().saturating_sub(vip.token_payout_data.cm_message_call_success_timestamp_nanos.unwrap()) > MAX_WAIT_TIME_NANOS_FOR_A_CM_CALLER_CALLBACK {
-                    std::mem::drop(vip);
-                    cm_data.void_token_positions.remove(i);
-                    continue;
-                }
                 // skip
             } else if vip.token_payout_lock == true { 
                 // skip
@@ -202,18 +192,11 @@ fn handle_do_cycles_payout_result(cpd: &mut CyclesPayoutData, do_cycles_payout_r
     }
 }
 
-fn handle_do_token_payout_sponse(tpd: &mut TokenPayoutData, do_token_payout_sponse: DoTokenPayoutSponse) {
-    match do_token_payout_sponse {
-        DoTokenPayoutSponse::TokenTransferError(_token_transfer_error_type) => {
-            
-        },
-        DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_transfer, _cm_message_error_type) => {
-            tpd.token_transfer = Some(token_transfer);
-        },
-        DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageSuccess(token_transfer, cm_message_call_success_timestamp_nanos) => {
-            tpd.token_transfer = Some(token_transfer);
-            tpd.cm_message_call_success_timestamp_nanos = Some(cm_message_call_success_timestamp_nanos);
-        },
-        DoTokenPayoutSponse::NothingForTheDo => {},
-    }
+// we use this function (instead of replacing the whole token_payout_data) 
+// cause the cm_caller-cm_call manual-callback can come back before this output is put back on the purchase/vcp. 
+// so we use this function so that only the fields that the do_token_payout fn sets get re-place.
+fn handle_do_token_payout_sponse(tpd: &mut TokenPayoutData, sponse: TokenPayoutData) {
+    tpd.token_transfer = sponse.token_transfer;
+    tpd.token_fee_collection = sponse.token_fee_collection;
+    tpd.cm_message_call_success_timestamp_nanos = sponse.cm_message_call_success_timestamp_nanos;
 }

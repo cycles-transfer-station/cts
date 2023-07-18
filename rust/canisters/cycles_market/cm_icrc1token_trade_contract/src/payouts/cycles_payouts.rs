@@ -42,11 +42,11 @@ pub async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutR
                     for_the_canister: q.cycles_payout_payee(),
                     method: q.cycles_payout_payee_method().to_string(),
                     put_bytes: q.cycles_payout_payee_method_quest_bytes()?,
-                    cycles: q.cycles(),
+                    cycles: q.cycles().saturating_sub(calculate_trade_fee(q.cycles())),
                     cm_callback_method: q.cm_call_callback_method().to_string(),
                 }
             )?,
-            q.cycles() + 10_000_000_000 // for the cm_caller
+            q.cycles().saturating_sub(calculate_trade_fee(q.cycles())) + 500_000_000/*for the cm_caller*/
         );
                 
         if let Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {

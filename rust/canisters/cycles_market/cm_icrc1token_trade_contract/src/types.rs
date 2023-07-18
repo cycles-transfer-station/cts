@@ -7,44 +7,111 @@ pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
 
 
+pub trait PositionTrait {
+    fn id(&self) -> PositionId;
+    fn positor(&self) -> Principal;
+    fn cycles_per_token_rate(&self) -> CyclesPerToken;
+    fn timestamp_nanos(&self) -> u128;
+    
+    type VoidPositionType: VoidPositionTrait;
+    fn into_void_position_type(self) -> Self::VoidPositionType;
+    
+    fn tokens(&self) -> Tokens;
+    fn subtract_tokens(&mut self, sub_tokens: Tokens);
+    
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool;
+    
+    const POSITION_KIND: PositionKind;
+}
+
+
+
 
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CyclesPosition {
     pub id: PositionId,   
     pub positor: Principal,
     pub cycles: Cycles,
-    pub minimum_purchase: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
     pub timestamp_nanos: u128,
 }
+
+impl PositionTrait for CyclesPosition {
+    fn id(&self) -> PositionId { self.id }
+    fn positor(&self) -> Principal { self.positor }
+    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
+    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+    
+    type VoidPositionType = VoidCyclesPosition;
+    fn into_void_position_type(self) -> Self::VoidPositionType {
+        VoidCyclesPosition{
+            position_id: self.id,
+            positor: self.positor,                                
+            cycles: self.cycles,
+            cycles_payout_lock: false,
+            cycles_payout_data: CyclesPayoutData::new(),
+            timestamp_nanos: time_nanos()
+        }
+    }
+    
+    fn tokens(&self) -> Tokens {
+        cycles_transform_tokens(self.cycles, self.cycles_per_token_rate)
+    }
+    fn subtract_tokens(&mut self, sub_tokens: Tokens) {
+        self.cycles = self.cycles.saturating_sub(tokens_transform_cycles(sub_tokens, self.cycles_per_token_rate));
+    }
+    #[inline(always)]
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool {
+        self.cycles_per_token_rate >= match_rate
+    }
+    
+    const POSITION_KIND: PositionKind = PositionKind::Cycles;
+
+}
+
+
+
 
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct TokenPosition {
     pub id: PositionId,   
     pub positor: Principal,
     pub tokens: Tokens,
-    pub minimum_purchase: Tokens,
     pub cycles_per_token_rate: CyclesPerToken,
     pub timestamp_nanos: u128,
 }
 
-pub trait PositionTrait {
-    fn id(&self) -> PositionId;
-    fn positor(&self) -> Principal;
-    fn cycles_per_token_rate(&self) -> CyclesPerToken;
-    fn timestamp_nanos(&self) -> u128;
-}
-impl PositionTrait for CyclesPosition {
-    fn id(&self) -> PositionId { self.id }
-    fn positor(&self) -> Principal { self.positor }
-    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
-    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
-}
 impl PositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
     fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+    
+    type VoidPositionType = VoidTokenPosition;
+    fn into_void_position_type(self) -> Self::VoidPositionType {
+        VoidTokenPosition{
+            position_id: self.id,
+            positor: self.positor,
+            tokens: self.tokens,
+            timestamp_nanos: time_nanos(),
+            token_payout_lock: false,
+            token_payout_data: TokenPayoutData::new_for_a_void_token_position()
+        }
+    }
+    
+    fn tokens(&self) -> Tokens {
+        self.tokens
+    }
+    fn subtract_tokens(&mut self, sub_tokens: Tokens) {
+        self.tokens = self.tokens.saturating_sub(sub_tokens);
+    }
+    #[inline(always)]
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool {
+        self.cycles_per_token_rate <= match_rate
+    }
+    
+    const POSITION_KIND: PositionKind = PositionKind::Token;
+
 }
 
 
@@ -100,11 +167,36 @@ pub struct TokenTransferBlockHeightAndTimestampNanos {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TokenPayoutData {
     pub token_transfer: Option<TokenTransferBlockHeightAndTimestampNanos>,
+    pub token_fee_collection: Option<TokenTransferBlockHeightAndTimestampNanos>,
     pub cm_message_call_success_timestamp_nanos: Option<u128>,
     pub cm_message_callback_complete: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-positor-message-call-error
 }
 impl TokenPayoutData {
-    // no new fn because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferBlockHeightAndTimestampNanos)
+    // separate new fns because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferBlockHeightAndTimestampNanos)
+    pub fn new_for_a_trade_log() -> Self {
+        Self{
+            token_transfer: None,
+            token_fee_collection: None,
+            cm_message_call_success_timestamp_nanos: None,
+            cm_message_callback_complete: None    
+        }
+    }
+    pub fn new_for_a_void_token_position() -> Self {
+        TokenPayoutData{
+            token_transfer: Some(TokenTransferBlockHeightAndTimestampNanos{
+                block_height: None,
+                timestamp_nanos: time_nanos(),
+            }),
+            token_fee_collection: Some(TokenTransferBlockHeightAndTimestampNanos{
+                block_height: None,
+                timestamp_nanos: time_nanos(),
+            }),
+            cm_message_call_success_timestamp_nanos: None,
+            cm_message_callback_complete: None            
+        }
+    }
+    
+    
     pub fn is_waiting_for_the_cmcaller_callback(&self) -> bool {
         self.cm_message_call_success_timestamp_nanos.is_some() 
         && self.cm_message_callback_complete.is_none()
@@ -127,6 +219,7 @@ pub trait TokenPayoutDataTrait {
     fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError>; 
     fn tokens(&self) -> Tokens;
     fn token_transfer_memo(&self) -> Option<IcrcMemo>;
+    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo>;
     fn token_transfer_fee(&self) -> Tokens;
     fn cm_call_id(&self) -> u128;
     fn cm_call_callback_method(&self) -> &'static str; 
@@ -155,7 +248,7 @@ pub struct TradeLog {
     pub token_payout_data: TokenPayoutData
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum PositionKind {
     Cycles,
     Token
@@ -301,10 +394,10 @@ impl TokenPayoutDataTrait for TradeLog {
     } 
     fn tokens(&self) -> Tokens { self.tokens }
     fn token_transfer_memo(&self) -> Option<IcrcMemo> { 
-        match self.position_kind { 
-            PositionKind::Cycles => Some(IcrcMemo(ByteBuf::from(*CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO))),
-            PositionKind::Token => Some(IcrcMemo(ByteBuf::from(*TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO)))
-        }
+        Some(IcrcMemo(ByteBuf::from(position_purchase_token_transfer_memo(self.position_kind, self.id))))
+    }
+    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> {
+        Some(IcrcMemo(ByteBuf::from(position_purchase_token_fee_collection_transfer_memo(self.position_kind, self.id))))
     }
     fn token_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
     fn cm_call_id(&self) -> u128 { self.id }
@@ -320,6 +413,12 @@ impl TokenPayoutDataTrait for TradeLog {
 // --------
 
 
+pub trait VoidPositionTrait {
+    fn position_id(&self) -> PositionId;
+}
+
+
+
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VoidCyclesPosition {
@@ -330,6 +429,13 @@ pub struct VoidCyclesPosition {
     pub cycles_payout_data: CyclesPayoutData,
     pub timestamp_nanos: u128
 }
+
+impl VoidPositionTrait for VoidCyclesPosition {
+    fn position_id(&self) -> PositionId {
+        self.position_id
+    }    
+}
+
 
 impl CyclesPayoutDataTrait for VoidCyclesPosition {
     fn cycles_payout_data(&self) -> CyclesPayoutData {
@@ -377,6 +483,12 @@ pub struct VoidTokenPosition {
     pub timestamp_nanos: u128
 }
 
+impl VoidPositionTrait for VoidTokenPosition {
+    fn position_id(&self) -> PositionId {
+        self.position_id
+    }    
+}
+
 impl TokenPayoutDataTrait for VoidTokenPosition {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
@@ -394,6 +506,7 @@ impl TokenPayoutDataTrait for VoidTokenPosition {
     }
     fn tokens(&self) -> Tokens { self.tokens }
     fn token_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
+    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
     fn token_transfer_fee(&self) -> Tokens { trap("void-token-position does not call the ledger."); }
     fn cm_call_id(&self) -> u128 { self.position_id }  
     fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_VOID_TOKEN_POSITION_POSITOR } 
