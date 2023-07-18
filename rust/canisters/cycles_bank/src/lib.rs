@@ -1843,7 +1843,7 @@ pub fn download_cm_cycles_positions(icrc1token_trade_contract: Icrc1TokenTradeCo
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_cycles_positions).unwrap_or(&vec![])),));
     });    
 }
 
@@ -1861,7 +1861,7 @@ pub fn download_cm_token_positions(icrc1token_trade_contract: Icrc1TokenTradeCon
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_positions).unwrap_or(&vec![])),));
     });
 }
 
@@ -1879,7 +1879,7 @@ pub fn download_cm_cycles_positions_purchases(icrc1token_trade_contract: Icrc1To
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions_purchases),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_cycles_positions_purchases).unwrap_or(&vec![])),));
     });
 }
 
@@ -1899,7 +1899,7 @@ pub fn download_cm_token_positions_purchases(icrc1token_trade_contract: Icrc1Tok
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions_purchases),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_positions_purchases).unwrap_or(&vec![])),));
     });
 }
 
@@ -1918,7 +1918,7 @@ pub fn download_cm_token_transfers_out(icrc1token_trade_contract: Icrc1TokenTrad
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_transfers_out),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_transfers_out).unwrap_or(&vec![])),));
     });
 }
 
@@ -1940,7 +1940,7 @@ pub fn download_cm_message_cycles_position_purchase_positor_logs(icrc1token_trad
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_positor_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_cycles_position_purchase_positor_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -1959,7 +1959,7 @@ pub fn download_cm_message_cycles_position_purchase_purchaser_logs(icrc1token_tr
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -1978,7 +1978,7 @@ pub fn download_cm_message_token_position_purchase_positor_logs(icrc1token_trade
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_positor_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_token_position_purchase_positor_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -1998,7 +1998,7 @@ pub fn download_cm_message_token_position_purchase_purchaser_logs(icrc1token_tra
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_token_position_purchase_purchaser_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_token_position_purchase_purchaser_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -2016,7 +2016,7 @@ pub fn download_cm_message_void_cycles_position_positor_logs(icrc1token_trade_co
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_cycles_position_positor_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_void_cycles_position_positor_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -2036,7 +2036,7 @@ pub fn download_cm_message_void_token_position_positor_logs(icrc1token_trade_con
     maintenance_check();
     
     with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, &cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).unwrap().cm_message_logs.cm_message_void_token_position_positor_logs),));
+        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_void_token_position_positor_logs).unwrap_or(&vec![])),));
     });
 }
 
@@ -2138,11 +2138,7 @@ pub fn metrics() { //-> UserUCMetrics {
 
 // --------------------------------------------------------
 
-#[update]
-pub fn topup_ctsfuel_with_some_cycles() -> () {
-    msg_cycles_accept128(msg_cycles_available128());
-}
-
+/*
 
 #[derive(CandidType)]
 pub enum UserCyclesBalanceForTheCTSFuelError {
@@ -2313,7 +2309,7 @@ pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), Us
 
 }
 
-
+*/
 
 
 // -----------------------------------------------------------------------------------
