@@ -242,12 +242,6 @@ pub fn round_robin<T: Copy>(ctcs: &Vec<T>, round_robin_counter: &'static LocalKe
 
 
 
-pub const fn cb_storage_size_mib_as_cb_network_memory_allocation_mib(storage_size_mib: u128) -> u128 {
-    storage_size_mib * 3 + 10
-}
-
-
-
 
 
 

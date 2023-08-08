@@ -6,11 +6,62 @@ use serde::Serialize;
 pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
 
+// this one goes into the PositionLog storage but gets updated for the position-termination.
+pub struct PositionLog {
+    id: PositionId,
+    positor: Principal,
+    match_tokens_quest: MatchTokensQuest,
+    position_kind: PositionKind,
+    creation_timestamp_nanos: u128,
+    position_termination: Option<PositionTerminationData>,
+}
 
-pub trait PositionTrait {
+
+pub struct PositionTerminationData {
+    timestamp_nanos: u128,
+    cause: PositionTerminationCause
+}
+
+pub enum PositionTerminationCause {
+    Fill, // the position is fill[ed]. position.amount < minimum_token_match()
+    Bump, // the position got bumped
+    UserCallVoidPosition, // the user cancelled the position by calling void_position
+    CurrentPositionsAreFull, // after matching the request with compatible positions, was not able to create a 'current-position' with the leftover amount. The canister's current_positions list is full.
+}
+
+
+
+
+
+// these two stay on the canister as the current positions / market depth.
+pub struct CyclesPosition {
+    id: PositionId,
+    positor: Principal,
+    match_tokens_quest: MatchTokensQuest,
+    creation_timestamp_nanos: u128,
+    current_position_cycles: Cycles,
+    purchases_rates_times_cycles_quantities_sum: u128,
+}
+pub struct TokenPosition {
+    id: PositionId,
+    positor: Principal,
+    match_tokens_quest: MatchTokensQuest,
+    creation_timestamp_nanos: u128,
+    current_position_tokens: Tokens,
+    purchases_rates_times_token_quantities_sum: u128,
+}
+
+
+
+
+
+// ------------------
+
+
+pub trait CurrentPositionTrait {
     fn id(&self) -> PositionId;
     fn positor(&self) -> Principal;
-    fn cycles_per_token_rate(&self) -> CyclesPerToken;
+    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken;
     fn timestamp_nanos(&self) -> u128;
     
     type VoidPositionType: VoidPositionTrait;
@@ -19,14 +70,16 @@ pub trait PositionTrait {
     fn tokens(&self) -> Tokens;
     fn subtract_tokens(&mut self, sub_tokens: Tokens);
     
-    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool;
+    // if the position is compatible with the match_rate, 
+    // returns the middle rate between this position's available rate and between the match_rate.
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken>;
     
     const POSITION_KIND: PositionKind;
 }
 
 
 
-
+/*
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CyclesPosition {
     pub id: PositionId,   
@@ -35,11 +88,21 @@ pub struct CyclesPosition {
     pub cycles_per_token_rate: CyclesPerToken,
     pub timestamp_nanos: u128,
 }
+*/
 
-impl PositionTrait for CyclesPosition {
+impl CurrentPositionTrait for CyclesPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
-    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
+    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
+        let total_position_cycles: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate);
+        find_current_position_available_rate(
+            (total_positiion_cycles - self.current_position_cycles),
+            self.purchases_rates_times_cycles_quantities_sum,
+            self.match_tokens_quest.cycles_per_token_rate,
+            total_position_cycles,
+            self.current_position_cycles
+        )
+    }
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidCyclesPosition;
@@ -47,22 +110,27 @@ impl PositionTrait for CyclesPosition {
         VoidCyclesPosition{
             position_id: self.id,
             positor: self.positor,                                
-            cycles: self.cycles,
+            cycles: self.current_position_cycles,
             cycles_payout_lock: false,
             cycles_payout_data: CyclesPayoutData::new(),
             timestamp_nanos: time_nanos()
         }
     }
     
-    fn tokens(&self) -> Tokens {
-        cycles_transform_tokens(self.cycles, self.cycles_per_token_rate)
+    fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens {
+        self.current_position_cycles / rate
     }
-    fn subtract_tokens(&mut self, sub_tokens: Tokens) {
-        self.cycles = self.cycles.saturating_sub(tokens_transform_cycles(sub_tokens, self.cycles_per_token_rate));
+    fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) {
+        let sub_cycles: Cycles = tokens_transform_cycles(sub_tokens, rate);
+        self.current_position_cycles = self.current_position_cycles.saturating_sub(sub_cycles);
+        self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);        
     }
-    #[inline(always)]
-    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool {
-        self.cycles_per_token_rate >= match_rate
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken> {
+        let current_position_available_cycles_per_token_rate = self.current_position_available_cycles_per_token_rate();
+        (current_position_available_cycles_per_token_rate >= match_rate).then(|| {
+            let difference = current_position_available_cycles_per_token_rate - match_rate;
+            current_position_available_cycles_per_token_rate - difference / 2
+        })
     }
     
     const POSITION_KIND: PositionKind = PositionKind::Cycles;
@@ -71,7 +139,7 @@ impl PositionTrait for CyclesPosition {
 
 
 
-
+/*
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct TokenPosition {
     pub id: PositionId,   
@@ -80,11 +148,20 @@ pub struct TokenPosition {
     pub cycles_per_token_rate: CyclesPerToken,
     pub timestamp_nanos: u128,
 }
+*/
 
-impl PositionTrait for TokenPosition {
+impl CurrentPositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
-    fn cycles_per_token_rate(&self) -> CyclesPerToken { self.cycles_per_token_rate }
+    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
+        find_current_position_available_rate(
+            (self.match_tokens_quest.tokens - self.current_position_tokens),
+            self.purchases_rates_times_token_quantities_sum,
+            self.match_tokens_quest.cycles_per_token_rate,
+            self.match_tokens_quest.tokens,
+            self.current_position_tokens
+        )
+    }
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidTokenPosition;
@@ -92,22 +169,28 @@ impl PositionTrait for TokenPosition {
         VoidTokenPosition{
             position_id: self.id,
             positor: self.positor,
-            tokens: self.tokens,
+            tokens: self.current_position_tokens,
             timestamp_nanos: time_nanos(),
             token_payout_lock: false,
             token_payout_data: TokenPayoutData::new_for_a_void_token_position()
         }
     }
     
-    fn tokens(&self) -> Tokens {
-        self.tokens
+    fn current_position_tokens(&self, _rate: CyclesPerToken) -> Tokens {
+        self.current_position_tokens
     }
-    fn subtract_tokens(&mut self, sub_tokens: Tokens) {
-        self.tokens = self.tokens.saturating_sub(sub_tokens);
+    fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) {
+        self.current_position_tokens = self.current_position_tokens.saturating_sub(sub_tokens);
+        self.purchases_rates_times_token_quantities_sum = self.purchases_rates_times_token_quantities_sum.saturating_add(rate * sub_tokens);
     }
-    #[inline(always)]
-    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> bool {
-        self.cycles_per_token_rate <= match_rate
+    fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken> {
+        let current_position_available_cycles_per_token_rate = self.current_position_available_cycles_per_token_rate();
+        (current_position_available_cycles_per_token_rate <= match_rate).then(|| {
+            let difference = match_rate - current_position_available_cycles_per_token_rate;
+            current_position_available_cycles_per_token_rate + difference / 2
+        })
+        
+        self.current_position_available_cycles_per_token_rate() <= match_rate
     }
     
     const POSITION_KIND: PositionKind = PositionKind::Token;
@@ -115,7 +198,29 @@ impl PositionTrait for TokenPosition {
 }
 
 
-// ------------
+fn find_current_position_available_rate(
+    position_purchases_quantity_sum: u128, 
+    position_purchases_rates_times_quantities_sum: u128,
+    match_quest_cycles_per_token_rate: CyclesPerToken,
+    match_quest_quantity: u128, 
+    current_position_quantity: u128,
+) -> CyclesPerToken {
+    if position_purchases_quantity_sum == 0 || current_position_quantity == 0 {
+        return match_quest_cycles_per_token_rate;
+    }
+    let average_position_purchases_rate = position_purchases_rates_times_quantities_sum / position_purchases_quantity_sum;
+    let rate_for_current_position = (match_quest_cycles_per_token_rate * match_quest_quantity - (average_position_purchases_rate * position_purchases_quantity_sum)) / current_position_quantity;
+    CyclesPerToken(rate_for_current_position)
+}
+
+
+
+
+
+
+// ----------------------------
+
+
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {

@@ -43,6 +43,15 @@ pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES             : Cycles = 127_0
 
 
 
+pub const fn cb_storage_size_mib_as_cb_network_memory_allocation_mib(storage_size_mib: u128) -> u128 {
+    storage_size_mib * 3 + 10
+}
+
+
+
+
+
+
 pub const ICP_LEDGER_CREATE_CANISTER_MEMO: IcpMemo = IcpMemo(0x41455243); // == 'CREA'
 pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 'TPUP'
 

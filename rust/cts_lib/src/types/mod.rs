@@ -19,9 +19,13 @@ use crate::{
 
 
 
+//pub struct Cycles(pub u128);
 pub type Cycles = u128;
+//pub struct CyclesTransferRefund(pub Cycles);
 pub type CyclesTransferRefund = Cycles;
+//pub struct CTSFuel(pub Cycles);
 pub type CTSFuel = Cycles;
+
 pub type XdrPerMyriadPerIcp = u64;
 
 
@@ -91,26 +95,26 @@ pub mod canister_code {
 
 
 
-pub mod cycles_banks_cache {
-    use super::{Principal, time};
+pub mod cache {
+    use super::{time};
     use std::collections::{HashMap};
     
     // private
     #[derive(Clone, Copy)]
-    struct CBCacheData {
+    struct CacheData<T> {
         timestamp_nanos: u64,
-        opt_cycles_bank_canister_id: Option<Principal>
+        data: T,
     }
 
     // cacha for this. with a max users->user-canisters
     // on a new user, put/update insert the new user into this cache
     // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
-        
-    pub struct CBSCache {
-        hashmap: HashMap<Principal, CBCacheData>,
+    use core::hash::Hash;
+    pub struct Cache<E: Eq + PartialEq + Hash + Clone, T> {
+        hashmap: HashMap<E, CacheData<T>>,
         max_size: usize
     }
-    impl CBSCache {
+    impl<E: Eq + PartialEq + Hash + Clone, T> Cache<E, T> {
         
         pub fn new(max_size: usize) -> Self {
             Self {
@@ -119,25 +123,26 @@ pub mod cycles_banks_cache {
             }
         }
         
-        pub fn put(&mut self, user_id: Principal, opt_cycles_bank_canister_id: Option<Principal>) {
+        pub fn put(&mut self, key: E, v: T) {
             if self.hashmap.len() >= self.max_size {
+                // file a bug report, if clone is not a trait bound of E, then the below code fails with a different error
                 self.hashmap.remove(
                     &(self.hashmap.iter().min_by_key(
-                        |(_user_id, user_cache_data)| {
-                            user_cache_data.timestamp_nanos
+                        |(_key, cache_data)| {
+                            cache_data.timestamp_nanos
                         }
                     ).unwrap().0.clone())
                 );
             }
-            self.hashmap.insert(user_id, CBCacheData{ opt_cycles_bank_canister_id, timestamp_nanos: time() });
+            self.hashmap.insert(key, CacheData{ data: v, timestamp_nanos: time() });
         }
         
-        pub fn check(&mut self, user_id: Principal) -> Option<Option<Principal>> {
-            match self.hashmap.get_mut(&user_id) {
+        pub fn check(&mut self, key: &E) -> Option<&T> {
+            match self.hashmap.get_mut(&key) {
                 None => None,
-                Some(user_cache_data) => {
-                    user_cache_data.timestamp_nanos = time();
-                    Some(user_cache_data.opt_cycles_bank_canister_id)
+                Some(cache_data) => {
+                    cache_data.timestamp_nanos = time(); // keeps the most used items in the cache
+                    Some(&(cache_data.data))
                 }
             }
         }
@@ -156,6 +161,13 @@ pub mod cts {
         pub cycles_balance: Cycles
     }
     
+
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone)]
+    pub struct LengthenMembershipQuest {
+        pub lengthen_years: u128,
+    }
+        
+    
 }
 
 
@@ -169,11 +181,19 @@ pub mod cbs_map {
         pub cts_id: Principal
     }
 
-    #[derive(CandidType, Deserialize, Clone)]    
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone)]    
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
+        pub first_membership_creation_timestamp_nanos: u128,
         pub cycles_bank_latest_known_module_hash: [u8; 32],
-        pub cycles_bank_lifetime_termination_timestamp_seconds: u128
+        pub cycles_bank_lifetime_termination_timestamp_seconds: u128,
+        pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData> // some if canister is uninstalled
+    }
+    
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone)]
+    pub struct CyclesBankTerminationUninstallData {
+        pub uninstall_timestamp_nanos: u64,
+        pub user_cycles_balance: Cycles,
     }
 
     #[derive(CandidType,Deserialize)]
@@ -181,7 +201,11 @@ pub mod cbs_map {
         CanisterIsFull,
         FoundUser(CBSMUserData)
     }
-
+    
+    #[derive(CandidType, Deserialize)]
+    pub enum UpdateUserError {
+        UserNotFound
+    }
     
     pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBErrorKind);
 
@@ -214,7 +238,8 @@ pub mod cycles_bank {
         pub cbsm_id: Principal,
         pub storage_size_mib: u128,                         
         pub lifetime_termination_timestamp_seconds: u128,
-        pub cycles_transferrer_canisters: Vec<Principal>
+        pub cycles_transferrer_canisters: Vec<Principal>,
+        pub start_with_user_cycles_balance: Cycles,
     }
     
     #[derive(CandidType, Deserialize)]

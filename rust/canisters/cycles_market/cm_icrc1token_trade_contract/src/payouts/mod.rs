@@ -1,20 +1,58 @@
-
-
 use crate::*;
 
 mod cycles_payouts;
 use cycles_payouts::*;
 
-
 mod token_payouts;
 use token_payouts::*;
 
+use flush_trade_logs::flush_trade_logs;
 
 
 
 
 
-pub async fn _do_payouts() {
+
+pub async fn do_payouts() {
+    
+    if with(&CM_DATA, |cm_data| {
+        cm_data.void_cycles_positions.len() == 0
+        && cm_data.void_token_positions.len() == 0
+        && cm_data.trade_logs.len() == 0
+    }) { return; }
+
+    match call::<(),()>(
+        ic_cdk::api::id(),
+        "do_payouts_public_method",
+        (),
+    ).await {
+        Ok(()) => {
+            flush_trade_logs().await;              
+        },
+        Err(call_error) => {
+            with_mut(&CM_DATA, |cm_data| {
+                cm_data.do_payouts_errors.push(call_error_as_u32_and_string(call_error));
+            });
+        }
+    }
+}
+
+#[export_name = "canister_update do_payouts_public_method"]
+pub extern "C" fn do_payouts_public_method() {
+    let caller: Principal = caller();
+    if ic_cdk::api::id() != caller && is_controller(&caller) == false {
+        trap("caller without the authorization.");
+    }
+    
+    ic_cdk::spawn(_do_payouts());
+    reply::<()>(());
+}
+
+
+
+
+
+async fn _do_payouts() {
 
     let mut void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
     let mut void_token_positions_token_payouts_chunk: Vec<(VoidTokenPositionId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
@@ -171,10 +209,6 @@ pub async fn _do_payouts() {
     });
     
 }
-
-
-
-
 
 
 

@@ -37,7 +37,8 @@ use cts_lib::{
                 Nat,
                 utils::{
                     encode_one,
-                    decode_one
+                    decode_one,
+                    encode_args,
                 }
             },
         },
@@ -56,6 +57,7 @@ use cts_lib::{
         CTSFuel,
         CyclesTransfer,
         CyclesTransferMemo,
+        CallError,
         cycles_transferrer,
         cycles_bank::{
             CyclesBankInit,
@@ -64,7 +66,8 @@ use cts_lib::{
         cycles_market::{
             icrc1token_trade_contract as cm_icrc1token_trade_contract,
             cm_main::Icrc1TokenTradeContract,
-        }
+        },
+        cts::LengthenMembershipQuest,
     },
     consts::{
         MiB,
@@ -86,6 +89,7 @@ use cts_lib::{
             }
         },
         tokens_transform_cycles,
+        call_error_as_u32_and_string,
     },
     icrc::{Tokens,IcrcId, BlockId},
     global_allocator_counter::get_allocated_bytes_count,
@@ -93,6 +97,9 @@ use cts_lib::{
 };
 
 use serde::Serialize;
+
+use futures::{poll, task::Poll};
+
 
 // -------------------------------------------------------------------------
 
@@ -597,6 +604,8 @@ fn canister_init(user_canister_init: CyclesBankInit) {
             user_data:                                              UserData::new(),
             cycles_transfers_id_counter:                            0u128    
         };
+        
+        cb_data.user_data.cycles_balance = user_canister_init.start_with_user_cycles_balance;
     });
 
     
@@ -778,7 +787,7 @@ fn ctsfuel_balance(cb_data: &CBData) -> CTSFuel {
         (
             cb_data.lifetime_termination_timestamp_seconds.saturating_sub(time_seconds()) 
             * 
-            cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(cb_data.storage_size_mib) * MiB as u128 // canister-memory-allocation in the mib
+            cts_lib::consts::cb_storage_size_mib_as_cb_network_memory_allocation_mib(cb_data.storage_size_mib) * MiB as u128 // canister-memory-allocation in the mib
         )
         *
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES
@@ -1202,6 +1211,102 @@ pub async fn transfer_icp(transfer_arg_raw: Vec<u8>) {
 
 // ---------------------------------------------------
 // cycles-market methods
+
+
+
+/*
+
+#[derive(CandidType)]
+pub enum CBBuyTokensError {
+    CTSFuelTooLow,
+    MemoryIsFull,
+    CyclesBalanceTooLow{ cycles_balance: Cycles },
+    CMBuyTokensCallError((u32, String)),
+    CMBuyTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+}
+
+type CBBuyTokensResult = Result<CM::BuyTokensResult, CBBuyTokensError>;
+
+#[update]
+pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: CM::BuyTokensQuest) -> CBBuyTokensResult {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+    
+    let put_call_cycles: Cycles = tokens_transform_cycles(q.tokens, q.cycles_per_token_rate);
+    
+    with(&CB_DATA, |cb_data| { 
+        if ctsfuel_balance(cb_data) < 30_000_000_000 {
+            return Err(CBBuyTokensError::CTSFuelTooLow);
+        }
+        if calculate_free_storage(cb_data) < std::mem::size_of::<CMCyclesPosition>() as u128 {
+            return Err(CBBuyTokensError::MemoryIsFull);
+        }
+        if cb_data.user_data.cycles_balance < put_call_cycles {
+            return Err(CBBuyTokensError::CyclesBalanceTooLow{ cycles_balance: cb_data.user_data.cycles_balance });
+        }
+        Ok(())
+    })?;
+    
+    let mut call_future = call_raw128(
+        icrc1token_trade_contract.trade_contract_canister_id,
+        "buy_tokens",
+        &encode_one(&q).unwrap(),
+        put_call_cycles
+    );
+    
+    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
+        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
+        return Err(CBBuyTokensError::CMBuyTokensCallError((call_error.0 as u32, "call_perform error".to_string())));
+    }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(put_call_cycles);
+        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
+    });
+    
+    let call_result: CallResult<Vec<u8>> = call_future.await;
+
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
+    });
+    
+    match call_result {
+        Ok(sponse_bytes) => match decode_one::<CM::BuyTokensResult>(&sponse_bytes) {
+            Ok(cm_buy_tokens_result) => {
+                if let Ok(ref cm_buy_tokens_ok) = cm_buy_tokens_result {
+                    with_mut(&CB_DATA, |cb_data| {
+                        
+                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions.push(
+                            CMCyclesPosition{
+                                id: cm_create_cycles_position_success.position_id,
+                                create_cycles_position_quest: q,
+                                create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
+                                timestamp_nanos: time_nanos(),
+                            }
+                        );
+                        
+                    });
+                }
+                Ok(cm_buy_tokens_result)
+            },
+            Err(candid_decode_error) => {
+                return Err(CBBuyTokensError::CMBuyTokensCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
+            }
+        },
+        Err(call_error) => {
+            return Err(CBBuyTokensError::CMBuyTokensCallError((call_error.0 as u32, call_error.1)));
+        }
+    }
+    
+    
+    
+}
+
+*/
+
+
+
 
 
 
@@ -2136,7 +2241,69 @@ pub fn metrics() { //-> UserUCMetrics {
 }
 
 
+
+
+
 // --------------------------------------------------------
+
+const TRILLION: u128 = 1_000_000_000_000;
+
+
+#[update]
+pub async fn user_lengthen_membership_cb_cycles_payment(q: LengthenMembershipQuest, msg_cycles: Cycles) -> Result<Vec<u8>/*cts reply*/, CallError> {
+    if with(&CB_DATA, |cb_data| caller() != cb_data.user_id ) {
+        trap("Caller must be the user for this method");
+    }
+    
+    let mut call_future = with(&CB_DATA, |cb_data| {
+        if cb_data.user_data.cycles_balance < msg_cycles {
+            trap(&format!(
+                "current cycles-balance: {}T, msg_cycles: {}T",
+                cb_data.user_data.cycles_balance / TRILLION,
+                msg_cycles / TRILLION 
+            ));
+        }
+        
+        call_raw128(
+            cb_data.cts_id,
+            "lengthen_membership_cb_cycles_payment",
+            &encode_args((q, cb_data.user_id)).unwrap(),
+            msg_cycles
+        )
+    });
+    
+    if let Poll::Ready(err_result) = poll!(&mut call_future) {
+        return Err(call_error_as_u32_and_string(err_result.unwrap_err()));
+    }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(msg_cycles);
+    });
+    
+    let call_result: CallResult<Vec<u8>> = call_future.await;
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
+    });
+    
+    call_result.map_err(|call_error| call_error_as_u32_and_string(call_error))
+    
+}
+
+
+
+
+
+#[update]
+pub fn cts_update_lifetime_termination_timestamp_seconds(new_lifetime_termination_timestamp_seconds: u128) {
+    with_mut(&CB_DATA, |cb_data| {
+        if [cb_data.cts_id, cb_data.cbsm_id].contains(&caller()) == false {
+            trap("Caller not authorized");
+        }
+        cb_data.lifetime_termination_timestamp_seconds = new_lifetime_termination_timestamp_seconds; 
+    });
+}
+
 
 /*
 

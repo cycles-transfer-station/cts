@@ -164,7 +164,6 @@ pub struct TransferTokenBalanceQuest {
 
 #[derive(CandidType, Deserialize)]
 pub enum TransferTokenBalanceError {
-    MsgCyclesTooLow{ transfer_token_balance_fee: Cycles },
     CyclesMarketIsBusy,
     CallerIsInTheMiddleOfACreateTokenPositionOrPurchaseCyclesPositionOrTransferTokenBalanceCall,
     CheckUserCyclesMarketTokenLedgerBalanceCallError((u32, String)),

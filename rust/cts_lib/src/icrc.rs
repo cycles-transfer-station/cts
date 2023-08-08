@@ -13,8 +13,10 @@ pub use icrc_ledger_types::{
         TransferError as TokenTransferError,
     },
 };
-pub use u128 as Tokens;
 
+
+pub use u128 as Tokens;
+//pub struct Tokens(pub u128);
 /*
 pub use ic_icrc1::{
     Account as Icrc1Id,

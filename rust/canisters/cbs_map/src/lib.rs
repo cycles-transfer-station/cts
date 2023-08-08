@@ -54,6 +54,7 @@ use cts_lib::{
             CBSMInit,
             CBSMUserData,
             PutNewUserError,
+            UpdateUserError,
             CBSMUpgradeCBError,
             CBSMUpgradeCBErrorKind
         },
@@ -305,10 +306,7 @@ pub fn void_user() {
 }
 
 
-#[derive(CandidType, Deserialize)]
-pub enum UpdateUserError {
-    UserNotFound
-}
+
 
 
 #[export_name = "canister_update update_user"]
@@ -334,7 +332,7 @@ pub fn update_user() {
 
 // -------------------------------
 
-
+/*
 
 #[update]
 pub fn cb_lengthen_lifetime(q: cycles_bank::LengthenLifetimeQuest) -> () {
@@ -344,7 +342,7 @@ pub fn cb_lengthen_lifetime(q: cycles_bank::LengthenLifetimeQuest) -> () {
     });
 }
 
-
+*/
 
 
 
