@@ -1,6 +1,10 @@
-use crate::ic_cdk::{
-    export::{Principal},
-    call,
+use crate::{
+    ic_cdk::{
+        export::{Principal},
+        call,
+    },
+    types::CallError,
+    tools::call_error_as_u32_and_string,
 };
 pub use icrc_ledger_types::{
     Account as IcrcId,
@@ -32,12 +36,12 @@ pub use ic_icrc1::{
 };
 */
 
-pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, (u32, String)> {
+pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, CallError> {
     call(
         icrc1_ledger_id,
         "icrc1_transfer",
         (q,),
-    ).await.map_err(|e| (e.0 as u32, e.1)).map(|(s,)| s)
+    ).await.map_err(|e| call_error_as_u32_and_string(e)).map(|(s,)| s)
 }
 /*   
     let client: ICRC1Client<CdkRuntime> = ICRC1Client::<CdkRuntime>{

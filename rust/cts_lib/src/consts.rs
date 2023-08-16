@@ -26,7 +26,9 @@ pub const WASM_PAGE_SIZE_BYTES: usize = 65536; // 2^16 // 64KiB
 
 pub const MANAGEMENT_CANISTER_ID: Principal = Principal::management_canister();
 
-pub const CYCLES_PER_XDR: Cycles = 1_000_000_000_000u128; // 1T cycles = 1 XDR
+pub const TRILLION: u128 = 1_000_000_000_000;
+
+pub const CYCLES_PER_XDR: Cycles = TRILLION; // 1T cycles = 1 XDR
 
 pub const NETWORK_CANISTER_CREATION_FEE_CYCLES                  : Cycles = 100_000_000_000;
 //pub const NETWORK_COMPUTE_PERCENT_ALLOCATED_PER_SECOND_FEE_CYCLES:Cycles= 100_000;

@@ -38,11 +38,11 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                 memo: q.token_transfer_memo(),
                 amount: {
                     q.tokens()
-                        .saturating_sub(calculate_trade_fee(q.tokens()))
-                        .saturating_sub(q.token_transfer_fee() * 2/*1 for the payout-transfer and 1 for the fee-collection-transfer*/)
+                        .saturating_sub(q.tokens_payout_fee())
+                        .saturating_sub(q.token_ledger_transfer_fee() * 2/*1 for the payout-transfer and 1 for the fee-collection-transfer*/)
                         .into()
                 },
-                fee: Some(q.token_transfer_fee().into()),
+                fee: Some(q.token_ledger_transfer_fee().into()),
                 from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
                 to: IcrcId{owner: ic_cdk::api::id(), subaccount: Some(principal_token_subaccount(&q.token_payout_payee()))},
                 created_at_time: Some(token_transfer_created_at_time)
@@ -57,12 +57,12 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                         }
                     )
                 },
-                Err(token_transfer_error) => {
+                Err(_token_transfer_error) => {
                     // log // return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferError(token_transfer_error));
                     return token_payout_data;
                 }
             },
-            Err(token_transfer_call_error) => {
+            Err(_token_transfer_call_error) => {
                 // log // return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferCallError(token_transfer_call_error));
                 return token_payout_data;
             }
@@ -75,8 +75,8 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
         match token_transfer(
             TokenTransferArg{
                 memo: q.token_fee_collection_transfer_memo(),
-                amount: calculate_trade_fee(q.tokens()).into(),
-                fee: Some(q.token_transfer_fee().into()),
+                amount: q.tokens_payout_fee().into(),
+                fee: Some(q.token_ledger_transfer_fee().into()),
                 from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
                 to: IcrcId{owner: ic_cdk::api::id(), subaccount: None},
                 created_at_time: Some(created_at_time)
@@ -91,11 +91,11 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                         }
                     )
                 },
-                Err(token_transfer_error) => {
+                Err(_token_transfer_error) => {
                     return token_payout_data;
                 }
             },
-            Err(token_transfer_call_error) => {
+            Err(_token_transfer_call_error) => {
                 return token_payout_data;
             }
         }
@@ -150,7 +150,7 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                     method: q.token_payout_payee_method().to_string(),
                     put_bytes: match q.token_payout_payee_method_quest_bytes(token_payout_data.token_transfer.as_ref().unwrap().clone()) {
                         Ok(b) => b,
-                        Err(candid_error) => {
+                        Err(_candid_error) => {
                             // log // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallQuestPutBytesCandidEncodeError(candid_error));     
                             return token_payout_data;
                         }
@@ -160,7 +160,7 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                 }
             ) {
                 Ok(b) => b,
-                Err(candid_error) => {
+                Err(_candid_error) => {
                     // log // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallQuestCandidEncodeError(candid_error));
                     return token_payout_data;
                 }
@@ -174,17 +174,17 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                         // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageSuccess(token_payout_data_token_transfer, time_nanos());
                         token_payout_data.cm_message_call_success_timestamp_nanos = Some(time_nanos());
                     },
-                    Err(cm_call_error) => {
+                    Err(_cm_call_error) => {
                         // log // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallError(cm_call_error));
                         return token_payout_data;
                     }
                 },
-                Err(candid_error) => {
+                Err(_candid_error) => {
                     // log // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallSponseCandidDecodeError(candid_error));                    
                     return token_payout_data;
                 }
             },
-            Err(call_error) => {
+            Err(_call_error) => {
                 // log // return DoTokenPayoutSponse::TokenTransferSuccessAndCMMessageError(token_payout_data_token_transfer, CMMessageErrorType::CMCallerCallCallError((call_error.0 as u32, call_error.1)));                    
                 return token_payout_data;
             } 
