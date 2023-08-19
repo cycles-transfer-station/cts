@@ -72,6 +72,7 @@ pub struct CyclesPosition {
     pub match_tokens_quest: MatchTokensQuest,
     pub current_position_cycles: Cycles,
     pub purchases_rates_times_cycles_quantities_sum: u128,
+    pub tokens_payouts_fees_sum: Tokens,
     pub timestamp_nanos: u128,
 }
 
@@ -113,6 +114,7 @@ impl CurrentPositionTrait for CyclesPosition {
         self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);        
         let total_position_cycles: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate);
         let fee_cycles: Cycles = calculate_trade_fee(total_position_cycles - self.current_position_cycles, sub_cycles);
+        self.tokens_payouts_fees_sum = self.tokens_payouts_fees_sum.saturating_add(cycles_transform_tokens(fee_cycles, rate));
         fee_cycles
     }
     
@@ -142,6 +144,7 @@ pub struct TokenPosition {
     pub match_tokens_quest: MatchTokensQuest,
     pub current_position_tokens: Tokens,
     pub purchases_rates_times_token_quantities_sum: u128,
+    pub cycles_payouts_fees_sum: Cycles,
     pub timestamp_nanos: u128,
 }
 
@@ -178,6 +181,7 @@ impl CurrentPositionTrait for TokenPosition {
         self.current_position_tokens = self.current_position_tokens.saturating_sub(sub_tokens);
         let fee_cycles: Cycles = calculate_trade_fee(self.purchases_rates_times_token_quantities_sum, rate * sub_tokens); // make sure we call this line before we add to the purchases_rates_times_token_quantities_sum, bc we need the total position volume in cycles before this purchase for the calculate_trade_fee fn. 
         self.purchases_rates_times_token_quantities_sum = self.purchases_rates_times_token_quantities_sum.saturating_add(rate * sub_tokens);
+        self.cycles_payouts_fees_sum = self.cycles_payouts_fees_sum.saturating_add(fee_cycles);
         fee_cycles
     }
     fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken> {
