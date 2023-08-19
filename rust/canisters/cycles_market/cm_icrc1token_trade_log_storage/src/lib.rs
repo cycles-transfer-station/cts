@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use cts_lib::{
     tools::{
         localkey::{
@@ -17,7 +18,7 @@ use cts_lib::{
                 reply,
             },
         },
-        export::{candid::{CandidType}},
+        export::{candid::{CandidType}, Principal},
         update,
         query,
         init,
@@ -29,7 +30,7 @@ use cts_lib::{
         locate_minimum_memory
     },
     consts::GiB,
-    types::cycles_market::icrc1token_trade_contract::icrc1token_trade_log_storage::*,
+    types::cycles_market::icrc1token_trade_contract::{PositionId, PurchaseId, icrc1token_trade_log_storage::*},
 };
 
 use ic_stable_structures::{
@@ -48,7 +49,8 @@ pub struct OldData {}
 pub struct Data {
     log_size: u32,
     first_log_id: u128,
-    trade_logs_memory_i: u64
+    trade_logs_memory_i: u64,
+    positions_purchases: HashMap<PositionId, Vec<PurchaseId>>
 }
 
 impl Data {
@@ -56,7 +58,8 @@ impl Data {
         Self {
             log_size: 0u32,
             first_log_id: 0u128,
-            trade_logs_memory_i: 0u64
+            trade_logs_memory_i: 0u64,
+            positions_purchases: HashMap::new(),
         }
     }
 }
@@ -64,7 +67,8 @@ impl Data {
 
 const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 const STABLE_MEMORY_ID_TRADE_LOGS_STORAGE: MemoryId = MemoryId::new(1);
-const MAX_STORAGE_BYTES: u64 = 50 * GiB as u64;
+const MAX_STABLE_TRADE_LOGS_STORAGE_BYTES: u64 = 20 * GiB as u64;
+const MAX_POSITIONS_PURCHASES_HEAP_HASHMAP_SIZE: u64 = 1 * GiB as u64/*max hashmap size on the heap*/;
 
 
 
@@ -104,6 +108,23 @@ fn get_trade_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
     stable_memory_tools::get_stable_memory(STABLE_MEMORY_ID_TRADE_LOGS_STORAGE)
 }
 
+pub fn position_id_of_the_serialization(b: &[u8]) -> PositionId {
+    u128::from_be_bytes(b[0..16].try_into().unwrap())
+}
+pub fn purchase_id_of_the_serialization(b: &[u8]) -> PurchaseId {
+    u128::from_be_bytes(b[16..32].try_into().unwrap())
+}
+
+
+
+pub fn positor_of_the_serialization(b: &[u8]) -> Principal {
+    Principal::from_slice(&b[32..62])        
+}
+pub fn purchaser_of_the_serialization(b: &[u8]) -> Principal {
+    Principal::from_slice(&b[62..92])        
+}
+
+
 // ----------------
 
 #[update]
@@ -114,10 +135,20 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     
     let trade_log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_trade_logs_storage_memory();
         
-    with(&DATA, |data| {     
+    with_mut(&DATA, |data| {     
         
-        if data.trade_logs_memory_i + q.bytes.len() as u64 > MAX_STORAGE_BYTES {
+        let log_size: usize = data.log_size.try_into().unwrap();
+        
+        if q.bytes.len() % log_size != 0 {
+            trap("flush q.bytes.len() % data.log_size != 0");
+        }
+        
+        if data.trade_logs_memory_i + q.bytes.len() as u64 > MAX_STABLE_TRADE_LOGS_STORAGE_BYTES {
             return Err(FlushError::StorageIsFull);
+        }
+            
+        if data.positions_purchases.len() as u64 * std::mem::size_of::<PositionId>() as u64 + ((data.trade_logs_memory_i + q.bytes.len() as u64) / data.log_size as u64) * std::mem::size_of::<PurchaseId>() as u64 >= MAX_POSITIONS_PURCHASES_HEAP_HASHMAP_SIZE {
+            return Err(FlushError::StorageIsFull);        
         }
             
         if let Err(_) = locate_minimum_memory(
@@ -126,22 +157,28 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         ) {
             return Err(FlushError::StorageIsFull);
         }
-                
+          
+        if data.trade_logs_memory_i == 0 {
+            data.first_log_id = purchase_id_of_the_serialization(&q.bytes);//u128::from_be_bytes(q.bytes[16..32].try_into().unwrap());   
+        }
+                            
         trade_log_storage_memory.write(
             data.trade_logs_memory_i,
             &q.bytes
         );
         
+        data.trade_logs_memory_i += q.bytes.len() as u64;
+        
+        for i in 0..(q.bytes.len() / log_size) {
+            let log_slice: &[u8] = &q.bytes[(i*log_size)..(i*log_size+log_size)];
+            data.positions_purchases.entry(position_id_of_the_serialization(log_slice))
+                .or_insert(Vec::new())
+                .push(purchase_id_of_the_serialization(log_slice));
+        }
+        
         Ok(())
         
     })?;
-    
-    with_mut(&DATA, |data| {
-        if data.trade_logs_memory_i == 0 {
-            data.first_log_id = u128::from_be_bytes(q.bytes[16..32].try_into().unwrap());   
-        }
-        data.trade_logs_memory_i += q.bytes.len() as u64
-    });
     
     Ok(FlushSuccess{})
 }
