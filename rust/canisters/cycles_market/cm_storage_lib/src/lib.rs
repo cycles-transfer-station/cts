@@ -48,7 +48,7 @@ pub struct OldStorageData {}
 
 #[derive(Serialize, Deserialize)]
 pub struct StorageData {
-    pub log_size: u32, // set in the canister_init
+    log_size: u32, // set in the canister_init
     first_log_id: u128,
     logs_memory_i: u64,
 }
@@ -60,6 +60,9 @@ impl StorageData {
             first_log_id: 0u128,
             logs_memory_i: 0u64,
         }
+    }
+    pub fn set_log_size(&mut self, log_size: u32) {
+        self.log_size = log_size;
     }
 }
 

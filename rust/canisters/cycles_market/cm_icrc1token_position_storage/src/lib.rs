@@ -17,13 +17,11 @@ use cts_lib::{
     },
     stable_memory_tools::{
         self,
+        MemoryId,
     },
     types::cycles_market::icrc1token_trade_contract::{PositionId, icrc1token_trade_log_storage::*},
 };
 
-use ic_stable_structures::{
-    memory_manager::MemoryId,
-};
 
 use cm_storage_lib::{
     self,
@@ -67,7 +65,7 @@ fn init(q: LogStorageInit) {
     stable_memory_tools::init(&USER_POSITIONS, USER_POSITIONS_MEMORY_ID);
         
     with_mut(&STORAGE_DATA, |data| {
-        data.log_size = q.log_size;
+        data.set_log_size(q.log_size);
     });
 }
 
@@ -96,7 +94,7 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
 }
 
 #[query(manual_reply = true)]
-pub fn map_logs_rchunks(k: Principal, opt_start_before_id: Option<u128>, chunk_size: u32) {
+pub fn map_logs_rchunks(k: UserPositionsKey, opt_start_before_id: Option<u128>, chunk_size: u32) {
     with(&USER_POSITIONS, |user_positions| {
         cm_storage_lib::map_logs_rchunks(&k, opt_start_before_id, chunk_size, user_positions);
     });

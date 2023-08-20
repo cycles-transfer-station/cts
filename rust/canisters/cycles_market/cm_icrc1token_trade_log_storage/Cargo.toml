@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
+cm_storage_lib = { path = "../cm_storage_lib" }
 cts_lib = { path = "../../../cts_lib" }
 candid = { workspace = true }
 serde = { workspace = true }
