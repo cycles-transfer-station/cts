@@ -9,7 +9,7 @@ pub type VoidTokenPositionId = PositionId;
 
 
 
-/*
+
 // this one goes into the PositionLog storage but gets updated for the position-termination.
 pub struct PositionLog {
     id: PositionId,
@@ -18,6 +18,12 @@ pub struct PositionLog {
     position_kind: PositionKind,
     creation_timestamp_nanos: u128,
     position_termination: Option<PositionTerminationData>,
+}
+impl PositionLog {
+    const SERIALIZE_SIZE: usize = 0;
+    pub fn into_stable_memory_serialize(self) -> [u8; Self::SERIALIZE_SIZE] {
+        todo!()
+    }
 }
 
 
@@ -34,7 +40,7 @@ pub enum PositionTerminationCause {
 }
 
 
-*/
+
 
 
 // ------------------
@@ -59,7 +65,8 @@ pub trait CurrentPositionTrait {
     const POSITION_KIND: PositionKind;
     
     fn is_current_position_quantity_0(&self) -> bool;
-    
+        
+    fn as_stable_memory_position_log(&self) -> PositionLog;
 }
 
 
@@ -131,6 +138,11 @@ impl CurrentPositionTrait for CyclesPosition {
     fn is_current_position_quantity_0(&self) -> bool {
         self.current_position_cycles == 0
     }
+    
+    fn as_stable_memory_position_log(&self) -> PositionLog {
+        todo!();
+    }
+
 
 }
 
@@ -196,6 +208,10 @@ impl CurrentPositionTrait for TokenPosition {
     
     fn is_current_position_quantity_0(&self) -> bool {
         self.current_position_tokens == 0
+    }
+    
+    fn as_stable_memory_position_log(&self) -> PositionLog {
+        todo!();
     }
 
 }

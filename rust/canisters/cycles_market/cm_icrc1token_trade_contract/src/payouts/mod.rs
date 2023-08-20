@@ -6,7 +6,7 @@ use cycles_payouts::*;
 mod token_payouts;
 use token_payouts::*;
 
-use flush_trade_logs::flush_trade_logs;
+use flush_logs::flush_trade_logs;
 
 
 

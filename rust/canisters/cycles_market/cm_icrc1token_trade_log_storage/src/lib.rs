@@ -81,7 +81,7 @@ thread_local!{
 
 
 #[init]
-fn init(q: Icrc1TokenTradeLogStorageInit) {
+fn init(q: LogStorageInit) {
     stable_memory_tools::init(&DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION);
     
     with_mut(&DATA, |data| {
@@ -117,12 +117,6 @@ pub fn purchase_id_of_the_serialization(b: &[u8]) -> PurchaseId {
 
 
 
-pub fn positor_of_the_serialization(b: &[u8]) -> Principal {
-    Principal::from_slice(&b[32..62])        
-}
-pub fn purchaser_of_the_serialization(b: &[u8]) -> Principal {
-    Principal::from_slice(&b[62..92])        
-}
 
 
 // ----------------

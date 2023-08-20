@@ -3,7 +3,7 @@ use serde_bytes::Bytes;
 
 
 #[derive(CandidType, Deserialize)]
-pub struct Icrc1TokenTradeLogStorageInit {
+pub struct LogStorageInit {
     pub log_size: u32,
 }
 

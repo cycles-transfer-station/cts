@@ -97,8 +97,8 @@ use types::*;
 mod payouts;
 use payouts::do_payouts;
 
-mod flush_trade_logs;
-use flush_trade_logs::FlushTradeLogStorageError;
+mod flush_logs;
+use flush_logs::FlushLogsStorageError;
 
 // ---------------
 
@@ -129,14 +129,17 @@ struct CMData {
     void_cycles_positions: Vec<VoidCyclesPosition>,
     void_token_positions: Vec<VoidTokenPosition>,
     do_payouts_errors: Vec<CallError>,
-    trade_log_storage_canisters: Vec<TradeLogStorageCanisterData>,
+    /*
+    // trade log storage
+    trade_log_storage_canisters: Vec<StorageCanisterData>,
     #[serde(with = "serde_bytes")]
     trade_log_storage_buffer: Vec<u8>,
     trade_log_storage_flush_lock: bool,
     create_trade_log_storage_canister_temp_holder: Option<Principal>,
     flush_trade_log_storage_errors: Vec<(FlushTradeLogStorageError, u64/*timestamp_nanos*/)>,
     trade_log_storage_canister_code: CanisterCode,
-    /*
+    */
+    /* positions storage
     position_log_storage_canisters: Vec<PositionLogStorageCanisterData>,
     #[serde(with = "serde_bytes")]
     position_log_storage_buffer: Vec<u8>,
@@ -145,6 +148,8 @@ struct CMData {
     flush_position_log_storage_errors: Vec<(FlushPositionLogStorageError, u64/*timestamp_nanos*/)>,
     position_log_storage_canister_code: CanisterCode, 
     */
+    trades_storage_data: LogStorageData,
+    positions_storage_data: LogStorageData,
 }
 
 impl CMData {
@@ -164,18 +169,38 @@ impl CMData {
             void_cycles_positions: Vec::new(),
             void_token_positions: Vec::new(),
             do_payouts_errors: Vec::new(),
-            trade_log_storage_canisters: Vec::new(),
-            trade_log_storage_buffer: Vec::new(),
-            trade_log_storage_flush_lock: false,
-            create_trade_log_storage_canister_temp_holder: None,
-            flush_trade_log_storage_errors: Vec::new(),
-            trade_log_storage_canister_code: CanisterCode::empty(),
+            trades_storage_data: LogStorageData::new(),
+            positions_storage_data: LogStorageData::new(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct TradeLogStorageCanisterData {
+pub struct LogStorageData {
+    storage_canisters: Vec<StorageCanisterData>,
+    #[serde(with = "serde_bytes")]
+    storage_buffer: Vec<u8>,
+    storage_flush_lock: bool,
+    create_storage_canister_temp_holder: Option<Principal>,
+    flush_storage_errors: Vec<(FlushLogsStorageError, u64/*timestamp_nanos*/)>,
+    storage_canister_code: CanisterCode,
+}
+impl LogStorageData {
+    fn new() -> Self {
+        Self {
+            storage_canisters: Vec::new(),
+            storage_buffer: Vec::new(),
+            storage_flush_lock: false,
+            create_storage_canister_temp_holder: None,
+            flush_storage_errors: Vec::new(),
+            storage_canister_code: CanisterCode::empty(),
+        }
+    }
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct StorageCanisterData {
     log_size: u32,
     first_log_id: u128,
     length: u64, // number of logs current store on this storage canister
@@ -423,7 +448,8 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
         cm_data.cm_caller = cm_init.cm_caller;
         cm_data.icrc1_token_ledger = cm_init.icrc1_token_ledger; 
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
-        cm_data.trade_log_storage_canister_code = cm_init.trade_log_storage_canister_code;
+        cm_data.trades_storage_data.storage_canister_code = cm_init.trades_storage_canister_code;
+        cm_data.positions_storage_data.storage_canister_code = cm_init.positions_storage_canister_code;
     });
     
     localkey::cell::set(&TOKEN_LEDGER_ID, cm_init.icrc1_token_ledger);
@@ -650,17 +676,21 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
         
         let cycles_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
         
+        let cycles_position: CyclesPosition = CyclesPosition{
+            id: cycles_position_id,
+            positor: caller,
+            match_tokens_quest: q.clone(),
+            current_position_cycles: minimum_msg_cycles,
+            purchases_rates_times_cycles_quantities_sum: 0,
+            tokens_payouts_fees_sum: 0,
+            timestamp_nanos: time_nanos(),
+        };
+          
+        cm_data.positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log().into_stable_memory_serialize());  
+        
         let (matches_trade_logs_ids, cycles_position): (Vec<PurchaseId>, CyclesPosition) = match_trades(
             caller, 
-            CyclesPosition{
-                id: cycles_position_id,
-                positor: caller,
-                match_tokens_quest: q.clone(),
-                current_position_cycles: minimum_msg_cycles,
-                purchases_rates_times_cycles_quantities_sum: 0,
-                tokens_payouts_fees_sum: 0,
-                timestamp_nanos: time_nanos(),
-            },
+            cycles_position,
             &mut cm_data.token_positions, 
             &mut cm_data.void_token_positions, 
             &mut cm_data.trade_logs,
@@ -801,7 +831,11 @@ pub async fn sell_tokens(q: SellTokensQuest) { // -> SellTokensResult
 
 
 async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult {
-
+    // make sure it is a canister
+    if caller.as_slice().len() == 29 {
+        trap("Caller must be a canister");
+    }
+    
     if q.tokens < minimum_tokens_match() {
         return Err(SellTokensError::SellTokensMinimum(minimum_tokens_match()));
     }
@@ -853,17 +887,21 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
         
         let token_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
     
+        let token_position: TokenPosition = TokenPosition{
+            id: token_position_id,
+            positor: caller,
+            match_tokens_quest: q.clone(),
+            current_position_tokens: q.tokens,
+            purchases_rates_times_token_quantities_sum: 0,
+            cycles_payouts_fees_sum: 0,
+            timestamp_nanos: time_nanos(),                
+        };
+        
+        cm_data.positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log().into_stable_memory_serialize());  
+        
         let (matches_trade_logs_ids, token_position): (Vec<PurchaseId>, TokenPosition) = match_trades(
             caller, 
-            TokenPosition{
-                id: token_position_id,
-                positor: caller,
-                match_tokens_quest: q.clone(),
-                current_position_tokens: q.tokens,
-                purchases_rates_times_token_quantities_sum: 0,
-                cycles_payouts_fees_sum: 0,
-                timestamp_nanos: time_nanos(),                
-            },
+            token_position,
             &mut cm_data.cycles_positions, 
             &mut cm_data.void_cycles_positions, 
             &mut cm_data.trade_logs,
@@ -1378,8 +1416,10 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
         
         let mut logs_bytes: Vec<u8> = Vec::new();
 
-        let first_trade_log_id_on_this_canister: Option<PurchaseId>/*none if there are no trade-logs on this canister*/ = if cm_data.trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
-            Some(u128::from_be_bytes((&cm_data.trade_log_storage_buffer[16..32]).try_into().unwrap()))
+        let trade_log_storage_buffer = &cm_data.trades_storage_data.storage_buffer;
+        
+        let first_trade_log_id_on_this_canister: Option<PurchaseId>/*none if there are no trade-logs on this canister*/ = if trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+            Some(u128::from_be_bytes((&trade_log_storage_buffer[16..32]).try_into().unwrap()))
         } else {
             cm_data.trade_logs.front().map(|l| l.id)
         };
@@ -1387,10 +1427,10 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
             
             let last_trade_log_id_on_this_canister: PurchaseId = {
                 cm_data.trade_logs.back().map(|p| p.id)
-                .unwrap_or(u128::from_be_bytes((&cm_data.trade_log_storage_buffer[
-                    cm_data.trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+16
+                .unwrap_or(u128::from_be_bytes((&trade_log_storage_buffer[
+                    trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+16
                     ..
-                    cm_data.trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+32
+                    trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+32
                 ]).try_into().unwrap())) // we know there is at least one trade-log on this canister at this point and if it's not in the cm_data.trade_logs it must be in the flush buffer
             };
             let start_before_id: PurchaseId = match q.opt_start_before_id {
@@ -1427,19 +1467,19 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
                     logs_bytes = cm_data_trade_logs_bytes;
                 }
                 if logs_bytes.len() < VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES 
-                && cm_data.trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
-                    let trade_log_storage_buffer_first_log_id: PurchaseId = first_trade_log_id_on_this_canister; // since we are in cm_data.trade_log_storage_buffer.len() > 0 we know that the first_trade_log_id_on_this_canister is in the trade_log_storage_buffer  
-                    let trade_log_storage_buffer_trade_logs_len: usize = cm_data.trade_log_storage_buffer.len() / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
+                && trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+                    let trade_log_storage_buffer_first_log_id: PurchaseId = first_trade_log_id_on_this_canister; // since we are in trade_log_storage_buffer.len() > 0 we know that the first_trade_log_id_on_this_canister is in the trade_log_storage_buffer  
+                    let trade_log_storage_buffer_trade_logs_len: usize = trade_log_storage_buffer.len() / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
                     let trade_log_storage_buffer_till_i: usize = {
                         if start_before_id >= trade_log_storage_buffer_first_log_id + trade_log_storage_buffer_trade_logs_len as u128 {
-                            cm_data.trade_log_storage_buffer.len()
+                            trade_log_storage_buffer.len()
                         } else {
                             // start_before_id must by within [1..] trade-logs in the trade_log_storage_buffer
                             (start_before_id - trade_log_storage_buffer_first_log_id) as usize * TradeLog::STABLE_MEMORY_SERIALIZE_SIZE
                         }
                     };
                     logs_bytes = vec![
-                        cm_data.trade_log_storage_buffer[..trade_log_storage_buffer_till_i].rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES - logs_bytes.len()).next().unwrap(), // unwrap is safe here bc we know that trade_log_storage_buffer is not empty and we know that start_before_id > first_trade_log_id_on_this_canister so trade_log_storage_buffer_till_i cannot be zero
+                        trade_log_storage_buffer[..trade_log_storage_buffer_till_i].rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES - logs_bytes.len()).next().unwrap(), // unwrap is safe here bc we know that trade_log_storage_buffer is not empty and we know that start_before_id > first_trade_log_id_on_this_canister so trade_log_storage_buffer_till_i cannot be zero
                         &logs_bytes
                     ].concat();
                 }
@@ -1447,7 +1487,7 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
         }
         
         let mut storage_canisters: Vec<StorageCanister> = Vec::new();
-        for storage_canister in cm_data.trade_log_storage_canisters.iter() {
+        for storage_canister in cm_data.trades_storage_data.storage_canisters.iter() {
             storage_canisters.push(
                 StorageCanister{
                     first_log_id : storage_canister.first_log_id,

@@ -64,7 +64,8 @@ struct CMMainData {
     cts_id: Principal,
     trade_contracts: TradeContracts,
     icrc1token_trade_contract_canister_code: CanisterCode,
-    icrc1token_trade_log_storage_canister_code: CanisterCode,
+    icrc1token_trades_storage_canister_code: CanisterCode,
+    icrc1token_positions_storage_canister_code: CanisterCode,
     cm_caller_canister_code: CanisterCode,
     controller_create_icrc1token_trade_contract_mid_call_data: Option<ControllerCreateIcrc1TokenTradeContractMidCallData>,
 }
@@ -75,7 +76,8 @@ impl CMMainData {
             cts_id: Principal::from_slice(&[]),
             trade_contracts: TradeContracts::new(),
             icrc1token_trade_contract_canister_code: CanisterCode::empty(),
-            icrc1token_trade_log_storage_canister_code: CanisterCode::empty(),
+            icrc1token_trades_storage_canister_code: CanisterCode::empty(),
+            icrc1token_positions_storage_canister_code: CanisterCode::empty(),
             cm_caller_canister_code: CanisterCode::empty(),
             controller_create_icrc1token_trade_contract_mid_call_data: None,
         }
@@ -151,7 +153,18 @@ pub fn controller_upload_icrc1token_trade_log_storage_canister_code(canister_cod
         trap("module hash is not as given");
     } 
     with_mut(&CM_MAIN_DATA, |data| {
-        data.icrc1token_trade_log_storage_canister_code = canister_code;
+        data.icrc1token_trades_storage_canister_code = canister_code;
+    });
+}
+
+#[update]
+pub fn controller_upload_icrc1token_positions_storage_canister_code(canister_code: CanisterCode) {
+    caller_is_controller_gaurd(&caller());
+    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
+        trap("module hash is not as given");
+    } 
+    with_mut(&CM_MAIN_DATA, |data| {
+        data.icrc1token_positions_storage_canister_code = canister_code;
     });
 }
 
@@ -369,7 +382,8 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                 cm_caller: mid_call_data.cm_caller_canister_id.as_ref().unwrap().clone(),
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,
-                trade_log_storage_canister_code: data.icrc1token_trade_log_storage_canister_code.clone(),
+                trades_storage_canister_code: data.icrc1token_trades_storage_canister_code.clone(),
+                positions_storage_canister_code: data.icrc1token_positions_storage_canister_code.clone(),
             }).unwrap()
         });
         

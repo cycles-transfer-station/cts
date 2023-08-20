@@ -19,7 +19,8 @@ pub struct CMIcrc1TokenTradeContractInit {
     pub cm_caller: Principal,
     pub icrc1_token_ledger: Principal,
     pub icrc1_token_ledger_transfer_fee: Tokens,
-    pub trade_log_storage_canister_code: CanisterCode,
+    pub trades_storage_canister_code: CanisterCode,
+    pub positions_storage_canister_code: CanisterCode,
 }
 
 // ----
@@ -237,6 +238,17 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
     pub token_transfer_block_height: BlockId,
     pub token_transfer_timestamp_nanos: u128,
 }
+
+
+// ---------------
+
+
+
+
+
+
+
+
 
 
 

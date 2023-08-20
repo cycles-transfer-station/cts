@@ -1,0 +1,17 @@
+[package]
+name = "cm_icrc1token_position_storage"
+version = "0.1.0"
+edition = "2021"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[dependencies]
+cm_storage_lib = { path = "../cm_storage_lib" }
+cts_lib = { path = "../../../cts_lib" }
+candid = { workspace = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+ic-stable-structures = { workspace = true }
