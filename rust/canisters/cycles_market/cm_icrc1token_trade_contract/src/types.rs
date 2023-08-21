@@ -20,8 +20,8 @@ pub struct PositionLog {
     position_termination: Option<PositionTerminationData>,
 }
 impl PositionLog {
-    const SERIALIZE_SIZE: usize = 0;
-    pub fn into_stable_memory_serialize(self) -> [u8; Self::SERIALIZE_SIZE] {
+    pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 0;
+    pub fn into_stable_memory_serialize(self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
         todo!()
     }
 }
@@ -106,7 +106,9 @@ impl CurrentPositionTrait for CyclesPosition {
             cycles: self.current_position_cycles,
             cycles_payout_lock: false,
             cycles_payout_data: CyclesPayoutData::new(),
-            timestamp_nanos: time_nanos()
+            timestamp_nanos: time_nanos(),
+            update_storage_position_data: VPUpdateStoragePositionData::new(),
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().into_stable_memory_serialize()
         }
     }
     
@@ -182,7 +184,9 @@ impl CurrentPositionTrait for TokenPosition {
             tokens: self.current_position_tokens,
             timestamp_nanos: time_nanos(),
             token_payout_lock: false,
-            token_payout_data: TokenPayoutData::new_for_a_void_token_position()
+            token_payout_data: TokenPayoutData::new_for_a_void_token_position(),
+            update_storage_position_data: VPUpdateStoragePositionData::new(),
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().into_stable_memory_serialize()
         }
     }
     
@@ -547,10 +551,23 @@ impl TokenPayoutDataTrait for TradeLog {
 
 pub trait VoidPositionTrait {
     fn position_id(&self) -> PositionId;
+    fn can_remove(&self) -> bool;
+    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData;
 }
 
-
-
+#[derive(Clone, Serialize, Deserialize)]
+pub struct VPUpdateStoragePositionData {
+    pub lock: bool,
+    pub status: bool,
+}
+impl VPUpdateStoragePositionData {
+    fn new() -> Self {
+        Self {
+            lock: false,
+            status: false
+        }
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VoidCyclesPosition {
@@ -559,13 +576,21 @@ pub struct VoidCyclesPosition {
     pub cycles: Cycles,
     pub cycles_payout_lock: bool,  // lock for the payout
     pub cycles_payout_data: CyclesPayoutData,
-    pub timestamp_nanos: u128
+    pub timestamp_nanos: u128,
+    pub update_storage_position_data: VPUpdateStoragePositionData,
+    pub update_storage_position_log_serialization_b: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidCyclesPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    fn can_remove(&self) -> bool {
+        self.cycles_payout_data.is_complete() && self.update_storage_position_data.status == true
+    }
+    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData {
+        &mut self.update_storage_position_data
+    }
 }
 
 
@@ -615,13 +640,21 @@ pub struct VoidTokenPosition {
     pub positor: Principal,
     pub token_payout_lock: bool,  // lock for the payout
     pub token_payout_data: TokenPayoutData,
-    pub timestamp_nanos: u128
+    pub timestamp_nanos: u128,
+    pub update_storage_position_data: VPUpdateStoragePositionData,    
+    pub update_storage_position_log_serialization_b: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidTokenPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    fn can_remove(&self) -> bool {
+        self.token_payout_data.is_complete() && self.update_storage_position_data.status == true
+    }
+    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData {
+        &mut self.update_storage_position_data
+    }
 }
 
 impl TokenPayoutDataTrait for VoidTokenPosition {

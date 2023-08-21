@@ -21,6 +21,7 @@ use cts_lib::{
             },
         },
         export::{candid::{CandidType}},
+        update,
         query,
     },
     stable_memory_tools::{
@@ -51,6 +52,7 @@ pub struct StorageData {
     log_size: u32, // set in the canister_init
     first_log_id: u128,
     logs_memory_i: u64,
+    controller_mark_full: bool,
 }
 
 impl StorageData {
@@ -59,6 +61,7 @@ impl StorageData {
             log_size: 0u32,
             first_log_id: 0u128,
             logs_memory_i: 0u64,
+            controller_mark_full: false
         }
     }
     pub fn set_log_size(&mut self, log_size: u32) {
@@ -79,7 +82,7 @@ thread_local!{
 }
 
 
-fn get_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
+pub fn get_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
     stable_memory_tools::get_stable_memory(LOGS_STABLE_MEMORY_ID)
 }
 
@@ -99,6 +102,10 @@ where
     let log_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_logs_storage_memory();
         
     with_mut(&STORAGE_DATA, |data| {     
+        
+        if data.controller_mark_full == true {
+            return Err(FlushError::StorageIsFull);
+        }
         
         let log_size: usize = data.log_size.try_into().unwrap();
         
@@ -239,6 +246,44 @@ pub fn view_trade_logs(q: ViewTradeLogsQuest) { //-> ViewTradeLogsSponse {
 fn logs_count(data: &StorageData) -> u64 {
     data.logs_memory_i / data.log_size as u64
 }
+
+#[update]
+fn controller_mark_full(mark: bool) {
+    caller_is_controller_gaurd(&caller());
+    with_mut(&STORAGE_DATA, |data| {
+        data.controller_mark_full = mark;
+    })
+}
+
+
+
+#[update]
+pub fn cm_update_log(log_id: u128, log_b: Vec<u8>) {
+    caller_is_controller_gaurd(&caller());
+    
+    let logs_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_logs_storage_memory();
+    
+    with(&STORAGE_DATA, |data| {
+        if log_b.len() != data.log_size as usize {
+            trap("log_size is the wrong_length");
+        }
+        
+        let log_start_memory_i: u64 = ((log_id.checked_sub(data.first_log_id).unwrap()) as u64).checked_mul(data.log_size as u64).unwrap();  
+        
+        if log_start_memory_i > data.logs_memory_i.checked_sub(data.log_size as u64).unwrap() {
+            trap("log-id not found");
+        }
+        
+        logs_storage_memory.write(log_start_memory_i, &log_b[..data.log_size as usize]);
+    });
+
+}
+
+
+
+
+
+
 
 
 

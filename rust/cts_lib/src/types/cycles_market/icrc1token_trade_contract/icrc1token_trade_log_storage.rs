@@ -1,8 +1,9 @@
 use crate::ic_cdk::export::candid::{CandidType, Deserialize};
 use serde_bytes::Bytes;
+use serde::Serialize;
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct LogStorageInit {
     pub log_size: u32,
 }

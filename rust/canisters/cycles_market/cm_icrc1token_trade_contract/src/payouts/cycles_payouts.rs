@@ -30,6 +30,9 @@ pub type DoCyclesPayoutResult = Result<DoCyclesPayoutSponse, DoCyclesPayoutError
 
 pub async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutResult {
     
+    // try cycles-payouts a couple of times before using the management canister's deposit cycles method.
+    // cycles-bank can be in the stop mode for an upgrade.  
+    
     if q.cycles_payout_data().cmcaller_cycles_payout_call_success_timestamp_nanos.is_none() {
         let cmcaller_cycles_payout_call_success_timestamp_nanos: Option<u128>;
         
