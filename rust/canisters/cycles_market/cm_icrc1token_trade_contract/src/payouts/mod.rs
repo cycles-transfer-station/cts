@@ -247,7 +247,7 @@ async fn _do_payouts() {
                 };
                 let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
                 vp.update_storage_position_data().lock = false;
-                vp.update_storage_position_data().status = do_update_storage_position_result;
+                vp.update_storage_position_data().status = do_update_storage_position_result.is_ok();
                 if vp.can_remove() {
                     std::mem::drop(vp);
                     void_positions.remove(vp_void_positions_i);
