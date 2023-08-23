@@ -1403,7 +1403,9 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
                 .filter(|tl| tl.position_id == q.index_key)
                 .rev()
                 .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
-                //.rev()
+                .collect::<Vec<&TradeLog>>()
+                .iter()
+                .rev()
                 .map(|tl| tl.stable_memory_serialize())
                 .collect()
         };        
