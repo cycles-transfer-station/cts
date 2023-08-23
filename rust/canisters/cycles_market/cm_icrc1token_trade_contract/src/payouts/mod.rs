@@ -34,7 +34,7 @@ pub async fn do_payouts() {
                 with_mut(&TRADES_STORAGE_DATA, |trades_storage_data| {
                     while cm_data.trade_logs.len() > 0 {
                         if cm_data.trade_logs[0].can_move_into_the_stable_memory_for_the_long_term_storage() == true {
-                            trades_storage_data.storage_buffer.extend(cm_data.trade_logs.pop_front().unwrap().into_stable_memory_serialize());
+                            trades_storage_data.storage_buffer.extend(cm_data.trade_logs.pop_front().unwrap().stable_memory_serialize());
                         } else {
                             break; // bc want to save into the stable-memory in the correct sequence.
                         }

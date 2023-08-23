@@ -4,6 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashSet, VecDeque},
     time::Duration,
+    thread::LocalKey,
 };
 use cts_lib::{
     tools::{
@@ -60,6 +61,7 @@ use cts_lib::{
                 call_with_payment128,
                 call_raw128,
                 reply,
+                reply_raw,
                 msg_cycles_refunded128,
                 msg_cycles_available128,
                 msg_cycles_accept128,
@@ -660,7 +662,7 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
         };
           
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log().into_stable_memory_serialize());  
+            positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log().stable_memory_serialize());  
         });
         
         let (matches_trade_logs_ids, cycles_position): (Vec<PurchaseId>, CyclesPosition) = match_trades(
@@ -831,7 +833,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
         };
         
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log().into_stable_memory_serialize());  
+            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log().stable_memory_serialize());  
         });
         
         let (matches_trade_logs_ids, token_position): (Vec<PurchaseId>, TokenPosition) = match_trades(
@@ -1173,7 +1175,7 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 }
 
 
-
+/*
 // --------------- VIEW-POSITONS -----------------
 
 const VIEW_POSITIONS_CHUNK_SIZE: usize = 1000;
@@ -1381,12 +1383,185 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
 
 }
 
+*/
+
+// -----------
+// view pending trades for a position
+#[query(manual_reply = true)]
+pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.trade_logs.make_contiguous();
+    });
+    with(&CM_DATA, |cm_data| {
+        let logs_b: Vec<Vec<u8>> = {
+            let till_i: usize = match q.opt_start_before_id {
+                None => cm_data.trade_logs.len(),
+                Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.id).unwrap_or_else(|i| i),
+            }; 
+            cm_data.trade_logs.as_slices().0[..till_i]
+                .iter()
+                .filter(|tl| tl.position_id == q.index_key)
+                .rev()
+                .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                //.rev()
+                .map(|tl| tl.stable_memory_serialize())
+                .collect()
+        };        
+        reply_raw(&logs_b.concat());
+    });
+}
 
 
 
 
 
+// ---------------
+// view user current positions
 
+#[query(manual_reply = true)]
+pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+    fn d<T: CurrentPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, current_positions: &Vec<T>) -> Box<dyn Iterator<Item=PositionLog> + '_> {
+        Box::new(current_positions[
+            ..
+            match q.opt_start_before_id {
+                None => current_positions.len(),
+                Some(start_before_id) => current_positions.binary_search_by_key(&start_before_id, |p| p.id()).unwrap_or_else(|i| i)
+            }
+        ]
+            .iter()
+            .filter(move |p| p.positor() == q.index_key)
+            .map(|p| p.as_stable_memory_position_log()))
+    }
+    with(&CM_DATA, |cm_data| {
+        let mut v: Vec<PositionLog> = d(q.clone(), &cm_data.cycles_positions).chain(d(q, &cm_data.token_positions)).collect();
+        v.sort_by_key(|pl| pl.id);
+        v.drain(..v.len().saturating_sub((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE));
+        let logs_b: Vec<Vec<u8>> = {
+            v.into_iter()
+            .map(|pl| pl.stable_memory_serialize())
+            .collect()
+        };
+        reply_raw(&logs_b.concat());
+    })
+}
+
+
+
+// ------
+
+// only the logs, does not return current positions data
+#[query(manual_reply = true)]
+pub fn view_user_positions_logs(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+    view_storage_logs_::<PositionLog>(q)
+} 
+
+// only the payout-complete logs, does not return trade-logs pending payouts or other tasks
+#[query(manual_reply = true)]
+pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
+    view_storage_logs_::<TradeLog>(q)
+} 
+
+
+
+
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct ViewStorageLogsQuest<LogIndexKey> {
+    opt_start_before_id: Option<u128>,
+    index_key: LogIndexKey
+}
+
+
+fn view_storage_logs_<LogType: StorageLogTrait>(q: ViewStorageLogsQuest<LogType::LogIndexKey>) {
+    with(LogType::LOG_STORAGE_DATA, |log_storage_data| {
+        let log_storage_buffer = &log_storage_data.storage_buffer;
+        
+        if log_storage_buffer.len() >= LogType::STABLE_MEMORY_SERIALIZE_SIZE {
+            let first_log_id_in_the_storage_buffer: u128 = LogType::log_id_of_the_log_serialization(&log_storage_buffer[..LogType::STABLE_MEMORY_SERIALIZE_SIZE]);
+        
+            let logs_storage_buffer_till_start_before_id: &[u8] = &log_storage_buffer[
+                ..
+                q.opt_start_before_id
+                    .map(|start_before_id| {
+                        start_before_id
+                            .checked_sub(first_log_id_in_the_storage_buffer)
+                            .unwrap() as usize
+                        * 
+                        LogType::STABLE_MEMORY_SERIALIZE_SIZE
+                    })
+                    .unwrap_or(log_storage_buffer.len()) 
+            ];
+                
+            let mut match_logs: Vec<&[u8]> = vec![];
+            
+            for i in 0..logs_storage_buffer_till_start_before_id.len() / LogType::STABLE_MEMORY_SERIALIZE_SIZE {
+                
+                let log_finish_i: usize = logs_storage_buffer_till_start_before_id.len() - i * LogType::STABLE_MEMORY_SERIALIZE_SIZE;
+                
+                let log: &[u8] = &logs_storage_buffer_till_start_before_id[
+                    log_finish_i - LogType::STABLE_MEMORY_SERIALIZE_SIZE
+                    ..
+                    log_finish_i
+                ];
+                
+                if LogType::index_key_of_the_log_serialization(log) == q.index_key {
+                    match_logs.push(log);
+                    
+                    if match_logs.len() * LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
+                        break;
+                    }
+                }
+            }
+            
+            for log in match_logs.into_iter().rev() {
+                reply_raw(log);
+            }
+        }
+    })
+}
+
+
+
+#[derive(CandidType, Deserialize)]
+pub struct StorageCanister {
+    // The id of the first log in this storage-canister
+    first_log_id : u128,
+    // The numbe8r of logs in this storage-canister
+    length : u128,
+    // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
+    // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
+    log_size: u32,
+    // Callback to fetch the storage logs in this storage canister.
+    callback : candid::Func,
+}
+
+#[query]
+pub fn view_positions_storage_canisters() -> Vec<StorageCanister> {
+    view_log_storage_canisters_(&POSITIONS_STORAGE_DATA) 
+}
+
+#[query]
+pub fn view_trades_storage_canisters() -> Vec<StorageCanister> {
+    view_log_storage_canisters_(&TRADES_STORAGE_DATA) 
+}
+
+
+fn view_log_storage_canisters_(LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Vec<StorageCanister> {
+    with(&LOG_STORAGE_DATA, |log_storage_data| {
+        let mut storage_canisters: Vec<StorageCanister> = Vec::new();
+        for storage_canister in log_storage_data.storage_canisters.iter() {
+            storage_canisters.push(
+                StorageCanister{
+                    first_log_id : storage_canister.first_log_id,
+                    length: storage_canister.length as u128,
+                    log_size: storage_canister.log_size,
+                    callback : candid::Func{ principal: storage_canister.canister_id, method: "map_logs_rchunks".to_string() }
+                }
+            );
+        }
+        storage_canisters
+    })
+}
 
 
 

@@ -1,4 +1,5 @@
-
+use std::thread::LocalKey;
+use std::cell::RefCell;
 
 use crate::*;
 use serde::Serialize;
@@ -10,19 +11,39 @@ pub type VoidTokenPositionId = PositionId;
 
 
 
+pub trait StorageLogTrait {
+    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
+    const STABLE_MEMORY_SERIALIZE_SIZE: usize;
+    fn stable_memory_serialize(&self) -> Vec<u8>;// Self::STABLE_MEMORY_SERIALIZE_SIZE]; const generics not stable yet
+    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128;
+    type LogIndexKey: CandidType + for<'a> Deserialize<'a> + PartialEq + Eq;
+    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey;
+}
+
+
 // this one goes into the PositionLog storage but gets updated for the position-termination.
 pub struct PositionLog {
-    id: PositionId,
-    positor: Principal,
-    match_tokens_quest: MatchTokensQuest,
-    position_kind: PositionKind,
-    creation_timestamp_nanos: u128,
-    position_termination: Option<PositionTerminationData>,
+    pub id: PositionId,
+    pub positor: Principal,
+    pub match_tokens_quest: MatchTokensQuest,
+    pub position_kind: PositionKind,
+    pub creation_timestamp_nanos: u128,
+    pub position_termination: Option<PositionTerminationData>,
 }
-impl PositionLog {
-    pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 0;
-    pub fn into_stable_memory_serialize(self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
+
+
+impl StorageLogTrait for PositionLog {
+    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &POSITIONS_STORAGE_DATA;
+    const STABLE_MEMORY_SERIALIZE_SIZE: usize = 5;  
+    fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
         todo!()
+    }  
+    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
+        u128::from_be_bytes((&log_b[0..16]).try_into().unwrap())
+    }
+    type LogIndexKey = Principal;
+    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
+        Principal::from_slice(&log_b[17..(17 + log_b[16] as usize)])
     }
 }
 
@@ -63,9 +84,7 @@ pub trait CurrentPositionTrait {
     fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken>;
     
     const POSITION_KIND: PositionKind;
-    
-    fn is_current_position_quantity_0(&self) -> bool;
-        
+            
     fn as_stable_memory_position_log(&self) -> PositionLog;
 }
 
@@ -108,7 +127,7 @@ impl CurrentPositionTrait for CyclesPosition {
             cycles_payout_data: CyclesPayoutData::new(),
             timestamp_nanos: time_nanos(),
             update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().into_stable_memory_serialize()
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().stable_memory_serialize()
         }
     }
     
@@ -136,10 +155,6 @@ impl CurrentPositionTrait for CyclesPosition {
     }
     
     const POSITION_KIND: PositionKind = PositionKind::Cycles;
-    
-    fn is_current_position_quantity_0(&self) -> bool {
-        self.current_position_cycles == 0
-    }
     
     fn as_stable_memory_position_log(&self) -> PositionLog {
         todo!();
@@ -186,7 +201,7 @@ impl CurrentPositionTrait for TokenPosition {
             token_payout_lock: false,
             token_payout_data: TokenPayoutData::new_for_a_void_token_position(),
             update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().into_stable_memory_serialize()
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().stable_memory_serialize()
         }
     }
     
@@ -209,10 +224,6 @@ impl CurrentPositionTrait for TokenPosition {
     }
     
     const POSITION_KIND: PositionKind = PositionKind::Token;
-    
-    fn is_current_position_quantity_0(&self) -> bool {
-        self.current_position_tokens == 0
-    }
     
     fn as_stable_memory_position_log(&self) -> PositionLog {
         todo!();
@@ -394,11 +405,12 @@ impl TradeLog {
         && self.cycles_payout_data.is_complete() == true
         && self.token_payout_data.is_complete() == true
     }
-    
-    pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 157;
-    
-    // use message-pack nah?
-    pub fn stable_memory_serialize(&self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
+}
+
+impl StorageLogTrait for TradeLog {
+    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
+    const STABLE_MEMORY_SERIALIZE_SIZE: usize = 157;    
+    fn stable_memory_serialize(&self) -> Vec<u8> {//[u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
         let mut s: [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] = [0; Self::STABLE_MEMORY_SERIALIZE_SIZE];
         s[0..16].copy_from_slice(&self.position_id.to_be_bytes());
         s[16..32].copy_from_slice(&self.id.to_be_bytes());
@@ -409,15 +421,16 @@ impl TradeLog {
         s[124..140].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
         s[140] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
         s[141..157].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
-        s
+        Vec::from(s)
     }
-    
-    pub fn into_stable_memory_serialize(self) -> [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
-        self.stable_memory_serialize()
+    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
+        u128::from_be_bytes(log_b[16..32].try_into().unwrap())
     }
-    
+    type LogIndexKey = PositionId;    
+    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
+        u128::from_be_bytes(log_b[0..16].try_into().unwrap())
+    }
 }
-
 
 impl CyclesPayoutDataTrait for TradeLog {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
@@ -578,7 +591,7 @@ pub struct VoidCyclesPosition {
     pub cycles_payout_data: CyclesPayoutData,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,
-    pub update_storage_position_log_serialization_b: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
+    pub update_storage_position_log_serialization_b: Vec<u8>// const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidCyclesPosition {
@@ -642,7 +655,7 @@ pub struct VoidTokenPosition {
     pub token_payout_data: TokenPayoutData,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,    
-    pub update_storage_position_log_serialization_b: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
+    pub update_storage_position_log_serialization_b: Vec<u8> // const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidTokenPosition {
