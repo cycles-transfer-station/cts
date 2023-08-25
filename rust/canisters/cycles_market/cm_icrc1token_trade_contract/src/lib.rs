@@ -1045,9 +1045,6 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             if time_seconds().saturating_sub(cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
                 return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
             }  
-            if cm_data.void_cycles_positions.len() >= MAX_VOID_CYCLES_POSITIONS {
-                return Err(VoidPositionError::CyclesMarketIsBusy);
-            }
             let cycles_position_for_the_void: CyclesPosition = cm_data.cycles_positions.remove(cycles_position_i);
             let cycles_position_for_the_void_void_cycles_positions_insertion_i: usize = cm_data.void_cycles_positions.binary_search_by_key(&cycles_position_for_the_void.id, |vcp| { vcp.position_id }).unwrap_err();
             cm_data.void_cycles_positions.insert(
@@ -1061,9 +1058,6 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             }
             if time_seconds().saturating_sub(cm_data.token_positions[token_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
                 return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.token_positions[token_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
-            }
-            if cm_data.void_token_positions.len() >= MAX_VOID_TOKEN_POSITIONS {
-                return Err(VoidPositionError::CyclesMarketIsBusy);
             }
             let token_position_for_the_void: TokenPosition = cm_data.token_positions.remove(token_position_i);
             let token_position_for_the_void_void_token_positions_insertion_i: usize = cm_data.void_token_positions.binary_search_by_key(&token_position_for_the_void.id, |vip| { vip.position_id }).unwrap_err();
@@ -1455,18 +1449,6 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
 // -----------
 */
 
-#[derive(CandidType, Deserialize)]
-pub struct ViewLatestTradesQuest {
-    opt_start_before_id: Option<PurchaseId>,
-}
-
-type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64);
-
-#[derive(CandidType, Deserialize)]
-pub struct ViewLatestTradesSponse {
-    trades_data: Vec<LatestTradesDataItem>, 
-    is_last_chunk_on_this_canister: bool,
-}
 
 const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
 
@@ -1781,8 +1763,7 @@ pub fn cm_message_void_cycles_position_positor_cmcaller_callback(q: CMCallbackQu
             .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_call_error));
             
             if cm_data.void_cycles_positions[void_cycles_position_void_cycles_positions_i]
-            .cycles_payout_data
-            .is_complete() {
+            .can_remove() {
                 cm_data.void_cycles_positions.remove(void_cycles_position_void_cycles_positions_i);
             }
         }
@@ -1806,8 +1787,7 @@ pub fn cm_message_void_token_position_positor_cmcaller_callback(q: CMCallbackQue
             .cm_message_callback_complete = Some(q.opt_call_error);
             
             if cm_data.void_token_positions[void_token_position_void_token_positions_i]
-            .token_payout_data
-            .is_complete() {
+            .can_remove() {
                 cm_data.void_token_positions.remove(void_token_position_void_token_positions_i);
             }
         }

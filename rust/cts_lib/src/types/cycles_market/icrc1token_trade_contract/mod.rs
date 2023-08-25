@@ -24,7 +24,7 @@ pub struct CMIcrc1TokenTradeContractInit {
 }
 
 // ----
-
+/*
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CreateCyclesPositionQuest {
     pub cycles: Cycles,
@@ -135,7 +135,7 @@ pub struct PurchaseTokenPositionSuccess {
 }
 
 pub type PurchaseTokenPositionResult = Result<PurchaseTokenPositionSuccess, PurchaseTokenPositionError>;
-
+*/
 // ----
 
 #[derive(CandidType, Deserialize)]
@@ -245,6 +245,24 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
 
 
 
+
+
+
+
+
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewLatestTradesQuest {
+    pub opt_start_before_id: Option<PurchaseId>,
+}
+
+pub type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64);
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewLatestTradesSponse {
+    pub trades_data: Vec<LatestTradesDataItem>, 
+    pub is_last_chunk_on_this_canister: bool,
+}
 
 
 
