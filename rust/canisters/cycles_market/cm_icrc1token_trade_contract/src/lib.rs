@@ -1465,6 +1465,35 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
             }
             trades_data = tl_chunk.into_iter().map(|tl| (tl.id,tl.tokens,tl.cycles_per_token_rate,tl.timestamp_nanos as u64)).collect();
         }
+        
+        if trades_data.len() < MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA {
+            // check-storage_buffer
+            with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
+                if let Some(iter) = view_storage_logs_::<TradeLog>(
+                    ViewStorageLogsQuest{
+                        opt_start_before_id: q.opt_start_before_id,
+                        index_key: None, 
+                    },
+                    log_storage_data,
+                    MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA - trades_data.len(),
+                ) {
+                    let mut v = iter.map(|s: &[u8]| {
+                        (
+                            TradeLog::log_id_of_the_log_serialization(s),
+                            TradeLog::tokens_quantity_of_the_log_serialization(s),
+                            TradeLog::rate_of_the_log_serialization(s),
+                            TradeLog::timestamp_nanos_of_the_log_serialization(s) as u64
+                        )
+                    })
+                    .collect::<Vec<LatestTradesDataItem>>();
+                    
+                    v.append(&mut trades_data);
+                    
+                    trades_data = v;
+                }
+            });
+        }
+        
     });
     ViewLatestTradesSponse {
         trades_data, 
@@ -1493,7 +1522,7 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
             }; 
             cm_data.trade_logs.as_slices().0[..till_i]
                 .iter()
-                .filter(|tl| tl.position_id == q.index_key)
+                .filter(|tl| tl.position_id == q.index_key.unwrap_or(tl.position_id))
                 .rev()
                 .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
                 .collect::<Vec<&TradeLog>>()
@@ -1524,7 +1553,7 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
             }
         ]
             .iter()
-            .filter(move |p| p.positor() == q.index_key)
+            .filter(move |p| p.positor() == q.index_key.unwrap_or(p.positor()))
             .map(|p| p.as_stable_memory_position_log()))
     }
     with(&CM_DATA, |cm_data| {
@@ -1547,13 +1576,25 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
 // only the logs, does not return current positions data
 #[query(manual_reply = true)]
 pub fn view_user_positions_logs(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
-    view_storage_logs_::<PositionLog>(q)
+    with(&PositionLog::LOG_STORAGE_DATA, |log_storage_data| {
+        if let Some(iter) = view_storage_logs_::<PositionLog>(q, log_storage_data, 1*MiB+512*KiB / PositionLog::STABLE_MEMORY_SERIALIZE_SIZE) {
+            for s in iter {
+                reply_raw(s);
+            }
+        }
+    });
 } 
 
 // only the payout-complete logs, does not return trade-logs pending payouts or other tasks
 #[query(manual_reply = true)]
 pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
-    view_storage_logs_::<TradeLog>(q)
+    with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
+        if let Some(iter) = view_storage_logs_::<TradeLog>(q, log_storage_data, 1*MiB+512*KiB / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE) {
+            for s in iter {
+                reply_raw(s);
+            }
+        }
+    });
 } 
 
 
@@ -1563,12 +1604,15 @@ pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as Storage
 #[derive(CandidType, Deserialize, Clone)]
 pub struct ViewStorageLogsQuest<LogIndexKey> {
     opt_start_before_id: Option<u128>,
-    index_key: LogIndexKey
+    index_key: Option<LogIndexKey>
 }
 
 
-fn view_storage_logs_<LogType: StorageLogTrait>(q: ViewStorageLogsQuest<LogType::LogIndexKey>) {
-    with(LogType::LOG_STORAGE_DATA, |log_storage_data| {
+fn view_storage_logs_<'a, LogType: StorageLogTrait>(
+    q: ViewStorageLogsQuest<LogType::LogIndexKey>, 
+    log_storage_data: &'a LogStorageData,
+    max_logs: usize,
+) -> Option<Box<dyn Iterator<Item=&'a [u8]> + 'a>> { // none if empty
         let log_storage_buffer = &log_storage_data.storage_buffer;
         
         if log_storage_buffer.len() >= LogType::STABLE_MEMORY_SERIALIZE_SIZE {
@@ -1604,20 +1648,24 @@ fn view_storage_logs_<LogType: StorageLogTrait>(q: ViewStorageLogsQuest<LogType:
                     log_finish_i
                 ];
                 
-                if LogType::index_key_of_the_log_serialization(log) == q.index_key {
-                    match_logs.push(log);
-                    
-                    if match_logs.len() * LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
-                        break;
+                if let Some(ref index_key) = q.index_key {
+                    if LogType::index_key_of_the_log_serialization(log) != *index_key {
+                        continue;
                     }
+                }
+                match_logs.push(log);
+                        
+                if match_logs.len() >= max_logs { //* LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
+                    break;
                 }
             }
             
-            for log in match_logs.into_iter().rev() {
-                reply_raw(log);
-            }
+            return Some(Box::new(match_logs.into_iter().rev()));
+
+        } else {
+            return None;
         }
-    })
+
 }
 
 

@@ -405,6 +405,16 @@ impl TradeLog {
         && self.cycles_payout_data.is_complete() == true
         && self.token_payout_data.is_complete() == true
     }
+    
+    pub fn tokens_quantity_of_the_log_serialization(log_b: &[u8]) -> Tokens {
+        u128::from_be_bytes(log_b[92..108].try_into().unwrap())        
+    }
+    pub fn rate_of_the_log_serialization(log_b: &[u8]) -> CyclesPerToken {
+        u128::from_be_bytes(log_b[124..140].try_into().unwrap())        
+    }
+    pub fn timestamp_nanos_of_the_log_serialization(log_b: &[u8]) -> u128 {
+        u128::from_be_bytes(log_b[141..157].try_into().unwrap())        
+    }
 }
 
 impl StorageLogTrait for TradeLog {
