@@ -170,7 +170,7 @@ where
                 ({
                     match opt_start_before_id {
                         None => vec.len(),
-                        Some(start_before_id) => vec.binary_search(&start_before_id).unwrap(),
+                        Some(start_before_id) => vec.binary_search(&start_before_id).unwrap_or_else(|e| e),
                     }
                 })
             ];

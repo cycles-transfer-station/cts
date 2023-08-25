@@ -1175,9 +1175,9 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 }
 
 
-/*
-// --------------- VIEW-POSITONS -----------------
 
+// --------------- VIEW-POSITONS -----------------
+/*
 const VIEW_POSITIONS_CHUNK_SIZE: usize = 1000;
 
 #[derive(CandidType, Deserialize)]
@@ -1237,9 +1237,78 @@ fn view_positions<T: CandidType + CurrentPositionTrait>(q: ViewPositionsQuest, p
     ,));
     
 }
+*/
+#[derive(CandidType, Deserialize)]
+pub struct ViewPositionBookQuest {
+    opt_start_greater_than_rate: Option<CyclesPerToken>
+}
+#[derive(CandidType, Deserialize)]
+pub struct ViewPositionBookSponse {
+    positions_quantities: Vec<(CyclesPerToken, Tokens)>, 
+    is_last_chunk: bool,
+}
+
+const MAX_POSITIONS_QUANTITIES: usize = 512*KiB*3 / std::mem::size_of::<(CyclesPerToken, Tokens)>();
+
+
+#[query]
+pub fn view_buy_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
+    with(&CM_DATA, |cm_data| {
+        view_position_book_(q, &cm_data.cycles_positions)  
+    })
+}
+
+#[query]
+pub fn view_sell_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
+    with(&CM_DATA, |cm_data| {
+        view_position_book_(q, &cm_data.token_positions)  
+    })    
+}
+
+
+fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, current_positions: &Vec<T>) -> ViewPositionBookSponse {
+    let mut positions_quantities: Vec<(CyclesPerToken, Tokens)> = vec![]; 
+    let mut is_last_chunk: bool = true;
+    
+    let mut cps_as_rate_and_quantity: Vec<(CyclesPerToken, Tokens)> = current_positions
+        .iter()
+        .map(|p| {
+            let rate = p.current_position_available_cycles_per_token_rate(); 
+            (rate, p.current_position_tokens(rate))
+        })
+        .collect();
+    cps_as_rate_and_quantity.sort_by_key(|d| d.0);
+        
+    if let Some(start_greater_than_rate) = q.opt_start_greater_than_rate {
+        let partition_point: usize = cps_as_rate_and_quantity.partition_point(|(r,t)| { r <= &start_greater_than_rate });
+        cps_as_rate_and_quantity.drain(..partition_point);    
+    }
+                
+    for (r,q) in cps_as_rate_and_quantity.into_iter() {
+        if let Some(latest_r_q) = positions_quantities.last_mut() {
+            if latest_r_q.0 == r {
+                latest_r_q.1 += q;
+                continue;
+            } 
+        }
+        if positions_quantities.len() >= MAX_POSITIONS_QUANTITIES {
+            is_last_chunk = false;
+            break;
+        }
+        positions_quantities.push((r,q));
+            
+    }
+    
+    ViewPositionBookSponse {
+        positions_quantities, 
+        is_last_chunk,
+    }
+    
+}
 
 
 
+/*
 // --------------- VIEW-TRADE-LOGS -----------------
 
 
@@ -1383,7 +1452,49 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
 
 }
 
+// -----------
 */
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewLatestTradesQuest {
+    opt_start_before_id: Option<PurchaseId>,
+}
+
+type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64);
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewLatestTradesSponse {
+    trades_data: Vec<LatestTradesDataItem>, 
+    is_last_chunk_on_this_canister: bool,
+}
+
+const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
+
+#[query]
+pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
+    let mut trades_data: Vec<LatestTradesDataItem> = vec![];
+    let mut is_last_chunk_on_this_canister: bool = false;
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.trade_logs.make_contiguous(); // since we are using a vecdeque here
+        let tls: &[TradeLog] = &cm_data.trade_logs.as_slices().0[..q.opt_start_before_id.map(|sbid| cm_data.trade_logs.binary_search_by_key(&sbid, |tl| tl.id).unwrap_or_else(|e| e)).unwrap_or(cm_data.trade_logs.len())];
+        if let Some(tl_chunk) = tls.rchunks(MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA).next() {  
+            if tl_chunk.first().unwrap().id == cm_data.trade_logs.front().unwrap().id {
+                is_last_chunk_on_this_canister = true;
+            }
+            trades_data = tl_chunk.into_iter().map(|tl| (tl.id,tl.tokens,tl.cycles_per_token_rate,tl.timestamp_nanos as u64)).collect();
+        }
+    });
+    ViewLatestTradesSponse {
+        trades_data, 
+        is_last_chunk_on_this_canister,
+    }   
+}
+ 
+
+
+
+
+
 
 // -----------
 // view pending trades for a position
@@ -1485,11 +1596,16 @@ fn view_storage_logs_<LogType: StorageLogTrait>(q: ViewStorageLogsQuest<LogType:
                 ..
                 q.opt_start_before_id
                     .map(|start_before_id| {
-                        start_before_id
-                            .checked_sub(first_log_id_in_the_storage_buffer)
-                            .unwrap() as usize
-                        * 
-                        LogType::STABLE_MEMORY_SERIALIZE_SIZE
+                        std::cmp::min(
+                            {
+                                start_before_id
+                                    .checked_sub(first_log_id_in_the_storage_buffer)
+                                    .unwrap_or(0) as usize
+                                * 
+                                LogType::STABLE_MEMORY_SERIALIZE_SIZE
+                            },
+                            log_storage_buffer.len()
+                        )
                     })
                     .unwrap_or(log_storage_buffer.len()) 
             ];
