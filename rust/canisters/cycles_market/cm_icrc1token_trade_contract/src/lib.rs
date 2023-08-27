@@ -1455,17 +1455,13 @@ const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::siz
 #[query]
 pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
     let mut trades_data: Vec<LatestTradesDataItem> = vec![];
-    let mut is_last_chunk_on_this_canister: bool = false;
+    let mut is_last_chunk_on_this_canister: bool = true;
     with_mut(&CM_DATA, |cm_data| {
         cm_data.trade_logs.make_contiguous(); // since we are using a vecdeque here
         let tls: &[TradeLog] = &cm_data.trade_logs.as_slices().0[..q.opt_start_before_id.map(|sbid| cm_data.trade_logs.binary_search_by_key(&sbid, |tl| tl.id).unwrap_or_else(|e| e)).unwrap_or(cm_data.trade_logs.len())];
         if let Some(tl_chunk) = tls.rchunks(MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA).next() {  
-            if tl_chunk.first().unwrap().id == cm_data.trade_logs.front().unwrap().id {
-                is_last_chunk_on_this_canister = true;
-            }
             trades_data = tl_chunk.into_iter().map(|tl| (tl.id,tl.tokens,tl.cycles_per_token_rate,tl.timestamp_nanos as u64)).collect();
         }
-        
         if trades_data.len() < MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA {
             // check-storage_buffer
             with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
@@ -1493,7 +1489,21 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
                 }
             });
         }
-        
+        // is last chunk
+        let mut first_log_id_on_this_canister: Option<u128> = None;
+        with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
+            if log_storage_data.storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+                first_log_id_on_this_canister = Some(TradeLog::log_id_of_the_log_serialization(&log_storage_data.storage_buffer[..TradeLog::STABLE_MEMORY_SERIALIZE_SIZE]));
+            } 
+        });
+        if let None = first_log_id_on_this_canister {
+            if cm_data.trade_logs.len() >= 1 {
+                first_log_id_on_this_canister = Some(cm_data.trade_logs.front().unwrap().id);
+            }
+        }
+        if trades_data.len() >= 1 && trades_data.first().unwrap().0 != first_log_id_on_this_canister.unwrap() { /*unwrap cause if there is at least one in the sponse we know there is at least one on the canistec*/
+            is_last_chunk_on_this_canister = false;
+        }
     });
     ViewLatestTradesSponse {
         trades_data, 
