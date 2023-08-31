@@ -67,6 +67,15 @@ impl StorageData {
     pub fn set_log_size(&mut self, log_size: u32) {
         self.log_size = log_size;
     }
+    pub fn logs_memory_i(&self) -> u64 {
+        self.logs_memory_i
+    }
+    pub fn first_log_id(&self) -> u128 {
+        self.first_log_id
+    }
+    pub fn log_size(&self) -> u32 {
+        self.log_size
+    }
 }
 
 
@@ -193,54 +202,6 @@ where
 
 
 
-
-
-
-#[derive(CandidType, Deserialize)]
-pub struct ViewTradeLogsQuest {
-    pub start_id: u128,
-    pub length: u128,
-}
-
-#[derive(CandidType)]
-pub struct ViewTradeLogsSponse<'a> {
-    pub logs: &'a Bytes
-}
-
-
-
-// disable on replicated?
-#[query(manual_reply = true)]
-pub fn view_trade_logs(q: ViewTradeLogsQuest) { //-> ViewTradeLogsSponse {
-    
-    let mut logs: Vec<u8> = Vec::new();
-    
-    with(&STORAGE_DATA, |data| {
-        if q.start_id < data.first_log_id {
-            trap("start_id is less than the first_log_id in this storage canister")
-        }         
-        if q.start_id + q.length > data.first_log_id + logs_count(data) as u128 {
-            trap("out of range, the last log requested is out of the range of this storage canister")
-        }
-        
-        let start_i: u64 = (q.start_id - data.first_log_id) as u64 * data.log_size as u64;
-        let finish_i: u64 = start_i + (q.length as u64 * data.log_size as u64);
-        
-        let memory = get_logs_storage_memory();
-        
-        logs = vec![0; (finish_i - start_i) as usize]; 
-        
-        memory.read(start_i, &mut logs);
-       
-    });
-    
-    reply::<(ViewTradeLogsSponse,)>((
-        ViewTradeLogsSponse{
-            logs: &Bytes::new(&logs),
-        }
-    ,));
-
-}
 
 
 fn logs_count(data: &StorageData) -> u64 {

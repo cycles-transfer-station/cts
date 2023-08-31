@@ -5,6 +5,7 @@ use cts_lib::{
         localkey::{
             refcell::{with, with_mut}
         },
+        stable_read_into_vec,
     },
     ic_cdk::{
         self,
@@ -18,7 +19,14 @@ use cts_lib::{
         self,
         MemoryId,
     },
-    types::cycles_market::icrc1token_trade_contract::{PositionId, PurchaseId, icrc1token_trade_log_storage::*},
+    types::cycles_market::icrc1token_trade_contract::{
+        PositionId, 
+        PurchaseId, 
+        ViewLatestTradesQuest, 
+        ViewLatestTradesSponse, 
+        LatestTradesDataItem, 
+        icrc1token_trade_log_storage::*
+    },
 };
 
 
@@ -27,7 +35,8 @@ use cm_storage_lib::{
     StorageData,
     OldStorageData,
     STORAGE_DATA,
-    STORAGE_DATA_MEMORY_ID    
+    STORAGE_DATA_MEMORY_ID,
+    get_logs_storage_memory,    
 };
 
 
@@ -105,6 +114,65 @@ pub fn map_logs_rchunks(k: PositionsPurchasesKey, opt_start_before_id: Option<u1
 
 
 
+
+
+#[query]
+pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
+    
+    let mut trades_data: Vec<LatestTradesDataItem> = vec![];
+    let mut is_last_chunk_on_this_canister: bool = true;
+    with(&STORAGE_DATA, |storage_data| {
+        if storage_data.logs_memory_i() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+            
+            let logs_memory = get_logs_storage_memory();
+            
+            let logs_storage_till_start_before_id_len_i: u64 = {
+                q.opt_start_before_id
+                    .map(|start_before_id| {
+                        std::cmp::min(
+                            {
+                                start_before_id
+                                    .checked_sub(storage_data.first_log_id())
+                                    .unwrap_or(0) as u64
+                                * 
+                                storage_data.log_size() as u64
+                            },
+                            storage_data.logs_memory_i()
+                        )
+                    })
+                    .unwrap_or(storage_data.logs_memory_i()) 
+            };
+            
+            for i in 0..std::cmp::min(logs_storage_till_start_before_id_len_i / storage_data.log_size() as u64, MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA as u64) {
+                
+                let log_finish_i: u64 = logs_storage_till_start_before_id_len_i - i * storage_data.log_size() as u64;
+                
+                let log: Vec<u8> = stable_read_into_vec(
+                    logs_memory,
+                    log_finish_i - storage_data.log_size() as u64,
+                    storage_data.log_size() as usize,
+                );
+                    
+                trades_data.push((
+                    TradeLog::log_id_of_the_log_serialization(&log),
+                    TradeLog::tokens_quantity_of_the_log_serialization(&log),
+                    TradeLog::rate_of_the_log_serialization(&log),
+                    TradeLog::timestamp_nanos_of_the_log_serialization(&log)
+                )); 
+                
+            }
+            
+            if trades_data.len() >= 1 && trades_data.first().unwrap().0 != storage_data.first_log_id() { /*unwrap cause if there is at least one in the sponse we know there is at least one on the canistec*/
+                is_last_chunk_on_this_canister = false;
+            }   
+        }
+    });
+    
+    ViewLatestTradesSponse {
+        trades_data, 
+        is_last_chunk_on_this_canister,
+    }   
+}
 
 
 

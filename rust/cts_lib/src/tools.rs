@@ -23,6 +23,7 @@ use crate::{
 };
 use std::thread::LocalKey;
 use std::cell::Cell;
+use ic_stable_structures::Memory;
 
 
 pub use ic_cdk::api::time as time_nanos_u64;
@@ -260,6 +261,13 @@ pub fn call_error_as_u32_and_string(t: (RejectionCode, String)) -> CallError {
     (t.0 as u32, t.1)
 }
 
+
+
+pub fn stable_read_into_vec<M: Memory>(memory: M, start: u64, len: usize) -> Vec<u8> {
+    let mut v: Vec<u8> = vec![0; len];
+    memory.read(start, &mut v);    
+    v
+}
 
 
 
