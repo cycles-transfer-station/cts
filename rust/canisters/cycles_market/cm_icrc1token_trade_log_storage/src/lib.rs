@@ -25,7 +25,9 @@ use cts_lib::{
         ViewLatestTradesQuest, 
         ViewLatestTradesSponse, 
         LatestTradesDataItem, 
-        icrc1token_trade_log_storage::*
+        MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA,
+        icrc1token_trade_log_storage::*,
+        trade_log,
     },
 };
 
@@ -122,7 +124,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
     let mut trades_data: Vec<LatestTradesDataItem> = vec![];
     let mut is_last_chunk_on_this_canister: bool = true;
     with(&STORAGE_DATA, |storage_data| {
-        if storage_data.logs_memory_i() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
+        if storage_data.logs_memory_i() >= trade_log::STABLE_MEMORY_SERIALIZE_SIZE as u64 {
             
             let logs_memory = get_logs_storage_memory();
             
@@ -148,16 +150,16 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
                 let log_finish_i: u64 = logs_storage_till_start_before_id_len_i - i * storage_data.log_size() as u64;
                 
                 let log: Vec<u8> = stable_read_into_vec(
-                    logs_memory,
+                    &logs_memory,
                     log_finish_i - storage_data.log_size() as u64,
                     storage_data.log_size() as usize,
                 );
                     
                 trades_data.push((
-                    TradeLog::log_id_of_the_log_serialization(&log),
-                    TradeLog::tokens_quantity_of_the_log_serialization(&log),
-                    TradeLog::rate_of_the_log_serialization(&log),
-                    TradeLog::timestamp_nanos_of_the_log_serialization(&log)
+                    trade_log::log_id_of_the_log_serialization(&log),
+                    trade_log::tokens_quantity_of_the_log_serialization(&log),
+                    trade_log::rate_of_the_log_serialization(&log),
+                    trade_log::timestamp_nanos_of_the_log_serialization(&log).try_into().unwrap() // good for a couple hundred years
                 )); 
                 
             }

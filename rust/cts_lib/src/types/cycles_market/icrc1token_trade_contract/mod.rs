@@ -5,7 +5,7 @@ pub mod icrc1token_trade_log_storage;
 use crate::ic_cdk::export::{Principal, candid::{CandidType, Deserialize}};
 use crate::icrc::{IcrcId, Tokens, TokenTransferError, BlockId};
 use crate::types::{Cycles,canister_code::CanisterCode};
-
+use crate::consts::KiB;
 use serde::Serialize;
 
 pub type PositionId = u128;
@@ -246,8 +246,11 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
 
 
 
+pub mod trade_log; 
 
 
+
+pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
 
 
 
@@ -263,10 +266,6 @@ pub struct ViewLatestTradesSponse {
     pub trades_data: Vec<LatestTradesDataItem>, 
     pub is_last_chunk_on_this_canister: bool,
 }
-
-
-
-
 
 
 

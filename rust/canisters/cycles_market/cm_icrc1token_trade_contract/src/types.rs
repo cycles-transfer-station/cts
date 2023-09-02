@@ -405,21 +405,11 @@ impl TradeLog {
         && self.cycles_payout_data.is_complete() == true
         && self.token_payout_data.is_complete() == true
     }
-    
-    pub fn tokens_quantity_of_the_log_serialization(log_b: &[u8]) -> Tokens {
-        u128::from_be_bytes(log_b[92..108].try_into().unwrap())        
-    }
-    pub fn rate_of_the_log_serialization(log_b: &[u8]) -> CyclesPerToken {
-        u128::from_be_bytes(log_b[124..140].try_into().unwrap())        
-    }
-    pub fn timestamp_nanos_of_the_log_serialization(log_b: &[u8]) -> u128 {
-        u128::from_be_bytes(log_b[141..157].try_into().unwrap())        
-    }
 }
 
 impl StorageLogTrait for TradeLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
-    const STABLE_MEMORY_SERIALIZE_SIZE: usize = 157;    
+    const STABLE_MEMORY_SERIALIZE_SIZE: usize = trade_log::STABLE_MEMORY_SERIALIZE_SIZE;    
     fn stable_memory_serialize(&self) -> Vec<u8> {//[u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
         let mut s: [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] = [0; Self::STABLE_MEMORY_SERIALIZE_SIZE];
         s[0..16].copy_from_slice(&self.position_id.to_be_bytes());
@@ -434,7 +424,7 @@ impl StorageLogTrait for TradeLog {
         Vec::from(s)
     }
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
-        u128::from_be_bytes(log_b[16..32].try_into().unwrap())
+        trade_log::log_id_of_the_log_serialization(log_b)
     }
     type LogIndexKey = PositionId;    
     fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {

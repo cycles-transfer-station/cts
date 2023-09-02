@@ -36,7 +36,7 @@ use cts_lib::{
         CyclesTransferRefund,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{icrc1token_trade_contract::{*, icrc1token_trade_log_storage::*}, cm_caller::*},
+        cycles_market::{icrc1token_trade_contract::{*, trade_log, icrc1token_trade_log_storage::*}, cm_caller::*},
     },
     management_canister,
     icrc::{
@@ -1450,8 +1450,6 @@ pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsS
 */
 
 
-const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
-
 #[query]
 pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
     let mut trades_data: Vec<LatestTradesDataItem> = vec![];
@@ -1476,9 +1474,9 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
                     let mut v = iter.map(|s: &[u8]| {
                         (
                             TradeLog::log_id_of_the_log_serialization(s),
-                            TradeLog::tokens_quantity_of_the_log_serialization(s),
-                            TradeLog::rate_of_the_log_serialization(s),
-                            TradeLog::timestamp_nanos_of_the_log_serialization(s) as u64
+                            trade_log::tokens_quantity_of_the_log_serialization(s),
+                            trade_log::rate_of_the_log_serialization(s),
+                            trade_log::timestamp_nanos_of_the_log_serialization(s) as u64
                         )
                     })
                     .collect::<Vec<LatestTradesDataItem>>();

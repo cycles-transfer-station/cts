@@ -263,7 +263,7 @@ pub fn call_error_as_u32_and_string(t: (RejectionCode, String)) -> CallError {
 
 
 
-pub fn stable_read_into_vec<M: Memory>(memory: M, start: u64, len: usize) -> Vec<u8> {
+pub fn stable_read_into_vec<M: Memory>(memory: &M, start: u64, len: usize) -> Vec<u8> {
     let mut v: Vec<u8> = vec![0; len];
     memory.read(start, &mut v);    
     v
