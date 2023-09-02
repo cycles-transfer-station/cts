@@ -199,43 +199,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cm_icrc1token_position_storage"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cm_storage_lib",
- "cts_lib",
- "ic-stable-structures",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "cm_icrc1token_trade_contract"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cts_lib",
- "futures",
- "ic-cdk-timers",
- "ic-stable-structures",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "cm_icrc1token_trade_log_storage"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cm_storage_lib",
- "cts_lib",
- "ic-stable-structures",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
 name = "cm_main"
 version = "0.1.0"
 dependencies = [
@@ -248,10 +211,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "cm_positions_storage"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cm_storage_lib",
+ "cts_lib",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "cm_storage_lib"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "cts_lib",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "cm_tc"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "futures",
+ "ic-cdk-timers",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "cm_trades_storage"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cm_storage_lib",
  "cts_lib",
  "ic-stable-structures",
  "serde",
