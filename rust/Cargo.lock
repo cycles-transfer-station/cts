@@ -238,6 +238,7 @@ name = "cm_tc"
 version = "0.1.0"
 dependencies = [
  "candid",
+ "cm_storage_lib",
  "cts_lib",
  "futures",
  "ic-cdk-timers",

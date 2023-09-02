@@ -36,7 +36,7 @@ use cts_lib::{
         CyclesTransferRefund,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{icrc1token_trade_contract::{*, trade_log, icrc1token_trade_log_storage::*}, cm_caller::*},
+        cycles_market::{tc::{*, trade_log}, cm_caller::*},
     },
     management_canister,
     icrc::{
@@ -88,9 +88,10 @@ use cts_lib::{
     },
     stable_memory_tools::{self, MemoryId},
 };
+use cm_storage_lib::LogStorageInit;
 
 
-use serde_bytes::{ByteBuf, Bytes};
+use serde_bytes::{ByteBuf};
 use serde::Serialize;
 
 // -------
@@ -665,7 +666,7 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
             positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log().stable_memory_serialize());  
         });
         
-        let (matches_trade_logs_ids, cycles_position): (Vec<PurchaseId>, CyclesPosition) = match_trades(
+        let cycles_position: CyclesPosition = match_trades(
             caller, 
             cycles_position,
             &mut cm_data.token_positions, 
@@ -836,7 +837,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
             positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log().stable_memory_serialize());  
         });
         
-        let (matches_trade_logs_ids, token_position): (Vec<PurchaseId>, TokenPosition) = match_trades(
+        let token_position: TokenPosition = match_trades(
             caller, 
             token_position,
             &mut cm_data.cycles_positions, 
@@ -882,14 +883,13 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
     void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
     trade_logs: &mut VecDeque<TradeLog>, 
     trade_logs_id_counter: &mut PurchaseId,
-) -> (Vec<PurchaseId>, CallerPositionType/*caller_position*/) {
+) -> CallerPositionType/*caller_position*/ {
                     
     if CallerPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
         trap("CallerPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
     }
                     
     // match positions and create a TradeLog for each match.
-    let mut matches_trade_logs_ids: Vec<PurchaseId> = Vec::new();    
     let mut match_rate: CyclesPerToken = caller_position.current_position_available_cycles_per_token_rate();
             
     'outer: loop {
@@ -947,7 +947,6 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                         token_payout_data: TokenPayoutData::new_for_a_trade_log()
                     }
                 );
-                matches_trade_logs_ids.push(trade_log_id);
                 
                 if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {            
                     std::mem::drop(matchee_position);
@@ -997,7 +996,7 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
         };
     }
                 
-    (matches_trade_logs_ids, caller_position)
+    caller_position
 }
 
 
@@ -1274,7 +1273,7 @@ fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, curren
     cps_as_rate_and_quantity.sort_by_key(|d| d.0);
         
     if let Some(start_greater_than_rate) = q.opt_start_greater_than_rate {
-        let partition_point: usize = cps_as_rate_and_quantity.partition_point(|(r,t)| { r <= &start_greater_than_rate });
+        let partition_point: usize = cps_as_rate_and_quantity.partition_point(|(r,_)| { r <= &start_greater_than_rate });
         cps_as_rate_and_quantity.drain(..partition_point);    
     }
                 
@@ -1702,7 +1701,7 @@ pub fn view_trades_storage_canisters() -> Vec<StorageCanister> {
 }
 
 
-fn view_log_storage_canisters_(LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Vec<StorageCanister> {
+fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Vec<StorageCanister> {
     with(&LOG_STORAGE_DATA, |log_storage_data| {
         let mut storage_canisters: Vec<StorageCanister> = Vec::new();
         for storage_canister in log_storage_data.storage_canisters.iter() {

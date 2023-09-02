@@ -19,14 +19,13 @@ use cts_lib::{
         self,
         MemoryId,
     },
-    types::cycles_market::icrc1token_trade_contract::{
+    types::cycles_market::tc::{
         PositionId, 
         PurchaseId, 
         ViewLatestTradesQuest, 
         ViewLatestTradesSponse, 
         LatestTradesDataItem, 
         MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA,
-        icrc1token_trade_log_storage::*,
         trade_log,
     },
 };
@@ -39,6 +38,10 @@ use cm_storage_lib::{
     STORAGE_DATA,
     STORAGE_DATA_MEMORY_ID,
     get_logs_storage_memory,    
+    LogStorageInit,
+    FlushQuest,
+    FlushSuccess,
+    FlushError,
 };
 
 
@@ -53,13 +56,6 @@ type PositionsPurchasesVecValue = PurchaseId;
 type PositionsPurchases = HashMap<PositionsPurchasesKey, Vec<PositionsPurchasesVecValue>>;
 
 
-fn index_key_of_the_log_serialization(b: &[u8]) -> PositionsPurchasesKey {
-    u128::from_be_bytes(b[0..16].try_into().unwrap())
-} 
-
-fn log_id_of_the_log_serialization(b: &[u8]) -> u128 {
-    u128::from_be_bytes(b[16..32].try_into().unwrap())
-} 
 
 
 
@@ -101,8 +97,8 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         cm_storage_lib::flush(
             q, 
             positions_purchases,
-            log_id_of_the_log_serialization,
-            index_key_of_the_log_serialization,
+            trade_log::log_id_of_the_log_serialization,
+            trade_log::index_key_of_the_log_serialization,
         )    
     })
 }

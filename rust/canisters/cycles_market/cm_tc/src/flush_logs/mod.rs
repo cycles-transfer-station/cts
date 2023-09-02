@@ -2,9 +2,9 @@ use crate::{
     LogStorageData,
     StorageCanisterData,
 };
+use cm_storage_lib::{FlushQuestForward, FlushResult, FlushError};
 use cts_lib::{
     types::{
-        cycles_market::icrc1token_trade_contract::icrc1token_trade_log_storage::{FlushQuestForward, FlushResult, FlushError},
         CallError,
         Cycles,
     },
@@ -51,7 +51,7 @@ const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 10_000_000_000_000;
        
 
 
-pub async fn flush_logs(LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) {            
+pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) {            
     let mut go: bool = false;
     with_mut(&LOG_STORAGE_DATA, |data| {
         if data.storage_buffer.len() >= FLUSH_STORAGE_BUFFER_AT_SIZE 
@@ -155,7 +155,7 @@ pub enum CreateStorageCanisterError {
     InstallCodeCallError(CallError),
 }
 
-async fn create_storage_canister(LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Result<Principal/*saves the trade-log-storage-canister-data in the LOG_STORAGE_DATA*/, CreateStorageCanisterError> {
+async fn create_storage_canister(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Result<Principal/*saves the trade-log-storage-canister-data in the LOG_STORAGE_DATA*/, CreateStorageCanisterError> {
     use crate::management_canister::*;
     
     

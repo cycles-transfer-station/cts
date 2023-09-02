@@ -1,14 +1,10 @@
 use crate::{
-    types::{
-        PositionLog,
-        StorageLogTrait
-    },
     POSITIONS_STORAGE_DATA,
 };
 use cts_lib::{
     types::{
         CallError,
-        cycles_market::icrc1token_trade_contract::{PositionId},
+        cycles_market::tc::{PositionId},
     },
     tools::{
         localkey::refcell::{with,with_mut},

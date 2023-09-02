@@ -34,16 +34,16 @@ pub struct PositionLog {
 
 impl StorageLogTrait for PositionLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &POSITIONS_STORAGE_DATA;
-    const STABLE_MEMORY_SERIALIZE_SIZE: usize = 5;  
+    const STABLE_MEMORY_SERIALIZE_SIZE: usize = position_log::STABLE_MEMORY_SERIALIZE_SIZE;  
     fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
         todo!()
     }  
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
-        u128::from_be_bytes((&log_b[0..16]).try_into().unwrap())
+        position_log::log_id_of_the_log_serialization(log_b)
     }
     type LogIndexKey = Principal;
     fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
-        Principal::from_slice(&log_b[17..(17 + log_b[16] as usize)])
+        position_log::index_key_of_the_log_serialization(log_b)
     }
 }
 
@@ -428,7 +428,7 @@ impl StorageLogTrait for TradeLog {
     }
     type LogIndexKey = PositionId;    
     fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
-        u128::from_be_bytes(log_b[0..16].try_into().unwrap())
+        trade_log::index_key_of_the_log_serialization(log_b)
     }
 }
 

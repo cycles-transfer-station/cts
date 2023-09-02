@@ -19,7 +19,7 @@ use cts_lib::{
         self,
         MemoryId,
     },
-    types::cycles_market::icrc1token_trade_contract::{PositionId, icrc1token_trade_log_storage::*},
+    types::cycles_market::tc::{PositionId, position_log},
 };
 
 
@@ -28,8 +28,11 @@ use cm_storage_lib::{
     StorageData,
     OldStorageData,
     STORAGE_DATA,
-    STORAGE_DATA_MEMORY_ID
-    
+    STORAGE_DATA_MEMORY_ID,
+    LogStorageInit,
+    FlushQuest,
+    FlushSuccess,
+    FlushError,    
 };
 
 
@@ -38,14 +41,6 @@ type UserPositionsKey = Principal;
 type UserPositionsVecValue = PositionId;
 type UserPositions = HashMap<UserPositionsKey, Vec<UserPositionsVecValue>>;
 
-
-fn index_key_of_the_log_serialization(b: &[u8]) -> UserPositionsKey {
-    Principal::from_slice(&b[17..(17 + b[16] as usize)])
-} 
-
-fn log_id_of_the_log_serialization(b: &[u8]) -> u128 {
-    u128::from_be_bytes(b[0..16].try_into().unwrap())
-} 
 
 
 
@@ -87,8 +82,8 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         cm_storage_lib::flush(
             q, 
             user_positions,
-            log_id_of_the_log_serialization,
-            index_key_of_the_log_serialization,
+            position_log::log_id_of_the_log_serialization,
+            position_log::index_key_of_the_log_serialization,
         )    
     })
 }

@@ -16,20 +16,17 @@ use cts_lib::{
             call::{
                 msg_cycles_available128,
                 msg_cycles_accept128,
-                reply,
                 reply_raw,
             },
         },
         export::{candid::{CandidType}},
         update,
-        query,
     },
     stable_memory_tools::{
         self,
         locate_minimum_memory
     },
     consts::GiB,
-    types::cycles_market::icrc1token_trade_contract::{icrc1token_trade_log_storage::*},
 };
 
 use ic_stable_structures::{
@@ -96,6 +93,33 @@ pub fn get_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
 }
 
 
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct LogStorageInit {
+    pub log_size: u32,
+}
+
+
+
+#[derive(CandidType)]
+pub struct FlushQuestForward<'a> {
+    pub bytes: &'a Bytes
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct FlushQuest {
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct FlushSuccess {}
+
+#[derive(CandidType, Deserialize)]
+pub enum FlushError {
+    StorageIsFull,
+}
+
+pub type FlushResult = Result<FlushSuccess, FlushError>;
 
 
 pub fn flush<K, F, Q>(q: FlushQuest, map: &mut HashMap<K, Vec<u128>>, log_id_of_the_log_serialization: F, index_key_of_the_log_serialization: Q) -> Result<FlushSuccess, FlushError> 
@@ -203,10 +227,6 @@ where
 
 
 
-
-fn logs_count(data: &StorageData) -> u64 {
-    data.logs_memory_i / data.log_size as u64
-}
 
 #[update]
 fn controller_mark_full(mark: bool) {

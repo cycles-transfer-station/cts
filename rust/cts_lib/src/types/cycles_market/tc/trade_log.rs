@@ -1,18 +1,17 @@
-use serde::{Serialize,Deserialize};
-use super::{PositionId,PurchaseId};
-
-use candid::Principal;
 use crate::{
     icrc::Tokens,
     types::{
-        Cycles,
         cycles_market::{
-            icrc1token_trade_contract::{
+            tc::{
                 CyclesPerToken
             }
         }        
     }
 };
+use super::PositionId;
+
+
+
 
 pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 157; 
 
@@ -29,4 +28,10 @@ pub fn rate_of_the_log_serialization(log_b: &[u8]) -> CyclesPerToken {
 pub fn timestamp_nanos_of_the_log_serialization(log_b: &[u8]) -> u128 {
     u128::from_be_bytes(log_b[141..157].try_into().unwrap())        
 }
+
+
+pub fn index_key_of_the_log_serialization(b: &[u8]) -> PositionId {
+    u128::from_be_bytes(b[0..16].try_into().unwrap())
+} 
+
 

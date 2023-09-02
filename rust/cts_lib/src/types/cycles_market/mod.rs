@@ -1,5 +1,5 @@
 pub mod cm_main;
-pub mod icrc1token_trade_contract;
+pub mod tc;
 pub mod cm_caller;
 
 

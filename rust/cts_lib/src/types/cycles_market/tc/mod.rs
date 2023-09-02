@@ -1,7 +1,3 @@
-pub mod icrc1token_trade_log_storage;
-
-
-
 use crate::ic_cdk::export::{Principal, candid::{CandidType, Deserialize}};
 use crate::icrc::{IcrcId, Tokens, TokenTransferError, BlockId};
 use crate::types::{Cycles,canister_code::CanisterCode};
@@ -247,6 +243,7 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
 
 
 pub mod trade_log; 
+pub mod position_log;
 
 
 
