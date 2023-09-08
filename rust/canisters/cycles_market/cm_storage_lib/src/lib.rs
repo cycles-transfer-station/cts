@@ -122,11 +122,11 @@ pub enum FlushError {
 pub type FlushResult = Result<FlushSuccess, FlushError>;
 
 
-pub fn flush<K, F, Q>(q: FlushQuest, map: &mut HashMap<K, Vec<u128>>, log_id_of_the_log_serialization: F, index_key_of_the_log_serialization: Q) -> Result<FlushSuccess, FlushError> 
+pub fn flush<K, F, Q>(q: FlushQuest, map: &mut HashMap<K, Vec<u128>>, log_id_of_the_log_serialization: F, index_keys_of_the_log_serialization: Q) -> Result<FlushSuccess, FlushError> 
 where
     K: PartialEq + Eq + Hash,
     F: Fn(&[u8]) -> u128,
-    Q: Fn(&[u8]) -> K
+    Q: Fn(&[u8]) -> Vec<K>
 {
     caller_is_controller_gaurd(&caller());
     
@@ -174,9 +174,11 @@ where
         
         for i in 0..(q.bytes.len() / log_size) {
             let log_slice: &[u8] = &q.bytes[(i*log_size)..(i*log_size+log_size)];
-            map.entry(index_key_of_the_log_serialization(log_slice))
+            for index_key in index_keys_of_the_log_serialization(log_slice).into_iter() {
+                map.entry(index_key)
                 .or_insert(Vec::new())
-                .push(log_id_of_the_log_serialization(log_slice));
+                .push(log_id_of_the_log_serialization(log_slice));    
+            }; 
         }
         
         Ok(())

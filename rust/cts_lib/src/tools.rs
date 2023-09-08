@@ -197,6 +197,9 @@ pub fn tokens_transform_cycles(tokens: Tokens, cycles_per_token: Cycles) -> Cycl
 }
 
 pub fn cycles_transform_tokens(cycles: Cycles, cycles_per_token: Cycles) -> Tokens {
+    if cycles_per_token == 0 {
+        return 0;
+    }
     cycles / cycles_per_token
 }
 

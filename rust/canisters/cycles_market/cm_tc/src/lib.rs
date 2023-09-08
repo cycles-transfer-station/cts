@@ -658,12 +658,15 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
             match_tokens_quest: q.clone(),
             current_position_cycles: minimum_msg_cycles,
             purchases_rates_times_cycles_quantities_sum: 0,
+            fill_quantity_tokens: 0,
             tokens_payouts_fees_sum: 0,
             timestamp_nanos: time_nanos(),
         };
           
+        msg_cycles_accept128(minimum_msg_cycles);
+          
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log().stable_memory_serialize());  
+            positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
         let cycles_position: CyclesPosition = match_trades(
@@ -674,8 +677,6 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
             &mut cm_data.trade_logs,
             &mut cm_data.trade_logs_id_counter
         ); 
-        
-        msg_cycles_accept128(minimum_msg_cycles - cycles_position.current_position_cycles);
                 
         if cycles_position.current_position_tokens(cycles_position.current_position_available_cycles_per_token_rate()) >= minimum_tokens_match() {
             cm_data.cycles_positions.insert(
@@ -685,7 +686,7 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
         } else {
             cm_data.void_cycles_positions.insert(
                 cm_data.void_cycles_positions.binary_search_by_key(&cycles_position.id, |vcp| vcp.position_id).unwrap_err(),
-                cycles_position.into_void_position_type()
+                cycles_position.into_void_position_type(Some(PositionTerminationCause::Fill))
             );
         }
         
@@ -834,7 +835,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
         };
         
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log().stable_memory_serialize());  
+            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
         let token_position: TokenPosition = match_trades(
@@ -854,7 +855,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
         } else {
             cm_data.void_token_positions.insert(
                 cm_data.void_token_positions.binary_search_by_key(&token_position.id, |vtp| vtp.position_id).unwrap_err(),
-                token_position.into_void_position_type()
+                token_position.into_void_position_type(Some(PositionTerminationCause::Fill))
             );
         }
         
@@ -929,7 +930,8 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                 let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
                 trade_logs.push_back(
                     TradeLog{
-                        position_id: matchee_position.id(),
+                        position_id_matcher: caller_position.id(),
+                        position_id_matchee: matchee_position.id(),
                         id: trade_log_id,
                         positor: matchee_position.positor(),
                         purchaser: caller,
@@ -939,7 +941,6 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                         position_kind: MatcheePositionType::POSITION_KIND,
                         timestamp_nanos: time_nanos(),
                         tokens_payout_fee,
-                        tokens_payout_ledger_transfer_fees_sum: 0, // starts at 0, gets updated on the payout
                         cycles_payout_fee,
                         cycles_payout_lock: false,
                         token_payout_lock: false,
@@ -959,7 +960,7 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                     };
                     void_positions.insert(
                         position_for_the_void_void_positions_insertion_i,
-                        position_for_the_void.into_void_position_type()
+                        position_for_the_void.into_void_position_type(Some(PositionTerminationCause::Fill))
                     );
                 } else {
                     i = i + 1;
@@ -1048,7 +1049,7 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             let cycles_position_for_the_void_void_cycles_positions_insertion_i: usize = cm_data.void_cycles_positions.binary_search_by_key(&cycles_position_for_the_void.id, |vcp| { vcp.position_id }).unwrap_err();
             cm_data.void_cycles_positions.insert(
                 cycles_position_for_the_void_void_cycles_positions_insertion_i,
-                cycles_position_for_the_void.into_void_position_type()
+                cycles_position_for_the_void.into_void_position_type(Some(PositionTerminationCause::UserCallVoidPosition))
             );
             Ok(())
         } else if let Ok(token_position_i) = cm_data.token_positions.binary_search_by_key(&q.position_id, |token_position| { token_position.id }) {
@@ -1062,7 +1063,7 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             let token_position_for_the_void_void_token_positions_insertion_i: usize = cm_data.void_token_positions.binary_search_by_key(&token_position_for_the_void.id, |vip| { vip.position_id }).unwrap_err();
             cm_data.void_token_positions.insert(
                 token_position_for_the_void_void_token_positions_insertion_i,
-                token_position_for_the_void.into_void_position_type()
+                token_position_for_the_void.into_void_position_type(Some(PositionTerminationCause::UserCallVoidPosition))
             );
             Ok(())
         } else {
@@ -1527,9 +1528,13 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
                 None => cm_data.trade_logs.len(),
                 Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.id).unwrap_or_else(|i| i),
             }; 
-            cm_data.trade_logs.as_slices().0[..till_i]
-                .iter()
-                .filter(|tl| tl.position_id == q.index_key.unwrap_or(tl.position_id))
+            let mut iter: Box<dyn DoubleEndedIterator<Item=&TradeLog>> = Box::new(cm_data.trade_logs.as_slices().0[..till_i].iter());
+            if let Some(index_key) = q.index_key {
+                iter = Box::new(iter.filter(move |tl| {
+                    tl.position_id_matchee == index_key || tl.position_id_matcher == index_key
+                }));
+            }
+            iter
                 .rev()
                 .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
                 .collect::<Vec<&TradeLog>>()
@@ -1561,7 +1566,7 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
         ]
             .iter()
             .filter(move |p| p.positor() == q.index_key.unwrap_or(p.positor()))
-            .map(|p| p.as_stable_memory_position_log()))
+            .map(|p| p.as_stable_memory_position_log(None)))
     }
     with(&CM_DATA, |cm_data| {
         let mut v: Vec<PositionLog> = d(q.clone(), &cm_data.cycles_positions).chain(d(q, &cm_data.token_positions)).collect();
@@ -1656,7 +1661,7 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
                 ];
                 
                 if let Some(ref index_key) = q.index_key {
-                    if LogType::index_key_of_the_log_serialization(log) != *index_key {
+                    if LogType::index_keys_of_the_log_serialization(log).contains(index_key) == false {
                         continue;
                     }
                 }

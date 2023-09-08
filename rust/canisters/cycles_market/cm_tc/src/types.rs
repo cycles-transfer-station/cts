@@ -14,10 +14,11 @@ pub type VoidTokenPositionId = PositionId;
 pub trait StorageLogTrait {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
     const STABLE_MEMORY_SERIALIZE_SIZE: usize;
+    const STABLE_MEMORY_VERSION: u16;
     fn stable_memory_serialize(&self) -> Vec<u8>;// Self::STABLE_MEMORY_SERIALIZE_SIZE]; const generics not stable yet
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128;
     type LogIndexKey: CandidType + for<'a> Deserialize<'a> + PartialEq + Eq;
-    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey;
+    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey>;
 }
 
 
@@ -27,6 +28,10 @@ pub struct PositionLog {
     pub positor: Principal,
     pub match_tokens_quest: MatchTokensQuest,
     pub position_kind: PositionKind,
+    pub mainder_position_quantity: u128, // if cycles position this is: Cycles, if Token position this is: Tokens.
+    pub fill_quantity: u128, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
+    pub fill_average_rate: CyclesPerToken,
+    pub payouts_fees_sum: u128, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
     pub creation_timestamp_nanos: u128,
     pub position_termination: Option<PositionTerminationData>,
 }
@@ -35,6 +40,7 @@ pub struct PositionLog {
 impl StorageLogTrait for PositionLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &POSITIONS_STORAGE_DATA;
     const STABLE_MEMORY_SERIALIZE_SIZE: usize = position_log::STABLE_MEMORY_SERIALIZE_SIZE;  
+    const STABLE_MEMORY_VERSION: u16 = 0;
     fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
         todo!()
     }  
@@ -42,22 +48,24 @@ impl StorageLogTrait for PositionLog {
         position_log::log_id_of_the_log_serialization(log_b)
     }
     type LogIndexKey = Principal;
-    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
-        position_log::index_key_of_the_log_serialization(log_b)
+    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey> {
+        position_log::index_keys_of_the_log_serialization(log_b)
     }
 }
 
 
 pub struct PositionTerminationData {
-    timestamp_nanos: u128,
-    cause: PositionTerminationCause
+    pub timestamp_nanos: u128,
+    pub cause: PositionTerminationCause
 }
 
 pub enum PositionTerminationCause {
     Fill, // the position is fill[ed]. position.amount < minimum_token_match()
     Bump, // the position got bumped
+    TimePass, // expired
     UserCallVoidPosition, // the user cancelled the position by calling void_position
-    CurrentPositionsAreFull, // after matching the request with compatible positions, was not able to create a 'current-position' with the leftover amount. The canister's current_positions list is full.
+    
+        
 }
 
 
@@ -74,7 +82,7 @@ pub trait CurrentPositionTrait {
     fn timestamp_nanos(&self) -> u128;
     
     type VoidPositionType: VoidPositionTrait;
-    fn into_void_position_type(self) -> Self::VoidPositionType;
+    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType;
     
     fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens;
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles;
@@ -85,7 +93,7 @@ pub trait CurrentPositionTrait {
     
     const POSITION_KIND: PositionKind;
             
-    fn as_stable_memory_position_log(&self) -> PositionLog;
+    fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog;
 }
 
 
@@ -98,6 +106,7 @@ pub struct CyclesPosition {
     pub match_tokens_quest: MatchTokensQuest,
     pub current_position_cycles: Cycles,
     pub purchases_rates_times_cycles_quantities_sum: u128,
+    pub fill_quantity_tokens: Tokens,
     pub tokens_payouts_fees_sum: Tokens,
     pub timestamp_nanos: u128,
 }
@@ -118,7 +127,7 @@ impl CurrentPositionTrait for CyclesPosition {
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidCyclesPosition;
-    fn into_void_position_type(self) -> Self::VoidPositionType {
+    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType {
         VoidCyclesPosition{
             position_id: self.id,
             positor: self.positor,                                
@@ -127,7 +136,7 @@ impl CurrentPositionTrait for CyclesPosition {
             cycles_payout_data: CyclesPayoutData::new(),
             timestamp_nanos: time_nanos(),
             update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().stable_memory_serialize()
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
         }
     }
     
@@ -137,6 +146,7 @@ impl CurrentPositionTrait for CyclesPosition {
     }
     
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
+        self.fill_quantity_tokens = self.fill_quantity_tokens.saturating_add(sub_tokens);
         let sub_cycles: Cycles = tokens_transform_cycles(sub_tokens, rate);
         self.current_position_cycles = self.current_position_cycles.saturating_sub(sub_cycles);
         self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);        
@@ -156,8 +166,32 @@ impl CurrentPositionTrait for CyclesPosition {
     
     const POSITION_KIND: PositionKind = PositionKind::Cycles;
     
-    fn as_stable_memory_position_log(&self) -> PositionLog {
-        todo!();
+    fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
+        let cycles_sold: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate) - self.current_position_cycles;
+        let fill_average_rate = {
+            if cycles_sold == 0 {
+                self.match_tokens_quest.cycles_per_token_rate
+            } else {
+                self.purchases_rates_times_cycles_quantities_sum / cycles_sold
+            }
+        };
+        PositionLog {
+            id: self.id,
+            positor: self.positor,
+            match_tokens_quest: self.match_tokens_quest.clone(),
+            position_kind: PositionKind::Cycles,
+            mainder_position_quantity: self.current_position_cycles, // if cycles position this is: Cycles, if Token position this is: Tokens.
+            fill_quantity: self.fill_quantity_tokens, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
+            fill_average_rate,
+            payouts_fees_sum: self.tokens_payouts_fees_sum, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
+            creation_timestamp_nanos: self.timestamp_nanos,
+            position_termination: position_termination_cause.map(|c| {
+                PositionTerminationData{
+                    timestamp_nanos: time_nanos(),
+                    cause: c
+                }
+            }),
+        }
     }
 
 
@@ -192,7 +226,7 @@ impl CurrentPositionTrait for TokenPosition {
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidTokenPosition;
-    fn into_void_position_type(self) -> Self::VoidPositionType {
+    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType {
         VoidTokenPosition{
             position_id: self.id,
             positor: self.positor,
@@ -201,7 +235,7 @@ impl CurrentPositionTrait for TokenPosition {
             token_payout_lock: false,
             token_payout_data: TokenPayoutData::new_for_a_void_token_position(),
             update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log().stable_memory_serialize()
+            update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
         }
     }
     
@@ -225,8 +259,32 @@ impl CurrentPositionTrait for TokenPosition {
     
     const POSITION_KIND: PositionKind = PositionKind::Token;
     
-    fn as_stable_memory_position_log(&self) -> PositionLog {
-        todo!();
+    fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
+        let tokens_sold: Cycles = self.match_tokens_quest.tokens - self.current_position_tokens;
+        let fill_average_rate = {
+            if tokens_sold == 0 {
+                self.match_tokens_quest.cycles_per_token_rate
+            } else {
+                self.purchases_rates_times_token_quantities_sum / tokens_sold
+            }
+        };
+        PositionLog {
+            id: self.id,
+            positor: self.positor,
+            match_tokens_quest: self.match_tokens_quest.clone(),
+            position_kind: PositionKind::Token,
+            mainder_position_quantity: self.current_position_tokens, // if cycles position this is: Cycles, if Token position this is: Tokens.
+            fill_quantity: self.purchases_rates_times_token_quantities_sum, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
+            fill_average_rate,
+            payouts_fees_sum: self.cycles_payouts_fees_sum, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
+            creation_timestamp_nanos: self.timestamp_nanos,
+            position_termination: position_termination_cause.map(|c| {
+                PositionTerminationData{
+                    timestamp_nanos: time_nanos(),
+                    cause: c
+                }
+            }),
+        }
     }
 
 }
@@ -300,19 +358,20 @@ pub trait CyclesPayoutDataTrait {
 
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct TokenTransferBlockHeightAndTimestampNanos {
+pub struct TokenTransferData {
     pub block_height: Option<BlockId>, // if None that means there was no transfer in this token-payout. it is an unlock of the funds within the same-token-id.
     pub timestamp_nanos: u128,
+    pub ledger_transfer_fee: Tokens,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TokenPayoutData {
-    pub token_transfer: Option<TokenTransferBlockHeightAndTimestampNanos>,
-    pub token_fee_collection: Option<TokenTransferBlockHeightAndTimestampNanos>,
+    pub token_transfer: Option<TokenTransferData>,
+    pub token_fee_collection: Option<TokenTransferData>,
     pub cm_message_call_success_timestamp_nanos: Option<u128>,
     pub cm_message_callback_complete: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-positor-message-call-error
 }
 impl TokenPayoutData {
-    // separate new fns because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferBlockHeightAndTimestampNanos)
+    // separate new fns because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferData)
     pub fn new_for_a_trade_log() -> Self {
         Self{
             token_transfer: None,
@@ -323,13 +382,15 @@ impl TokenPayoutData {
     }
     pub fn new_for_a_void_token_position() -> Self {
         TokenPayoutData{
-            token_transfer: Some(TokenTransferBlockHeightAndTimestampNanos{
+            token_transfer: Some(TokenTransferData{
                 block_height: None,
                 timestamp_nanos: time_nanos(),
+                ledger_transfer_fee: 0,
             }),
-            token_fee_collection: Some(TokenTransferBlockHeightAndTimestampNanos{
+            token_fee_collection: Some(TokenTransferData{
                 block_height: None,
                 timestamp_nanos: time_nanos(),
+                ledger_transfer_fee: 0,
             }),
             cm_message_call_success_timestamp_nanos: None,
             cm_message_callback_complete: None            
@@ -356,7 +417,7 @@ pub trait TokenPayoutDataTrait {
     fn token_payout_payee(&self) -> Principal;
     fn token_payout_payor(&self) -> Principal;
     fn token_payout_payee_method(&self) -> &'static str;
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError>; 
+    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferData) -> Result<Vec<u8>, CandidError>; 
     fn tokens(&self) -> Tokens;
     fn token_transfer_memo(&self) -> Option<IcrcMemo>;
     fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo>;
@@ -373,18 +434,17 @@ pub trait TokenPayoutDataTrait {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TradeLog {
-    pub position_id: PositionId,
+    pub position_id_matcher: PositionId,
+    pub position_id_matchee: PositionId,
     pub id: PurchaseId,
     pub positor: Principal, //maker
     pub purchaser: Principal, //taker
     pub tokens: Tokens,
     pub cycles: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
-    //but then how do we know whether the position is a cycles-position or a token-position & whether this is a cycles-position-purchase or a token-position-purchase?
     pub position_kind: PositionKind,
     pub timestamp_nanos: u128,
     pub tokens_payout_fee: Tokens,
-    pub tokens_payout_ledger_transfer_fees_sum: Tokens,
     pub cycles_payout_fee: Cycles,
     pub cycles_payout_lock: bool,
     pub token_payout_lock: bool,
@@ -410,25 +470,30 @@ impl TradeLog {
 impl StorageLogTrait for TradeLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
     const STABLE_MEMORY_SERIALIZE_SIZE: usize = trade_log::STABLE_MEMORY_SERIALIZE_SIZE;    
+    const STABLE_MEMORY_VERSION: u16 = 0; 
     fn stable_memory_serialize(&self) -> Vec<u8> {//[u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
         let mut s: [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] = [0; Self::STABLE_MEMORY_SERIALIZE_SIZE];
-        s[0..16].copy_from_slice(&self.position_id.to_be_bytes());
-        s[16..32].copy_from_slice(&self.id.to_be_bytes());
-        s[32..62].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
-        s[62..92].copy_from_slice(&principal_as_thirty_bytes(&self.purchaser));
-        s[92..108].copy_from_slice(&self.tokens.to_be_bytes());
-        s[108..124].copy_from_slice(&self.cycles.to_be_bytes());
-        s[124..140].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
-        s[140] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
-        s[141..157].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
+        s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());
+        s[2..18].copy_from_slice(&self.position_id_matchee.to_be_bytes());
+        s[18..34].copy_from_slice(&self.id.to_be_bytes());
+        s[34..64].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
+        s[64..94].copy_from_slice(&principal_as_thirty_bytes(&self.purchaser));
+        s[94..110].copy_from_slice(&self.tokens.to_be_bytes());
+        s[110..126].copy_from_slice(&self.cycles.to_be_bytes());
+        s[126..142].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
+        s[142] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
+        s[143..159].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
+        s[159..175].copy_from_slice(&self.tokens_payout_fee.to_be_bytes());
+        s[175..191].copy_from_slice(&self.cycles_payout_fee.to_be_bytes());
+        s[191..207].copy_from_slice(&self.position_id_matcher.to_be_bytes());
         Vec::from(s)
     }
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
         trade_log::log_id_of_the_log_serialization(log_b)
     }
     type LogIndexKey = PositionId;    
-    fn index_key_of_the_log_serialization(log_b: &[u8]) -> Self::LogIndexKey {
-        trade_log::index_key_of_the_log_serialization(log_b)
+    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey> {
+        trade_log::index_keys_of_the_log_serialization(log_b)
     }
 }
 
@@ -452,7 +517,7 @@ impl CyclesPayoutDataTrait for TradeLog {
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePurchaserMessageQuest {
-                        cycles_position_id: self.position_id,
+                        cycles_position_id: self.position_id_matchee,
                         cycles_position_positor: self.positor,
                         cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
@@ -464,7 +529,7 @@ impl CyclesPayoutDataTrait for TradeLog {
             PositionKind::Token => {
                 encode_one(
                     CMTokenPositionPurchasePositorMessageQuest{
-                        token_position_id: self.position_id,
+                        token_position_id: self.position_id_matchee,
                         token_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
                         purchaser: self.purchaser,
@@ -506,12 +571,12 @@ impl TokenPayoutDataTrait for TradeLog {
             PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER,
         }
     }
-    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
+    fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferData) -> Result<Vec<u8>, CandidError> {
         match self.position_kind { 
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePositorMessageQuest {
-                        cycles_position_id: self.position_id,
+                        cycles_position_id: self.position_id_matchee,
                         purchase_id: self.id,
                         purchaser: self.purchaser,
                         purchase_timestamp_nanos: self.timestamp_nanos,
@@ -526,7 +591,7 @@ impl TokenPayoutDataTrait for TradeLog {
             PositionKind::Token => {
                 encode_one(
                     CMTokenPositionPurchasePurchaserMessageQuest {
-                        token_position_id: self.position_id,
+                        token_position_id: self.position_id_matchee,
                         purchase_id: self.id, 
                         positor: self.positor,
                         purchase_timestamp_nanos: self.timestamp_nanos,
@@ -676,7 +741,7 @@ impl TokenPayoutDataTrait for VoidTokenPosition {
     fn token_payout_payee(&self) -> Principal { self.positor }
     fn token_payout_payor(&self) -> Principal { self.positor }
     fn token_payout_payee_method(&self) -> &'static str { CM_MESSAGE_METHOD_VOID_TOKEN_POSITION_POSITOR }
-    fn token_payout_payee_method_quest_bytes(&self, _token_payout_data_token_transfer: TokenTransferBlockHeightAndTimestampNanos) -> Result<Vec<u8>, CandidError> {
+    fn token_payout_payee_method_quest_bytes(&self, _token_payout_data_token_transfer: TokenTransferData) -> Result<Vec<u8>, CandidError> {
         encode_one(
             CMVoidTokenPositionPositorMessageQuest {
                 position_id: self.position_id,

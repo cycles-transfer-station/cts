@@ -83,7 +83,7 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
             q, 
             user_positions,
             position_log::log_id_of_the_log_serialization,
-            position_log::index_key_of_the_log_serialization,
+            position_log::index_keys_of_the_log_serialization,
         )    
     })
 }

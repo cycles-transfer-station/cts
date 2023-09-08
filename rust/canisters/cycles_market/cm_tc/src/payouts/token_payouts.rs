@@ -33,16 +33,17 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
     
     if let None = token_payout_data.token_transfer {
         let token_transfer_created_at_time: u64 = time_nanos_u64()-NANOS_IN_A_SECOND as u64;
+        let ledger_transfer_fee: Tokens = q.token_ledger_transfer_fee(); 
         match token_transfer(
             TokenTransferArg{
                 memo: q.token_transfer_memo(),
                 amount: {
                     q.tokens()
                         .saturating_sub(q.tokens_payout_fee())
-                        .saturating_sub(q.token_ledger_transfer_fee() * 2/*1 for the payout-transfer and 1 for the fee-collection-transfer*/)
+                        .saturating_sub(ledger_transfer_fee)
                         .into()
                 },
-                fee: Some(q.token_ledger_transfer_fee().into()),
+                fee: Some(ledger_transfer_fee.into()),
                 from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
                 to: IcrcId{owner: ic_cdk::api::id(), subaccount: Some(principal_token_subaccount(&q.token_payout_payee()))},
                 created_at_time: Some(token_transfer_created_at_time)
@@ -51,9 +52,10 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
             Ok(token_transfer_result) => match token_transfer_result {
                 Ok(block_height) => {
                     token_payout_data.token_transfer = Some(
-                        TokenTransferBlockHeightAndTimestampNanos{
+                        TokenTransferData{
                             block_height: Some(block_height),
-                            timestamp_nanos: token_transfer_created_at_time as u128
+                            timestamp_nanos: token_transfer_created_at_time as u128,
+                            ledger_transfer_fee: ledger_transfer_fee,
                         }
                     )
                 },
@@ -72,11 +74,14 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
     
     if let None = token_payout_data.token_fee_collection {
         let created_at_time: u64 = time_nanos_u64()-NANOS_IN_A_SECOND as u64;
+        let ledger_transfer_fee: Tokens = q.token_ledger_transfer_fee();         
         match token_transfer(
             TokenTransferArg{
                 memo: q.token_fee_collection_transfer_memo(),
-                amount: q.tokens_payout_fee().into(),
-                fee: Some(q.token_ledger_transfer_fee().into()),
+                amount: q.tokens_payout_fee()
+                            .saturating_sub(ledger_transfer_fee)
+                            .into(),
+                fee: Some(ledger_transfer_fee.into()),
                 from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
                 to: IcrcId{owner: ic_cdk::api::id(), subaccount: None},
                 created_at_time: Some(created_at_time)
@@ -85,9 +90,10 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
             Ok(token_transfer_result) => match token_transfer_result {
                 Ok(block_height) => {
                     token_payout_data.token_fee_collection = Some(
-                        TokenTransferBlockHeightAndTimestampNanos{
+                        TokenTransferData{
                             block_height: Some(block_height),
-                            timestamp_nanos: created_at_time as u128
+                            timestamp_nanos: created_at_time as u128,
+                            ledger_transfer_fee,
                         }
                     )
                 },
