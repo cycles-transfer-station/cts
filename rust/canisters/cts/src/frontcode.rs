@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 use cts_lib::{
-    ic_cdk::{
-        api::{data_certificate, set_certified_data}
-    },
-    ic_certified_map::{self, RbTree, HashTree, AsHashTree},
+    ic_certified_map::{self, RbTree},
     tools::{
         localkey::refcell::{with},
     },

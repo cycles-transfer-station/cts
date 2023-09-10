@@ -29,19 +29,6 @@ use cts_lib::{
                 stable64_write
             }
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-                Nat,
-                utils::{
-                    encode_one,
-                    decode_one,
-                    encode_args,
-                }
-            },
-        },
         update, 
         query, 
         init, 
@@ -64,11 +51,15 @@ use cts_lib::{
             LengthenLifetimeQuest
         },
         cycles_market::{
-            icrc1token_trade_contract as cm_icrc1token_trade_contract,
+            tc as cm_icrc1token_trade_contract,
             cm_main::Icrc1TokenTradeContract,
         },
-        cts::LengthenMembershipQuest,
+        cts::{
+            LengthenMembershipQuest,
+            UserAndCB,
+        }
     },
+    cts_cb_authorizations::is_cts_cb_authorization_valid,
     consts::{
         MiB,
         GiB,
@@ -94,6 +85,17 @@ use cts_lib::{
     icrc::{Tokens,IcrcId, BlockId},
     global_allocator_counter::get_allocated_bytes_count,
     stable_memory_tools::{self, MemoryId},
+};
+use candid::{
+    Principal,
+    CandidType,
+    Deserialize,
+    Nat,
+    utils::{
+        encode_one,
+        decode_one,
+        encode_args,
+    }
 };
 
 use serde::Serialize;
@@ -122,78 +124,9 @@ struct CyclesTransferOut {
     cycles_transfer_memo: CyclesTransferMemo,                           // save max 32-bytes of the memo, of a Blob or of a Text
     timestamp_nanos: u128, // time sent
     opt_cycles_transfer_call_error: Option<(u32/*reject_code*/, String/*reject_message*/)>, // None means the cycles_transfer-call replied. // save max 20-bytes of the string
-    fee_paid: u64 // cycles_transferrer_fee
 }
 
 // --------
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMCyclesPosition{
-    id: cm_icrc1token_trade_contract::PositionId,   
-    create_cycles_position_quest: cm_icrc1token_trade_contract::CreateCyclesPositionQuest,
-    create_position_fee: u64,
-    timestamp_nanos: u128,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMTokenPosition{
-    id: cm_icrc1token_trade_contract::PositionId,   
-    create_token_position_quest: cm_icrc1token_trade_contract::CreateTokenPositionQuest,
-    create_position_fee: u64,
-    timestamp_nanos: u128,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMCyclesPositionPurchase{
-    cycles_position_id: cm_icrc1token_trade_contract::PositionId,
-    cycles_position_cycles_per_token_rate: cm_icrc1token_trade_contract::CyclesPerToken,
-    cycles_position_positor: Principal,
-    id: cm_icrc1token_trade_contract::PurchaseId,
-    cycles: Cycles,
-    purchase_position_fee: u64,
-    timestamp_nanos: u128,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMTokenPositionPurchase{
-    token_position_id: cm_icrc1token_trade_contract::PositionId,
-    token_position_cycles_per_token_rate: cm_icrc1token_trade_contract::CyclesPerToken,
-    token_position_positor: Principal,
-    id: cm_icrc1token_trade_contract::PurchaseId,
-    tokens: Tokens,
-    purchase_position_fee: u64,
-    timestamp_nanos: u128,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMTokenTransferOut{
-    tokens: Tokens,
-    token_ledger_transfer_fee: Tokens,
-    to: IcrcId,
-    block_height: Nat,
-    timestamp_nanos: u128,
-    transfer_token_balance_fee: u64
-}
-
-#[derive(Serialize, Deserialize)]
-struct CMCallsOut {
-    cm_cycles_positions: Vec<CMCyclesPosition>,
-    cm_token_positions: Vec<CMTokenPosition>,
-    cm_cycles_positions_purchases: Vec<CMCyclesPositionPurchase>,
-    cm_token_positions_purchases: Vec<CMTokenPositionPurchase>,    
-    cm_token_transfers_out: Vec<CMTokenTransferOut>,
-}
-impl CMCallsOut {
-    fn new() -> Self {
-        Self {
-            cm_cycles_positions: Vec::new(),
-            cm_token_positions: Vec::new(),
-            cm_cycles_positions_purchases: Vec::new(),
-            cm_token_positions_purchases: Vec::new(),    
-            cm_token_transfers_out: Vec::new(),
-        }
-    }
-}
 
 
 #[derive(CandidType, Serialize, Deserialize)]
@@ -259,13 +192,11 @@ impl CMMessageLogs {
 
 #[derive(Serialize, Deserialize)]
 struct CMTradeContractLogs {
-    cm_calls_out: CMCallsOut,
     cm_message_logs: CMMessageLogs,
 }
 impl CMTradeContractLogs {
     fn new() -> Self {
         Self {
-            cm_calls_out: CMCallsOut::new(),
             cm_message_logs: CMMessageLogs::new(),
         }
     }
@@ -300,9 +231,9 @@ struct CBData {
     user_id: Principal,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
-    cycles_transferrer_canisters: Vec<Principal>,
     user_data: UserData,
     cycles_transfers_id_counter: u128,
+    cts_cb_authorization: Vec<u8>,
 }
 
 impl CBData {
@@ -314,12 +245,13 @@ impl CBData {
             user_id: Principal::from_slice(&[]),
             storage_size_mib: 0,       // memory-allocation/2 // is with the set in the canister_init // in the mib // starting at a 50mib-storage with a 1-year-user_canister_lifetime with a 5T-cycles-ctsfuel-balance at a cost: 10T-CYCLES   // this value is half of the user-canister-memory_allocation. for the upgrades.  
             lifetime_termination_timestamp_seconds: 0,
-            cycles_transferrer_canisters: Vec::new(),
             user_data: UserData::new(),
-            cycles_transfers_id_counter: 0,        
+            cycles_transfers_id_counter: 0,  
+            cts_cb_authorization: Vec::new()      
         }
     }
 }
+
 
 // ------ old cb data -----------
 
@@ -333,7 +265,7 @@ use cts_lib::{
         IcpBlockHeight,
     }
 };
-use cts_lib::types::cycles_market::icrc1token_trade_contract::{PositionId, PurchaseId};
+use cts_lib::types::cycles_market::tc::{PositionId, PurchaseId};
 
 #[derive(CandidType, Deserialize)]
 struct OldCMCyclesPosition{
@@ -541,11 +473,6 @@ struct OldCBData {
 // ------------------------------
 
 
-pub const CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE: Cycles = 20_000_000_000;
-
-pub const CYCLES_MARKET_CREATE_POSITION_FEE: Cycles = 50_000_000_000;
-pub const CYCLES_MARKET_PURCHASE_POSITION_FEE: Cycles = 50_000_000_000;
-pub const CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE: Cycles = 50_000_000_000;
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 10_000_000_000;
@@ -576,7 +503,6 @@ thread_local! {
 
     // not save in a CBData
     static MEMORY_SIZE_AT_THE_START: Cell<usize> = Cell::new(0); 
-    static CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER: Cell<usize> = Cell::new(0);
     static STOP_CALLS: Cell<bool> = Cell::new(false);
     static STATE_SNAPSHOT_CB_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
 
@@ -600,9 +526,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
             user_id:                                                user_canister_init.user_id,
             storage_size_mib:                                       user_canister_init.storage_size_mib,
             lifetime_termination_timestamp_seconds:                 user_canister_init.lifetime_termination_timestamp_seconds,
-            cycles_transferrer_canisters:                           user_canister_init.cycles_transferrer_canisters,
-            user_data:                                              UserData::new(),
-            cycles_transfers_id_counter:                            0u128    
+            ..CBData::new()    
         };
         
         cb_data.user_data.cycles_balance = user_canister_init.start_with_user_cycles_balance;
@@ -644,7 +568,6 @@ fn post_upgrade() {
         user_id: old_cb_data.user_id,
         storage_size_mib: old_cb_data.storage_size_mib,
         lifetime_termination_timestamp_seconds: old_cb_data.lifetime_termination_timestamp_seconds,
-        cycles_transferrer_canisters: old_cb_data.cycles_transferrer_canisters,
         user_data: UserData{
             cycles_balance: old_cb_data.user_data.cycles_balance,
             cycles_transfers_in: old_cb_data.user_data.cycles_transfers_in,
@@ -661,6 +584,7 @@ fn post_upgrade() {
             ].into() // HashMap<Icrc1TokenTradeContract, CMTradeContractLogs>,
         },
         cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
+        cts_cb_authorization: Vec::new()
     };
 
     with_mut(&CB_DATA, |cb_data| {
@@ -681,12 +605,16 @@ fn post_upgrade() {
 // this is onli for ingress-messages (calls that come from outside the network)
 #[no_mangle]
 fn canister_inspect_message() {
-    use cts_lib::ic_cdk::api::call::{/*method_name, */accept_message};
+    use cts_lib::ic_cdk::api::call::{method_name, accept_message};
     
-    if caller() != user_id() {
-        trap("caller must be the owner");
+    let public_methods = [
+        "get_cts_cb_auth",  
+    ];
+    if public_methods.contains(&&method_name()[..]) == false {
+        if caller() != user_id() {
+            trap("caller must be the owner");
+        }
     }
-    
     accept_message();
 }
 
@@ -708,29 +636,6 @@ fn new_cycles_transfer_id(id_counter: &mut u128) -> u128 {
     id
 }
 
-// round-robin on the cycles-transferrer-canisters
-fn next_cycles_transferrer_canister_round_robin() -> Option<Principal> {
-    with(&CB_DATA, |cb_data| { 
-        let ctcs: &Vec<Principal> = &(cb_data.cycles_transferrer_canisters);
-        match ctcs.len() {
-            0 => None,
-            1 => Some(ctcs[0]),
-            l => {
-                CYCLES_TRANSFERRER_CANISTERS_ROUND_ROBIN_COUNTER.with(|ctcs_rrc| { 
-                    let c_i: usize = ctcs_rrc.get();                    
-                    if c_i <= l-1 {
-                        let ctc_id: Principal = ctcs[c_i];
-                        if c_i == l-1 { ctcs_rrc.set(0); } else { ctcs_rrc.set(c_i + 1); }
-                        Some(ctc_id)
-                    } else {
-                        ctcs_rrc.set(1); // we check before that the len of the ctcs is at least 2 in the first match                         
-                        Some(ctcs[0])
-                    } 
-                })
-            }
-        } 
-    })
-}
     
 // compute the size of a CyclesTransferIn and of a CyclesTransferOut, check the length of both vectors, and compute the current storage usage. 
 fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
@@ -747,16 +652,6 @@ fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
             .values()
             .fold(0, |c, cm_trade_contract_logs| { 
                 c
-                +
-                cm_trade_contract_logs.cm_calls_out.cm_cycles_positions.len() * std::mem::size_of::<CMCyclesPosition>()
-                +
-                cm_trade_contract_logs.cm_calls_out.cm_token_positions.len() * std::mem::size_of::<CMTokenPosition>()
-                +
-                cm_trade_contract_logs.cm_calls_out.cm_cycles_positions_purchases.len() * std::mem::size_of::<CMCyclesPositionPurchase>()
-                +
-                cm_trade_contract_logs.cm_calls_out.cm_token_positions_purchases.len() * std::mem::size_of::<CMTokenPositionPurchase>()
-                +
-                cm_trade_contract_logs.cm_calls_out.cm_token_transfers_out.len() * std::mem::size_of::<CMTokenTransferOut>()
                 +
                 cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
                 +
@@ -848,16 +743,6 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
 
     maintenance_check();
 
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        if caller() == cts_id() {
-            with_mut(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_accept128(msg_cycles_available128())); });
-            reply::<()>(());
-            return;            
-        }
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-
     if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CyclesTransferIn>() as u128 + 32 {
         if caller() == cts_id() {
             with_mut(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_accept128(msg_cycles_available128())); });
@@ -878,13 +763,8 @@ pub fn cycles_transfer() { // (ct: CyclesTransfer) -> ()
     let cycles_cept: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
     let (ct_memo, by_the_canister): (CyclesTransferMemo, Principal) = {
-        if with(&CB_DATA, |cb_data| { cb_data.cycles_transferrer_canisters.contains(&caller()) }) { 
-            let (ct,): (cycles_transferrer::CyclesTransfer,) = arg_data::<(cycles_transferrer::CyclesTransfer,)>();
-            (ct.memo, ct.original_caller.unwrap_or(caller()))
-        } else {
-            let (ct,): (CyclesTransfer,) = arg_data::<(CyclesTransfer,)>();
-            (ct.memo, caller())    
-        }
+        let (ct,): (CyclesTransfer,) = arg_data::<(CyclesTransfer,)>();
+        (ct.memo, caller())    
     };
     
     with_mut(&CB_DATA, |cb_data| {
@@ -972,17 +852,22 @@ pub struct UserTransferCyclesQuest {
 
 #[derive(CandidType)]
 pub enum UserTransferCyclesError {
-    CTSFuelTooLow,
     MemoryIsFull,
     InvalidCyclesTransferMemoSize{max_size_bytes: u128},
     InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: Cycles },
-    CyclesBalanceTooLow { cycles_balance: Cycles, cycles_transferrer_transfer_cycles_fee: Cycles },
-    CyclesTransferrerTransferCyclesError(cycles_transferrer::TransferCyclesError),
-    CyclesTransferrerTransferCyclesCallError((u32, String))
+    CyclesBalanceTooLow { cycles_balance: Cycles },
+    CyclesTransferCallPerformError(CallError)
+}
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct UserTransferCyclesSponse {
+    cycles_refund: Cycles,
+    cycles_transfer_id: u128,
+    opt_cycles_transfer_call_error: Option<CallError>,
 }
 
 #[update]
-pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, UserTransferCyclesError> {
+pub async fn transfer_cycles(mut q: UserTransferCyclesQuest, (user_of_the_cb, cts_cb_auth): (Principal/*user_id*/, Vec<u8>/*cts_cb_authorization*/)) -> Result<UserTransferCyclesSponse, UserTransferCyclesError> {
 
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
@@ -990,8 +875,12 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
     
     maintenance_check();
     
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 15_000_000_000 {
-        return Err(UserTransferCyclesError::CTSFuelTooLow);
+    if is_cts_cb_authorization_valid(
+        cts_id(),
+        UserAndCB{user_id: user_of_the_cb, cb_id: q.for_the_canister },
+        cts_cb_auth,
+    ) == false {
+        trap("For the now, must transfer cycles with the CTS cycles-banks.");
     }
     
     if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CyclesTransferOut>() as u128 + 32 + 40 {
@@ -1002,8 +891,8 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
         return Err(UserTransferCyclesError::InvalidTransferCyclesAmount{ minimum_user_transfer_cycles: MINIMUM_USER_TRANSFER_CYCLES });
     }
     
-    if q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE > with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) {
-        return Err(UserTransferCyclesError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_transferrer_transfer_cycles_fee: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE });
+    if q.cycles > with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) {
+        return Err(UserTransferCyclesError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) });
     }
     
     // check memo size
@@ -1026,71 +915,60 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest) -> Result<u128, Use
         CyclesTransferMemo::Int(_int) => {} 
     }
  
+    let mut call_future = call_raw128(
+        q.for_the_canister,
+        "cycles_transfer",
+        encode_one(&CyclesTransfer{ memo: q.cycles_transfer_memo.clone() }).unwrap(),
+        q.cycles
+    );
+    
+    if let Poll::Ready(x) = poll!(&mut call_future) {
+        return Err(UserTransferCyclesError::CyclesTransferCallPerformError(call_error_as_u32_and_string(x.unwrap_err())));
+    }
+    
     let cycles_transfer_id: u128 = with_mut(&CB_DATA, |cb_data| {
         let cycles_transfer_id: u128 = new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter);        
         // take the user-cycles before the transfer, and refund in the callback 
-        cb_data.user_data.cycles_balance -= q.cycles + CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE;
+        cb_data.user_data.cycles_balance -= q.cycles;
         cb_data.user_data.cycles_transfers_out.push(
             CyclesTransferOut{
                 id: cycles_transfer_id,
                 for_the_canister: q.for_the_canister,
                 cycles_sent: q.cycles,
                 cycles_refunded: None,   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
-                cycles_transfer_memo: q.cycles_transfer_memo.clone(),
+                cycles_transfer_memo: q.cycles_transfer_memo,
                 timestamp_nanos: time_nanos(), // time sent
                 opt_cycles_transfer_call_error: None,
-                fee_paid: CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE as u64
             }
         );
         cycles_transfer_id
     });
-    
-    let q_cycles: Cycles = q.cycles; // copy cause want the value to stay on the stack for the closure to run with it. after the q is move into the candid params
-    let cycles_transferrer_transfer_cycles_fee: Cycles = CYCLES_TRANSFERRER_TRANSFER_CYCLES_FEE; // copy the value to stay on the stack for the closure to run with it.
-    
-    let cancel_user_transfer_cycles = || {
-        with_mut(&CB_DATA, |cb_data| {
-            cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(q_cycles + cycles_transferrer_transfer_cycles_fee);
-            
-            match cb_data.user_data.cycles_transfers_out.iter().rposition(
-                |cycles_transfer_out: &CyclesTransferOut| { 
-                    (*cycles_transfer_out).id == cycles_transfer_id
-                }
-            ) {
-                Some(i) => { cb_data.user_data.cycles_transfers_out.remove(i); },
-                None => {}
-            }
-        });
-    };
         
-    match call_with_payment128::<(cycles_transferrer::TransferCyclesQuest,), (Result<(), cycles_transferrer::TransferCyclesError>,)>(
-        next_cycles_transferrer_canister_round_robin().expect("0 known cycles transferrer canisters.")/*before the first await*/,
-        "transfer_cycles",
-        (cycles_transferrer::TransferCyclesQuest{
-            user_cycles_transfer_id: cycles_transfer_id,
-            for_the_canister: q.for_the_canister,
-            cycles: q.cycles,
-            cycles_transfer_memo: q.cycles_transfer_memo
-        },),
-        q.cycles + cycles_transferrer_transfer_cycles_fee
-    ).await { // it is possible that this callback will be called after the cycles_transferrer calls the cycles_transferrer_user_transfer_cycles_callback
-        Ok((cycles_transferrer_transfer_cycles_sponse,)) => match cycles_transferrer_transfer_cycles_sponse {
-            Ok(()) => return Ok(cycles_transfer_id), // Ok here means the cycles-transfer call will either be delivered, returned because the destination canister does not exist or returned because of an out of cycles condition.
-            Err(cycles_transferrer_transfer_cycles_error) => {
-                cancel_user_transfer_cycles();
-                return Err(UserTransferCyclesError::CyclesTransferrerTransferCyclesError(cycles_transferrer_transfer_cycles_error));
-            }
-        }, 
-        Err(cycles_transferrer_transfer_cycles_call_error) => {
-            cancel_user_transfer_cycles();
-            return Err(UserTransferCyclesError::CyclesTransferrerTransferCyclesCallError((cycles_transferrer_transfer_cycles_call_error.0 as u32, cycles_transferrer_transfer_cycles_call_error.1)));
-        }
-    }
+    let call_result: CallResult<Vec<u8>> = call_future.await;
     
+    let cycles_refund: Cycles = msg_cycles_refunded128(); 
+    
+    let opt_cycles_transfer_call_error: Option<CallError> = call_result.err().map(call_error_as_u32_and_string);
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_refund);
+        
+        if let Ok(i) = cb_data.user_data.cycles_transfers_out.binary_search_by_key(&cycles_transfer_id, |ct_out| ct_out.id) {
+            let ct_out: &mut CyclesTransferOut = &mut cb_data.user_data.cycles_transfers_out[i];
+            ct_out.cycles_refunded = Some(cycles_refund);
+            ct_out.opt_cycles_transfer_call_error = opt_cycles_transfer_call_error.clone();
+        };
+    });    
+    
+    Ok(UserTransferCyclesSponse {
+        cycles_refund,
+        cycles_transfer_id,
+        opt_cycles_transfer_call_error,
+    })
 }
 
 
-
+/*
 // no check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method. set on the side the ctsfuel for the callback?
 
 #[update]
@@ -1113,7 +991,7 @@ pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::Transf
     });
 
 }
-
+*/
 
 
 
@@ -1311,7 +1189,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
 
 
 
-
+/*
 
 #[derive(CandidType)]
 pub enum UserCMCreateCyclesPositionError {
@@ -1678,7 +1556,7 @@ pub async fn cm_purchase_token_position(icrc1token_trade_contract: Icrc1TokenTra
     }
 
 }
-
+*/
 
 // ---------------------
 
@@ -1727,7 +1605,6 @@ pub async fn cm_void_position(icrc1token_trade_contract: Icrc1TokenTradeContract
 pub enum UserCMTransferTokenBalanceError {
     CTSFuelTooLow,
     MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_transfer_token_balance_fee: Cycles },
     CyclesMarketTransferTokenBalanceCallError((u32, String)),
     CyclesMarketTransferTokenBalanceCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
     CyclesMarketTransferTokenBalanceError(cm_icrc1token_trade_contract::TransferTokenBalanceError)
@@ -1743,19 +1620,11 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: Icrc1TokenTrad
         return Err(UserCMTransferTokenBalanceError::CTSFuelTooLow);
     }
 
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMTokenTransferOut>() as u128 {
-        return Err(UserCMTransferTokenBalanceError::MemoryIsFull);
-    }
-
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE {
-        return Err(UserCMTransferTokenBalanceError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_transfer_token_balance_fee: CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE });
-    }
-    
     let mut call_future = call_raw128(
         icrc1token_trade_contract.trade_contract_canister_id,
         "transfer_token_balance",
-        &encode_one(&q).unwrap(),
-        CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE
+        encode_one(&q).unwrap(),
+        0,
     );
     
     if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
@@ -1764,32 +1633,16 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: Icrc1TokenTrad
     }
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE);
         cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
 
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
-    });
 
     match call_result {
         Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::TransferTokenBalanceResult>(&sponse_bytes) {
             Ok(cm_transfer_token_balance_result) => match cm_transfer_token_balance_result {
                 Ok(block_height) => {
-                    with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_transfers_out.push(
-                            CMTokenTransferOut{
-                                tokens: q.tokens,
-                                token_ledger_transfer_fee: q.token_fee,
-                                to: q.to,
-                                block_height: block_height.clone(),
-                                timestamp_nanos: time_nanos(),
-                                transfer_token_balance_fee: CYCLES_MARKET_TRANSFER_TOKEN_BALANCE_FEE as u64
-                            }
-                        );
-                    });
                     Ok(block_height)
                 },
                 Err(cm_transfer_token_balance_error) => {
@@ -1932,105 +1785,6 @@ pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::C
 
 
 
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_cycles_positions(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_cycles_positions).unwrap_or(&vec![])),));
-    });    
-}
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_positions(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_positions).unwrap_or(&vec![])),));
-    });
-}
-
-#[query(manual_reply = true)]
-pub fn download_cm_cycles_positions_purchases(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_cycles_positions_purchases).unwrap_or(&vec![])),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_positions_purchases(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_positions_purchases).unwrap_or(&vec![])),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_token_transfers_out(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_calls_out.cm_token_transfers_out).unwrap_or(&vec![])),));
-    });
-}
-
-
-
-// -----------------
-
 #[query(manual_reply = true)]
 pub fn download_cm_message_cycles_position_purchase_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
     if caller() != user_id() {
@@ -2159,31 +1913,22 @@ pub struct UserUCMetrics<'a> {
     ctsfuel_balance: CTSFuel,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
-    cycles_transferrer_canisters: &'a Vec<Principal>,
     user_id: Principal,
     user_canister_creation_timestamp_nanos: u128,
     storage_usage: u128,
     cycles_transfers_id_counter: u128,
     cycles_transfers_in_len: u128,
     cycles_transfers_out_len: u128,
-    cm_trade_contracts_logs_lengths: HashMap<&'a Icrc1TokenTradeContract, CMTradeContractLogsLengths>,    
-    
+    cm_trade_contracts_logs_lengths: HashMap<&'a Icrc1TokenTradeContract, CMTradeContractLogsLengths>,   
+    cts_cb_authorization: bool, 
 }
 
 
 #[derive(CandidType)]
 pub struct CMTradeContractLogsLengths {
-    cm_calls_out_lengths: CMCallsOutLengths,
     cm_message_logs_lengths: CMMessageLogsLengths,
 }
-#[derive(CandidType)]
-pub struct CMCallsOutLengths {
-    cm_cycles_positions_length: u64,
-    cm_token_positions_length: u64,
-    cm_cycles_positions_purchases_length: u64,
-    cm_token_positions_purchases_length: u64,    
-    cm_token_transfers_out_length: u64,
-}
+
 #[derive(CandidType)]
 pub struct CMMessageLogsLengths{
     cm_message_cycles_position_purchase_positor_logs_length: u64,
@@ -2196,13 +1941,6 @@ pub struct CMMessageLogsLengths{
 
 fn cm_trade_contract_logs_lengths(cm_trade_contract_logs: &CMTradeContractLogs) -> CMTradeContractLogsLengths {
     CMTradeContractLogsLengths{
-        cm_calls_out_lengths: CMCallsOutLengths{
-            cm_cycles_positions_length: cm_trade_contract_logs.cm_calls_out.cm_cycles_positions.len() as u64,
-            cm_token_positions_length: cm_trade_contract_logs.cm_calls_out.cm_token_positions.len() as u64,
-            cm_cycles_positions_purchases_length: cm_trade_contract_logs.cm_calls_out.cm_cycles_positions_purchases.len() as u64,
-            cm_token_positions_purchases_length: cm_trade_contract_logs.cm_calls_out.cm_token_positions_purchases.len() as u64,    
-            cm_token_transfers_out_length: cm_trade_contract_logs.cm_calls_out.cm_token_transfers_out.len() as u64,
-        },
         cm_message_logs_lengths: CMMessageLogsLengths{
             cm_message_cycles_position_purchase_positor_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() as u64,
             cm_message_cycles_position_purchase_purchaser_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() as u64,
@@ -2228,7 +1966,6 @@ pub fn metrics() { //-> UserUCMetrics {
             ctsfuel_balance: ctsfuel_balance(cb_data),
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,
-            cycles_transferrer_canisters: &(cb_data.cycles_transferrer_canisters),
             user_id: cb_data.user_id,
             user_canister_creation_timestamp_nanos: cb_data.user_canister_creation_timestamp_nanos,
             storage_usage: calculate_current_storage_usage(cb_data),
@@ -2236,6 +1973,7 @@ pub fn metrics() { //-> UserUCMetrics {
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
             cm_trade_contracts_logs_lengths: cb_data.user_data.cm_trade_contracts.iter().map(|(k,v)| { (k, cm_trade_contract_logs_lengths(v)) }).collect(),
+            cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0
         },));
     });
 }
@@ -2267,7 +2005,7 @@ pub async fn user_lengthen_membership_cb_cycles_payment(q: LengthenMembershipQue
         call_raw128(
             cb_data.cts_id,
             "lengthen_membership_cb_cycles_payment",
-            &encode_args((q, cb_data.user_id)).unwrap(),
+            encode_args((q, cb_data.user_id)).unwrap(),
             msg_cycles
         )
     });
@@ -2305,181 +2043,38 @@ pub fn cts_update_lifetime_termination_timestamp_seconds(new_lifetime_terminatio
 }
 
 
-/*
-
-#[derive(CandidType)]
-pub enum UserCyclesBalanceForTheCTSFuelError {
-    MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: Cycles },
-    CyclesBalanceTooLow { cycles_balance: Cycles }
-}
-
+// make pub fn for the user for the upload of the cb-auth. check the auth validity before cepting it. if valid auth is in the cb, no need to accept a new one.
 #[update]
-pub fn cycles_balance_for_the_ctsfuel(cycles_for_the_ctsfuel: Cycles) -> Result<(), UserCyclesBalanceForTheCTSFuelError> {
-    if caller() != user_id() {
-        trap("caller must be the user for this method.");
+pub fn user_upload_cts_cb_authorization(auth: Vec<u8>) {
+    if caller() != with(&CB_DATA, |cb_data| cb_data.user_id) {
+        trap("caller not authorized");
     }
-    
-    maintenance_check();
-    
-    if cycles_for_the_ctsfuel < MINIMUM_CYCLES_FOR_THE_CTSFUEL {
-        return Err(UserCyclesBalanceForTheCTSFuelError::MinimumCyclesForTheCTSFuel{ minimum_cycles_for_the_ctsfuel: MINIMUM_CYCLES_FOR_THE_CTSFUEL });
-    }
-    
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < cycles_for_the_ctsfuel {
-        return Err(UserCyclesBalanceForTheCTSFuelError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) });        
-    } 
-    
+    // if current auth, trap,
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance -= cycles_for_the_ctsfuel;
-        // cycles-transfer-out log? what if storage is full and ctsfuel is empty?
-    });
-    
-    Ok(())
-}
-
-
-
-// ---------------------------------------------
-
-
-
-#[derive(CandidType)]
-pub enum LengthenLifetimeError {
-    MinimumSetLifetimeTerminationTimestampSeconds(u128),
-    CyclesBalanceTooLow{ cycles_balance: Cycles, lengthen_cost_cycles: Cycles },
-    CBSMCallError((u32, String))
-}
-
-#[update]
-pub async fn lengthen_lifetime(q: LengthenLifetimeQuest) -> Result<u128/*new-lifetime-termination-timestamp-seconds*/, LengthenLifetimeError> {
-    if caller() != user_id() {
-        trap("caller must be the user for this method.");
-    }
-    
-    maintenance_check();
-
-    let minimum_set_lifetime_termination_timestamp_seconds: u128 = with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_add(MINIMUM_LENGTHEN_LIFETIME_SECONDS).unwrap_or_else(|| { trap("time is not support at the moment") });
-    if q.set_lifetime_termination_timestamp_seconds < minimum_set_lifetime_termination_timestamp_seconds {
-        return Err(LengthenLifetimeError::MinimumSetLifetimeTerminationTimestampSeconds(minimum_set_lifetime_termination_timestamp_seconds));
-    }
-
-    let lengthen_cost_cycles: Cycles = {
-        ( q.set_lifetime_termination_timestamp_seconds - with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }) )
-        * cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(with(&CB_DATA, |cb_data| { cb_data.storage_size_mib })) // canister-memory-allocation in the mib 
-        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024/*network storage charge per MiB per second*/
-    };
-    
-    if lengthen_cost_cycles > with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) {
-        return Err(LengthenLifetimeError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), lengthen_cost_cycles });
-    }
-    
-    with_mut(&CB_DATA, |cb_data| {    
-        cb_data.user_data.cycles_balance -= lengthen_cost_cycles; 
-    });
-    
-    match call::<(&LengthenLifetimeQuest,),()>(
-        with(&CB_DATA, |cb_data| { cb_data.cbsm_id }),
-        "cb_lengthen_lifetime",
-        (&q,),
-    ).await {
-        Ok(()) => {
-            with_mut(&CB_DATA, |cb_data| {    
-                cb_data.lifetime_termination_timestamp_seconds = q.set_lifetime_termination_timestamp_seconds;
-                Ok(cb_data.lifetime_termination_timestamp_seconds)
-            })                    
-        },
-        Err(call_error) => {
-            with_mut(&CB_DATA, |cb_data| {    
-                cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(lengthen_cost_cycles); 
-            });
-            return Err(LengthenLifetimeError::CBSMCallError((call_error.0 as u32, call_error.1)));
+        if cb_data.cts_cb_authorization.len() != 0 {
+            trap("Already with an authorization.")
         }
-    }
-    
-}
-
-
-
-// ---------------------------
-
-#[derive(CandidType, Deserialize)]
-pub struct UserChangeStorageSizeQuest {
-    new_storage_size_mib: u128
-}
-
-#[derive(CandidType)]
-pub enum UserChangeStorageSizeMibError {
-    NewStorageSizeMibTooLow{ minimum_new_storage_size_mib: u128 },
-    NewStorageSizeMibTooHigh{ maximum_new_storage_size_mib: u128 },
-    CyclesBalanceTooLow{ cycles_balance: Cycles, new_storage_size_mib_cost_cycles: Cycles },
-    ManagementCanisterUpdateSettingsCallError((u32, String))
-}
-
-#[update]
-pub async fn change_storage_size(q: UserChangeStorageSizeQuest) -> Result<(), UserChangeStorageSizeMibError> {
-    if caller() != user_id() {
-        trap("caller must be the user for this method.");
-    }
-    
-    let minimum_new_storage_size_mib: u128 = with(&CB_DATA, |cb_data| { cb_data.storage_size_mib }) + 10; 
-    
-    if q.new_storage_size_mib < minimum_new_storage_size_mib  {
-        return Err(UserChangeStorageSizeMibError::NewStorageSizeMibTooLow{ minimum_new_storage_size_mib }); 
-    };
-    
-    if q.new_storage_size_mib > MAXIMUM_STORAGE_SIZE_MiB {
-        return Err(UserChangeStorageSizeMibError::NewStorageSizeMibTooHigh{ maximum_new_storage_size_mib: MAXIMUM_STORAGE_SIZE_MiB });     
-    }
-    
-    let new_storage_size_mib_cost_cycles: Cycles = {
-        ( cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(q.new_storage_size_mib) - cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(with(&CB_DATA, |cb_data| { cb_data.storage_size_mib })) ) // grow canister-memory-allocation in the mib 
-        * with(&CB_DATA, |cb_data| { cb_data.lifetime_termination_timestamp_seconds }).checked_sub(time_seconds()).unwrap_or_else(|| { trap("user-contract-lifetime is with the termination.") })
-        * NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES / 1024 /*network storage charge per MiB per second*/
-    };
-    
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < new_storage_size_mib_cost_cycles {
-        return Err(UserChangeStorageSizeMibError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), new_storage_size_mib_cost_cycles });
-    }
-
-    // take the cycles before the .await and if error after here, refund the cycles
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance -= new_storage_size_mib_cost_cycles; 
-    });
-
-    match call::<(management_canister::ChangeCanisterSettingsRecord,), ()>(
-        MANAGEMENT_CANISTER_ID,
-        "update_settings",
-        (management_canister::ChangeCanisterSettingsRecord{
-            canister_id: ic_cdk::api::id(),
-            settings: management_canister::ManagementCanisterOptionalCanisterSettings{
-                controllers : None,
-                compute_allocation : None,
-                memory_allocation : Some((cts_lib::tools::cb_storage_size_mib_as_cb_network_memory_allocation_mib(q.new_storage_size_mib) * MiB as u128).into()),
-                freezing_threshold : None,
-            }
-        },)
-    ).await {
-        Ok(()) => {
-            with_mut(&CB_DATA, |cb_data| {
-                cb_data.storage_size_mib = q.new_storage_size_mib;
-            });
-            Ok(())
-        },
-        Err(call_error) => {
-            with_mut(&CB_DATA, |cb_data| {
-                cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(new_storage_size_mib_cost_cycles); 
-            });
-            return Err(UserChangeStorageSizeMibError::ManagementCanisterUpdateSettingsCallError((call_error.0 as u32, call_error.1)));
+        // check auth,
+        if is_cts_cb_authorization_valid(
+            cb_data.cts_id,
+            UserAndCB{ user_id: caller(), cb_id: ic_cdk::api::id() },
+            auth.clone(),
+        ) == false {
+            
         }
-    }
-
-
+        cb_data.cts_cb_authorization = auth;
+    });    
 }
 
-*/
 
+// anyone can call this method for the verification of the authentication of this cts-cycles-bank.
+#[query(manual_reply = true)]
+pub fn get_cts_cb_auth() { //-> (Principal/*UserId*/, Vec<u8>/*auth*/) {
+    with(&CB_DATA, |cb_data| {
+       reply((cb_data.user_id, &cb_data.cts_cb_authorization)); 
+    });
+}
 
-// -----------------------------------------------------------------------------------
 
 
 
@@ -2517,7 +2112,6 @@ pub struct CTSUCMetrics {
     stable_memory_size_bytes: u64,
     storage_size_mib: u128,
     lifetime_termination_timestamp_seconds: u128,
-    cycles_transferrer_canisters: Vec<Principal>,
     user_id: Principal,
     user_canister_creation_timestamp_nanos: u128,
     cycles_transfers_id_counter: u128,
@@ -2544,7 +2138,6 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
             stable_memory_size_bytes: ic_cdk::api::stable::stable64_size() * WASM_PAGE_SIZE_BYTES as u64,
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,
-            cycles_transferrer_canisters: cb_data.cycles_transferrer_canisters.clone(),
             user_id: cb_data.user_id,
             user_canister_creation_timestamp_nanos: cb_data.user_canister_creation_timestamp_nanos,
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,

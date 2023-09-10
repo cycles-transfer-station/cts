@@ -1,14 +1,14 @@
 
 use cts_lib::{
-    ic_certified_map::{self, RbTree, HashTree, AsHashTree, Hash},
+    ic_certified_map::{self, HashTree, AsHashTree},
     types::cts::{
-        CTS_CB_AUTHORIZATIONS_SEED,
         UserAndCB,
     },
+    cts_cb_authorizations::CTS_CB_AUTHORIZATIONS_SEED,
     tools::{
         time_nanos_u64,
         sha256,
-        localkey::refcell::{with,with_mut},
+        localkey::refcell::{with},
     },
     consts::{
         NANOS_IN_A_SECOND,
@@ -22,7 +22,6 @@ use crate::{
     CTS_DATA,
        
 };
-use std::collections::HashMap;
 use serde::Serialize;
 
 
@@ -43,7 +42,7 @@ pub fn put_cb_auth(cb_auths: &mut CBAuths, user_and_cb: UserAndCB) {
     cb_auths.put(
         sha256(&CTS_CB_AUTHORIZATIONS_SEED[..]),
         sha256(&user_and_cb.create_cts_cb_authorization_msg()[..]),
-        time_nanos_u64().saturating_add(NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) 
+        time_nanos_u64().saturating_add((NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64) 
     );
 }
 
@@ -81,7 +80,6 @@ pub fn make_file_certificate_header(file_name: &str) -> (String, String) {
 }
 
 pub fn get_cb_auth_(user_and_cb: UserAndCB) -> Vec<u8> {
-    use ic_certified_map::HashTree;
     with(&CTS_DATA, |cts_data| {
         let witness: HashTree = cts_data.cb_auths.witness(
             sha256(&CTS_CB_AUTHORIZATIONS_SEED[..]),
@@ -94,7 +92,7 @@ pub fn get_cb_auth_(user_and_cb: UserAndCB) -> Vec<u8> {
         let mut serializer = serde_cbor::ser::Serializer::new(vec![]);
         serializer.self_describe().unwrap();
         #[derive(Serialize)]
-        struct Auth{ certificate: Vec<u8>, tree: HashTree}
+        struct Auth<'a>{ certificate: Vec<u8>, tree: HashTree<'a>}
         Auth{
             certificate: data_certificate().unwrap_or_else(|| trap("can get cts_cb_auth in an unreplicated query call.")),
             tree: tree,

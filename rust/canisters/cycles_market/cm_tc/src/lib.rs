@@ -23,6 +23,7 @@ use cts_lib::{
         caller_is_controller_gaurd,
         call_error_as_u32_and_string,
     },
+    cts_cb_authorizations::is_cts_cb_authorization_valid,
     consts::{
         KiB,
         MiB,
@@ -106,8 +107,6 @@ use payouts::do_payouts;
 mod flush_logs;
 use flush_logs::FlushLogsStorageError;
 
-mod cts_cb_authorizations;
-use cts_cb_authorizations::is_cts_cb_authorization_valid;
 // ---------------
 
 // round robin on multiple cm_callers if the load gets heavy. scalable payouts!
@@ -613,6 +612,7 @@ pub fn buy_tokens(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Pr
     let caller: Principal = caller();
     
     if is_cts_cb_authorization_valid(
+        localkey::cell::get(&CTS_ID),        
         UserAndCB{
             user_id: user_of_the_cb,
             cb_id: caller,
@@ -769,6 +769,7 @@ pub async fn sell_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizati
     let caller: Principal = caller();
     
     if is_cts_cb_authorization_valid(
+        localkey::cell::get(&CTS_ID),
         UserAndCB{
             user_id: user_of_the_cb,
             cb_id: caller,

@@ -1,5 +1,6 @@
 
 [workspace]
+resolver = "2"
 
 members = [
     "cts_lib",
@@ -13,6 +14,7 @@ members = [
     "canisters/cycles_market/cm_trades_storage",
     "canisters/cycles_market/cm_positions_storage",
     "canisters/cycles_market/cm_caller",
+    "canister_authorizations",
 ]
 
 exclude = [
@@ -29,16 +31,14 @@ debug = false
 
 
 [workspace.dependencies]
-ic-cdk = "0.10.0" #{ git = "https://github.com/dfinity/cdk-rs.git", rev = "24bdf5ee37399c4e27ad329880c79733f6454f27" } #"0.10.0" #
-ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "5a8a90c1734b2802e2166ce14e73df75aac61a22" } # "0.3.0"
+ic-cdk = "0.10.0"
+ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "212b8c34ec17f849a256feedac9003c26a38e84b" } 
 ic-ledger-types = "0.7.0"
 candid = "0.9.5"
 sha2 = "0.9.1"
 serde = { version = "1.0.137", features = ["derive"] }
 serde_bytes = "0.11.6"
-icrc-ledger-types = { git = "https://github.com/dfinity/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
-#ic-icrc1-client-cdk = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
-#ic-icrc1 = { git = "https://github.com/dfinity/ic.git", rev = "290eabafc91fb37b89f64bcd98c6907d3e0ee405" }
+icrc-ledger-types = { git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
 ic-stable-structures = "0.5.3"
 rmp-serde = "1.1.1"
 futures = "0.3.23"

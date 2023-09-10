@@ -296,6 +296,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canister_authorizations"
+version = "0.1.0"
+dependencies = [
+ "candid 0.9.6",
+ "ic-crypto-iccsa",
+ "ic-types",
+]
+
+[[package]]
 name = "cbs_map"
 version = "0.1.0"
 dependencies = [
@@ -390,9 +399,7 @@ dependencies = [
  "cts_lib",
  "futures",
  "ic-cdk-timers",
- "ic-crypto-iccsa",
  "ic-stable-structures",
- "ic-types",
  "serde",
  "serde_bytes",
 ]
@@ -530,6 +537,7 @@ name = "cts_lib"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister_authorizations",
  "ic-cdk 0.10.0",
  "ic-certified-map",
  "ic-ledger-types",
@@ -944,7 +952,7 @@ dependencies = [
 [[package]]
 name = "ic-base-types"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base32",
  "byte-unit",
@@ -975,7 +983,7 @@ dependencies = [
 [[package]]
 name = "ic-btc-types-internal"
 version = "0.1.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "candid 0.9.6",
  "ic-btc-interface",
@@ -1055,7 +1063,7 @@ dependencies = [
 [[package]]
 name = "ic-certification"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "hex",
  "ic-crypto-tree-hash",
@@ -1069,8 +1077,8 @@ dependencies = [
 
 [[package]]
 name = "ic-certified-map"
-version = "0.3.4"
-source = "git+https://github.com/levifeldman/cdk-rs.git?rev=5a8a90c1734b2802e2166ce14e73df75aac61a22#5a8a90c1734b2802e2166ce14e73df75aac61a22"
+version = "0.4.0"
+source = "git+https://github.com/levifeldman/cdk-rs.git?rev=212b8c34ec17f849a256feedac9003c26a38e84b#212b8c34ec17f849a256feedac9003c26a38e84b"
 dependencies = [
  "serde",
  "serde_bytes",
@@ -1080,12 +1088,12 @@ dependencies = [
 [[package]]
 name = "ic-constants"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 
 [[package]]
 name = "ic-crypto-getrandom-for-wasm"
 version = "0.1.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "getrandom",
 ]
@@ -1093,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-iccsa"
 version = "0.1.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "ic-crypto-internal-basic-sig-iccsa",
 ]
@@ -1101,7 +1109,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-basic-sig-der-utils"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "hex",
  "ic-types",
@@ -1112,7 +1120,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-basic-sig-iccsa"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base64 0.11.0",
  "hex",
@@ -1131,7 +1139,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-bls12-381-type"
 version = "0.1.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "hex",
  "ic-crypto-getrandom-for-wasm",
@@ -1150,7 +1158,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-seed"
 version = "0.1.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "hex",
  "ic-crypto-sha2",
@@ -1164,7 +1172,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-sha2"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "openssl",
  "sha2 0.9.9",
@@ -1173,7 +1181,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-threshold-sig-bls12381"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base64 0.11.0",
  "cached",
@@ -1200,7 +1208,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-threshold-sig-bls12381-der"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "simple_asn1",
 ]
@@ -1208,7 +1216,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-internal-types"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "arrayvec",
  "base64 0.11.0",
@@ -1226,7 +1234,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-secrets-containers"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "serde",
  "zeroize",
@@ -1235,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-sha2"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "ic-crypto-internal-sha2",
 ]
@@ -1243,7 +1251,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-tree-hash"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "assert_matches",
  "ic-crypto-internal-types",
@@ -1257,7 +1265,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-utils-threshold-sig"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base64 0.11.0",
  "ic-crypto-internal-threshold-sig-bls12381",
@@ -1268,7 +1276,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-utils-threshold-sig-der"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base64 0.11.0",
  "ic-crypto-internal-threshold-sig-bls12381-der",
@@ -1279,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "ic-error-types"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "ic-utils",
  "serde",
@@ -1290,7 +1298,7 @@ dependencies = [
 [[package]]
 name = "ic-ic00-types"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "candid 0.9.6",
  "ic-base-types",
@@ -1324,7 +1332,7 @@ dependencies = [
 [[package]]
 name = "ic-protobuf"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "bincode",
  "candid 0.9.6",
@@ -1345,7 +1353,7 @@ checksum = "95dce29e3ceb0e6da3e78b305d95365530f2efd2146ca18590c0ef3aa6038568"
 [[package]]
 name = "ic-sys"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "hex",
  "ic-crypto-sha2",
@@ -1359,7 +1367,7 @@ dependencies = [
 [[package]]
 name = "ic-types"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base64 0.11.0",
  "bincode",
@@ -1395,7 +1403,7 @@ dependencies = [
 [[package]]
 name = "ic-utils"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "cvt",
  "hex",
@@ -1433,7 +1441,7 @@ dependencies = [
 [[package]]
 name = "icrc-ledger-types"
 version = "0.1.1"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "base32",
  "candid 0.9.6",
@@ -1881,7 +1889,7 @@ dependencies = [
 [[package]]
 name = "phantom_newtype"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "candid 0.9.6",
  "serde",
@@ -2502,7 +2510,7 @@ dependencies = [
 [[package]]
 name = "tree-deserializer"
 version = "0.8.0"
-source = "git+https://github.com/dfinity/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
+source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
 dependencies = [
  "ic-crypto-tree-hash",
  "leb128",

@@ -17,6 +17,4 @@ serde_bytes = { workspace = true }
 futures = { workspace = true }
 ic-stable-structures = { workspace = true }
 ic-cdk-timers = "0.1.2"
-ic-crypto-iccsa = { git = "https://github.com/dfinity/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
-ic-types = { git = "https://github.com/dfinity/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
 

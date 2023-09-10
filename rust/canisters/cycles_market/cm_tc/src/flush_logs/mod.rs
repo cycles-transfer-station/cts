@@ -2,12 +2,11 @@ use crate::{
     LogStorageData,
     StorageCanisterData,
 };
-use cm_storage_lib::{FlushQuest, /*FlushQuestForward,*/ FlushResult, FlushError};
+use cm_storage_lib::{FlushQuestForward, FlushResult, FlushError};
 use cts_lib::{
     types::{
         CallError,
         Cycles,
-        canister_code::CanisterCode,
     },
     consts::{MiB, KiB},
     tools::{
@@ -22,7 +21,7 @@ use cts_lib::{
     }
 };
 use serde::{Serialize, Deserialize};
-//use serde_bytes::Bytes;
+use serde_bytes::Bytes;
 use candid::{Principal, encode_one, decode_one};
 use std::{
     thread::LocalKey,
@@ -99,16 +98,18 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
         
         for chunk_size in chunk_sizes.into_iter() {
 
-            match call_raw128( // <(FlushQuestForward,), (FlushResult,)>
-                storage_canister_id,
-                "flush",
-                &encode_one(&
-                    FlushQuest{
-                        bytes: with(&LOG_STORAGE_DATA, |data| { (&data.storage_buffer[..chunk_size]).to_vec() }),
-                    }
-                ).unwrap(),
-                10_000_000_000 // put some cycles for the trade-log-storage-canister
-            ).await {            
+            match with(&LOG_STORAGE_DATA, |data| { 
+                call_raw128( // <(FlushQuestForward,), (FlushResult,)>
+                    storage_canister_id,
+                    "flush",
+                    encode_one(&
+                        FlushQuestForward{
+                            bytes: Bytes::new(&data.storage_buffer[..chunk_size]),
+                        }
+                    ).unwrap(),
+                    10_000_000_000 // put some cycles for the trade-log-storage-canister
+                )
+            }).await {            
                 Ok(sb) => match decode_one::<FlushResult>(&sb).unwrap() {
                     Ok(_flush_success) => {
                         with_mut(&LOG_STORAGE_DATA, |data| {
@@ -176,28 +177,25 @@ async fn create_storage_canister(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'sta
     };
     
     let mut log_size: u32 = 0;
-    let mut storage_canister_code: CanisterCode = CanisterCode::empty();
-    let mut init_arg: Vec<u8> = Vec::new();
+    let mut module_hash: [u8; 32] = [0; 32];
     
-    with(&LOG_STORAGE_DATA, |data| {
+    match with(&LOG_STORAGE_DATA, |data| {
         log_size = data.storage_canister_init.log_size;         
-        storage_canister_code = data.storage_canister_code.clone();
-        init_arg = encode_one(&data.storage_canister_init).map_err(|e| { CreateStorageCanisterError::InstallCodeCandidError(format!("{:?}", e)) })?;
-        Ok(())
-    })?;
-    match call_raw128(
-        Principal::management_canister(),
-        "install_code",
-        &encode_one(
-            ManagementCanisterInstallCodeQuest{
-                mode : ManagementCanisterInstallCodeMode::install,
-                canister_id : canister_id,
-                wasm_module : storage_canister_code.module(),
-                arg : &init_arg
-            }
-        ).map_err(|e| { CreateStorageCanisterError::InstallCodeCandidError(format!("{:?}", e)) })?,    
-        0
-    ).await {
+        module_hash = data.storage_canister_code.module_hash().clone();
+        Ok(call_raw128(
+            Principal::management_canister(),
+            "install_code",
+            encode_one(
+                ManagementCanisterInstallCodeQuest{
+                    mode : ManagementCanisterInstallCodeMode::install,
+                    canister_id : canister_id,
+                    wasm_module : data.storage_canister_code.module(),
+                    arg : &encode_one(&data.storage_canister_init).map_err(|e| { CreateStorageCanisterError::InstallCodeCandidError(format!("{:?}", e)) })?,
+                }
+            ).map_err(|e| { CreateStorageCanisterError::InstallCodeCandidError(format!("{:?}", e)) })?,    
+            0
+        ))        
+    })?.await {
         Ok(_) => {
             with_mut(&LOG_STORAGE_DATA, |data| {
                 data.storage_canisters.push(
@@ -208,7 +206,7 @@ async fn create_storage_canister(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'sta
                         is_full: false,
                         canister_id: canister_id,
                         creation_timestamp: time_nanos(),
-                        module_hash: storage_canister_code.module_hash().clone(),
+                        module_hash,
                     }
                 );
             });

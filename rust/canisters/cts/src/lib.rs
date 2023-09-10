@@ -28,9 +28,6 @@ use cts_lib::{
         cycles_bank::{
             CyclesBankInit,
         },
-        cycles_transferrer::{
-            CyclesTransferrerCanisterInit,
-        },
         cts::{LengthenMembershipQuest, UserAndCB},
     },
     management_canister::{
@@ -201,14 +198,11 @@ pub struct CTSData {
     cycles_market_main: Principal,
     cycles_bank_canister_code: CanisterCode,
     cbs_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
     frontcode_files: Files,
     frontcode_files_hashes: FilesHashes,
     cb_auths: CBAuths,
     cbs_maps: Vec<Principal>,
     create_new_cbs_map_lock: bool,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
     canisters_for_the_use: HashSet<Principal>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
     users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
@@ -222,14 +216,11 @@ impl CTSData {
             cycles_market_main: Principal::from_slice(&[]),
             cycles_bank_canister_code: CanisterCode::new(Vec::new()),
             cbs_map_canister_code: CanisterCode::new(Vec::new()),
-            cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
             frontcode_files_hashes: FilesHashes::new(),
             cb_auths: CBAuths::default(),
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
-            cycles_transferrer_canisters: Vec::new(),
-            cycles_transferrer_canisters_round_robin_counter: 0,
             canisters_for_the_use: HashSet::new(),
             users_purchase_cycles_bank: HashMap::new(),
             users_burn_icp_mint_cycles: HashMap::new(),
@@ -341,14 +332,11 @@ fn post_upgrade() {
         cycles_market_main: Principal::from_text("").unwrap(),
         cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
         cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
-        cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
         frontcode_files: old_cts_data.frontcode_files,
         frontcode_files_hashes,
         cb_auths: CBAuths::default(),
         cbs_maps: old_cts_data.cbs_maps,
         create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
-        cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
-        cycles_transferrer_canisters_round_robin_counter: old_cts_data.cycles_transferrer_canisters_round_robin_counter,
         canisters_for_the_use: old_cts_data.canisters_for_the_use,
         users_purchase_cycles_bank: old_cts_data.users_purchase_cycles_bank,
         users_burn_icp_mint_cycles: old_cts_data.users_burn_icp_mint_cycles,
@@ -974,7 +962,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             call_raw128( //::<(ManagementCanisterInstallCodeQuest,), ()>(
                 MANAGEMENT_CANISTER_ID,
                 "install_code",
-                &encode_one(&ManagementCanisterInstallCodeQuest {
+                encode_one(&ManagementCanisterInstallCodeQuest {
                     mode : ManagementCanisterInstallCodeMode::install,
                     canister_id : purchase_cycles_bank_data.cycles_bank_canister.unwrap(),
                     wasm_module : cts_data.cycles_bank_canister_code.module(),
@@ -984,7 +972,6 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                         user_id: user_id,
                         storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                         lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
-                        cycles_transferrer_canisters: with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.clone() }),
                         start_with_user_cycles_balance: 0
                     }).unwrap()
                 }).unwrap(),
@@ -1494,7 +1481,7 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
         let mut cycles_transfer_call_future = call_raw128(
             burn_icp_mint_cycles_data.cycles_bank_canister_id.unwrap(),
             "cycles_transfer",
-            &match encode_one(CyclesTransfer{
+            match encode_one(CyclesTransfer{
                 memo: CyclesTransferMemo::Text("CTS-BURN-ICP-MINT-CYCLES".to_string())
             }) {
                 Ok(b)=>b, 
@@ -2117,7 +2104,7 @@ async fn finish_lengthen_membership_update_cycles_bank_and_update_cbsm_(
                 call_raw128(
                     Principal::management_canister(),
                     "install_code",
-                    &encode_one(
+                    encode_one(
                         ManagementCanisterInstallCodeQuest {
                             mode : ManagementCanisterInstallCodeMode::install,
                             canister_id : mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.cycles_bank_canister_id,
@@ -2129,7 +2116,6 @@ async fn finish_lengthen_membership_update_cycles_bank_and_update_cbsm_(
                                     cbsm_id: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().1,
                                     storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                                     lifetime_termination_timestamp_seconds: mid_call_data.new_lifetime_termination_timestamp_seconds().unwrap(),
-                                    cycles_transferrer_canisters: cts_data.cycles_transferrer_canisters.clone(),
                                     start_with_user_cycles_balance: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.membership_termination_cb_uninstall_data.as_ref().unwrap().user_cycles_balance
                                 }
                             ).unwrap(),
@@ -2528,7 +2514,7 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, p
                     call_raw128(
                         MANAGEMENT_CANISTER_ID,
                         "install_code",
-                        &encode_one(&ManagementCanisterInstallCodeQuest{
+                        encode_one(&ManagementCanisterInstallCodeQuest{
                             mode : ManagementCanisterInstallCodeMode::upgrade,
                             canister_id : *umc_id/*copy*/,
                             wasm_module : cts_data.cbs_map_canister_code.module(),
@@ -2673,276 +2659,6 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Op
     }
 
 }
-
-
-
-
-
-
-// ----- CYCLES_TRANSFERRER_CANISTERS-METHODS --------------------------
-
-
-#[update]
-pub fn controller_put_ctc_code(canister_code: CanisterCode) -> () {
-    caller_is_controller_gaurd(&caller());
-    
-    if sha256(canister_code.module()) != *canister_code.module_hash() {
-        trap("Given canister_code.module_hash is different than the manual compute module hash");
-    }
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        cts_data.cycles_transferrer_canister_code = canister_code;
-    });
-}
-
-
-
-
-#[export_name = "canister_query controller_see_cycles_transferrer_canisters"]
-pub fn controller_see_cycles_transferrer_canisters() {
-    caller_is_controller_gaurd(&caller());
-    with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cycles_transferrer_canisters),));
-    });
-}
-
-
-
-
-#[update]
-pub fn controller_put_cycles_transferrer_canisters(mut put_cycles_transferrer_canisters: Vec<Principal>) {
-    
-    caller_is_controller_gaurd(&caller());
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        for put_cycles_transferrer_canister in put_cycles_transferrer_canisters.iter() {
-            if cts_data.cycles_transferrer_canisters.contains(put_cycles_transferrer_canister) {
-                trap(&format!("{:?} already in the cycles_transferrer_canisters list", put_cycles_transferrer_canister));
-            }
-        }
-        cts_data.cycles_transferrer_canisters.append(&mut put_cycles_transferrer_canisters);
-    });
-}
-
-
-
-#[derive(CandidType, Deserialize)]
-pub enum ControllerCreateNewCyclesTransferrerCanisterError {
-    GetNewCanisterError(GetNewCanisterError),
-    CyclesTransferrerCanisterCodeNotFound,
-    InstallCodeCallError((u32, String))
-}
-
-
-#[update]
-pub async fn controller_create_new_cycles_transferrer_canister() -> Result<Principal, ControllerCreateNewCyclesTransferrerCanisterError> {
-    caller_is_controller_gaurd(&caller());
-    
-    let new_cycles_transferrer_canister_id: Principal = match get_new_canister(
-        None,
-        3_000_000_000_000/*7_000_000_000_000*/
-    ).await {
-        Ok(new_canister_id) => new_canister_id,
-        Err(get_new_canister_error) => return Err(ControllerCreateNewCyclesTransferrerCanisterError::GetNewCanisterError(get_new_canister_error))
-    };
-    
-    // on errors after here make sure to put the new_canister into the NEW_CANISTERS list
-    
-    // install code
-    if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
-        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
-        return Err(ControllerCreateNewCyclesTransferrerCanisterError::CyclesTransferrerCanisterCodeNotFound);
-    }
-    
-    match call::<(ManagementCanisterInstallCodeQuest,), ()>(
-        MANAGEMENT_CANISTER_ID,
-        "install_code",
-        (ManagementCanisterInstallCodeQuest{
-            mode : ManagementCanisterInstallCodeMode::install,
-            canister_id : new_cycles_transferrer_canister_id,
-            wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canister_code.module() as *const Vec<u8> })},
-            arg : &encode_one(&CyclesTransferrerCanisterInit{
-                cts_id: id()
-            }).unwrap() // unwrap or return Err(candiderror); 
-        },)
-    ).await {
-        Ok(_) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.push(new_cycles_transferrer_canister_id); }); 
-            Ok(new_cycles_transferrer_canister_id)    
-        },
-        Err(install_code_call_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cycles_transferrer_canister_id); });
-            return Err(ControllerCreateNewCyclesTransferrerCanisterError::InstallCodeCallError((install_code_call_error.0 as u32, install_code_call_error.1)));
-        }
-    }
-      
-} 
-
-
-
-/*
-#[update]
-pub fn controller_take_away_cycles_transferrer_canisters(take_away_ctcs: Vec<Principal>) {
-    caller_is_controller_gaurd(&caller());
-    with_mut(&CYCLES_TRANSFERRER_CANISTERS, |ctcs| {
-        for take_away_ctc in take_away_ctcs.iter() {
-            match ctcs.binary_search(take_away_ctc) {
-                Ok(take_away_ctc_i) => {
-                    ctcs.remove(take_away_ctc_i);
-                },
-                Err(_) => {
-                    trap(&format!("{:?} is not one of the cycles_transferrer canisters in the CTS", take_away_ctc)); // rollback 
-                }
-            }
-        }
-    });    
-}
-*/
-
-/*
-
-#[update]
-pub async fn controller_see_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    caller_is_controller_gaurd(&caller());
-    
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
-    }
-    
-    match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_see_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
-        ()
-    ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
-        Err(call_error) => Err((call_error.0 as u32, call_error.1))
-    }
-
-}
-
-
-#[update]
-pub async fn controller_do_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    caller_is_controller_gaurd(&caller());
-    
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id))
-    }
-    
-    match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
-        ()
-    ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
-        Err(call_error) => Err((call_error.0 as u32, call_error.1))
-    }
-
-
-}
-
-
-#[update]
-pub async fn controller_drain_cycles_transferrer_canister_re_try_cycles_transferrer_user_transfer_cycles_callbacks(cycles_transferrer_canister_id: Principal) -> Result<Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>, (u32, String)> {
-    caller_is_controller_gaurd(&caller());
-    
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&cycles_transferrer_canister_id) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", cycles_transferrer_canister_id));
-    }
-    
-    match call::<(), (Vec<ReTryCyclesTransferrerUserTransferCyclesCallback>,)>(
-        cycles_transferrer_canister_id,
-        "cts_drain_re_try_cycles_transferrer_user_transfer_cycles_callbacks",
-        ()
-    ).await {
-        Ok((re_try_cycles_transferrer_user_transfer_cycles_callbacks,)) => Ok(re_try_cycles_transferrer_user_transfer_cycles_callbacks),
-        Err(call_error) => Err((call_error.0 as u32, call_error.1))
-    }
-
-}
-
-
-
-*/
-
-
-
-
-pub type ControllerUpgradeCTCError = (Principal, ControllerUpgradeCTCCallErrorType, (u32, String)); 
-
-#[derive(CandidType, Deserialize)]
-pub enum ControllerUpgradeCTCCallErrorType {
-    StopCanisterCallError,
-    UpgradeCodeCallError,
-    StartCanisterCallError
-}
-
-
-
-// we upgrade the ctcs one at a time because if one of them takes too long to stop, we dont want to wait for it to come back, we will stop_calls on the cycles_transferrer, wait an hour, uninstall, and reinstall
-#[update]
-pub async fn controller_upgrade_ctc(upgrade_ctc: Principal, post_upgrade_arg: Vec<u8>) -> Result<(), ControllerUpgradeCTCError> {
-    caller_is_controller_gaurd(&caller());
-
-    if with(&CTS_DATA, |cts_data| cts_data.cycles_transferrer_canister_code.module().len() == 0 ) {
-        trap("CYCLES_TRANSFERRER_CANISTER_CODE.module().len() is 0.")
-    }
-    
-    if with(&CTS_DATA, |cts_data| { cts_data.cycles_transferrer_canisters.contains(&upgrade_ctc) == false }) {
-        trap(&format!("cts cycles_transferrer_canisters does not contain: {:?}", upgrade_ctc));
-    }
-       
-    match call::<(CanisterIdRecord,), ()>(
-        MANAGEMENT_CANISTER_ID,
-        "stop_canister",
-        (CanisterIdRecord{ canister_id: upgrade_ctc },)
-    ).await {
-        Ok(_) => {},
-        Err(stop_canister_call_error) => {
-                
-            // set stop_calls_flag , wait an hour, then re-try the [re]maining re_try-cycles_transferrer_user_transfer_cycles_callbacks till 0 left, then uninstall the canister and install . 
-
-            
-            return Err((upgrade_ctc, ControllerUpgradeCTCCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
-        }
-    }
-
-    match with(&CTS_DATA, |cts_data| { 
-        call_raw128(
-            MANAGEMENT_CANISTER_ID,
-            "install_code",
-            &encode_one(&ManagementCanisterInstallCodeQuest{
-                mode : ManagementCanisterInstallCodeMode::upgrade,
-                canister_id : upgrade_ctc,
-                wasm_module : cts_data.cycles_transferrer_canister_code.module(),
-                arg : &post_upgrade_arg,
-            }).unwrap(),
-            0
-        )
-    }).await {
-        Ok(_) => {},
-        Err(upgrade_code_call_error) => {
-            return Err((upgrade_ctc, ControllerUpgradeCTCCallErrorType::UpgradeCodeCallError, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
-        }
-    }
-
-    match call::<(CanisterIdRecord,), ()>(
-        MANAGEMENT_CANISTER_ID,
-        "start_canister",
-        (CanisterIdRecord{ canister_id: upgrade_ctc },)
-    ).await {
-        Ok(_) => {},
-        Err(start_canister_call_error) => {
-            return Err((upgrade_ctc, ControllerUpgradeCTCCallErrorType::StartCanisterCallError, (start_canister_call_error.0 as u32, start_canister_call_error.1))); 
-        }
-    }
-    
-    Ok(())
-    
-}
-
-
-
 
 
 
@@ -3293,9 +3009,7 @@ pub struct CTSMetrics {
     canisters_for_the_use_count: u64,
     cbsm_code_hash: Option<[u8; 32]>,
     cycles_bank_canister_code_hash: Option<[u8; 32]>,
-    cycles_transferrer_canister_code_hash: Option<[u8; 32]>,
     cbsms_count: u64,
-    cycles_transferrer_canisters_count: u64,
     latest_known_cmc_rate: IcpXdrConversionRate,
     users_purchase_cycles_bank_count: u64,
     users_burn_icp_mint_cycles_count: u64,
@@ -3315,9 +3029,7 @@ pub fn controller_see_metrics() -> CTSMetrics {
             canisters_for_the_use_count: cts_data.canisters_for_the_use.len() as u64,
             cbsm_code_hash: if cts_data.cbs_map_canister_code.module().len() != 0 { Some(cts_data.cbs_map_canister_code.module_hash().clone()) } else { None },
             cycles_bank_canister_code_hash: if cts_data.cycles_bank_canister_code.module().len() != 0 { Some(cts_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
-            cycles_transferrer_canister_code_hash: if cts_data.cycles_transferrer_canister_code.module().len() != 0 { Some(cts_data.cycles_transferrer_canister_code.module_hash().clone()) } else { None },
             cbsms_count: cts_data.cbs_maps.len() as u64,
-            cycles_transferrer_canisters_count: cts_data.cycles_transferrer_canisters.len() as u64,
             latest_known_cmc_rate: LATEST_KNOWN_CMC_RATE.with(|cr| cr.get()),
             users_purchase_cycles_bank_count: cts_data.users_purchase_cycles_bank.len() as u64,
             users_burn_icp_mint_cycles_count: cts_data.users_burn_icp_mint_cycles.len() as u64,

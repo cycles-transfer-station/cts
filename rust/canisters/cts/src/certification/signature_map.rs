@@ -1,12 +1,18 @@
 //! taken out the internet-identity at git commit 6f234e6d6f6f78493072cdcbaa1da98011b06b9a
+//! added Serialize, and Deserialize
 //! https://github.com/dfinity/internet-identity/blob/6f234e6d6f6f78493072cdcbaa1da98011b06b9a/src/internet_identity/src/signature_map.rs#L1
 
 //! Maintains anchor signatures and expirations.
+
+
+#![allow(dead_code)]
+
 use super::ic_certified_map::{leaf_hash, AsHashTree, Hash, HashTree, RbTree};
 use std::borrow::Cow;
 use std::collections::BinaryHeap;
+use serde::{Serialize, Deserialize};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct Unit;
 
 impl AsHashTree for Unit {
@@ -18,7 +24,7 @@ impl AsHashTree for Unit {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 struct SigExpiration {
     expires_at: u64,
     seed_hash: Hash,
@@ -39,7 +45,7 @@ impl PartialOrd for SigExpiration {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct SignatureMap {
     certified_map: RbTree<Hash, RbTree<Hash, Unit>>,
     expiration_queue: BinaryHeap<SigExpiration>,

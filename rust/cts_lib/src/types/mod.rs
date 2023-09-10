@@ -153,8 +153,6 @@ pub mod cache {
 pub mod cts {
     use super::*;
     
-    pub const CTS_CB_AUTHORIZATIONS_SEED: &'static [u8; 21] = b"CTS-CB-AUTHORIZATIONS";
-    
     pub struct UserAndCB {
         pub user_id: Principal,
         pub cb_id: Principal
@@ -163,7 +161,6 @@ pub mod cts {
         pub fn create_cts_cb_authorization_msg(&self) -> Vec<u8> {
             let user_id_slice = self.user_id.as_slice();
             let cb_id_slice = self.cb_id.as_slice();
-            
             let mut v: Vec<u8> = Vec::new();
             v.push(user_id_slice.len() as u8);
             v.extend(user_id_slice);
@@ -256,7 +253,6 @@ pub mod cycles_bank {
         pub cbsm_id: Principal,
         pub storage_size_mib: u128,                         
         pub lifetime_termination_timestamp_seconds: u128,
-        pub cycles_transferrer_canisters: Vec<Principal>,
         pub start_with_user_cycles_balance: Cycles,
     }
     
