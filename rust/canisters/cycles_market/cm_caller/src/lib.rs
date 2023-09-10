@@ -15,14 +15,6 @@ use cts_lib::{
                 msg_cycles_refunded128    
             },
         },
-        export::{
-            Principal,
-            candid::{
-                self, 
-                CandidType, 
-                Deserialize,
-            },
-        },
         init,
         pre_upgrade,
         post_upgrade,
@@ -49,6 +41,12 @@ use cts_lib::{
         call_error_as_u32_and_string,
     },
     stable_memory_tools::{self, MemoryId},
+};
+use candid::{
+    Principal,
+    self, 
+    CandidType, 
+    Deserialize,
 };
 use std::cell::{Cell, RefCell};
 use futures::task::Poll;

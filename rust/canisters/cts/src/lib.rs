@@ -31,7 +31,7 @@ use cts_lib::{
         cycles_transferrer::{
             CyclesTransferrerCanisterInit,
         },
-        cts::LengthenMembershipQuest,
+        cts::{LengthenMembershipQuest, UserAndCB},
     },
     management_canister::{
         ManagementCanisterInstallCodeMode,
@@ -98,18 +98,6 @@ use cts_lib::{
                 stable64_write,
             }
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-                Func,
-                utils::{
-                    encode_one, 
-                    decode_one
-                },
-            },
-        },
         update, 
         query, 
         init, 
@@ -131,7 +119,16 @@ use cts_lib::{
     },
     global_allocator_counter::get_allocated_bytes_count
 };
-
+use candid::{
+    Principal,
+    CandidType,
+    Deserialize,
+    Func,
+    utils::{
+        encode_one, 
+        decode_one
+    }
+};
 
 #[cfg(test)]
 mod t;
@@ -165,13 +162,14 @@ use frontcode::{
     FilesHashes, 
     HttpRequest, 
     HttpResponse, 
-    set_root_hash, 
-    make_file_certificate_header,
     create_opt_stream_callback_token,
     StreamStrategy,
     StreamCallbackTokenBackwards,
     StreamCallbackHttpResponse,
 };
+
+mod certification;
+use certification::*;
 
 
 // -------
@@ -206,6 +204,7 @@ pub struct CTSData {
     cycles_transferrer_canister_code: CanisterCode,
     frontcode_files: Files,
     frontcode_files_hashes: FilesHashes,
+    cb_auths: CBAuths,
     cbs_maps: Vec<Principal>,
     create_new_cbs_map_lock: bool,
     cycles_transferrer_canisters: Vec<Principal>,
@@ -226,6 +225,7 @@ impl CTSData {
             cycles_transferrer_canister_code: CanisterCode::new(Vec::new()),
             frontcode_files: Files::new(),
             frontcode_files_hashes: FilesHashes::new(),
+            cb_auths: CBAuths::default(),
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
             cycles_transferrer_canisters: Vec::new(),
@@ -336,7 +336,6 @@ fn post_upgrade() {
     let mut old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_upgrade_data_candid_bytes).unwrap(); 
     
     let frontcode_files_hashes: FilesHashes = FilesHashes::from_iter(old_cts_data.frontcode_files_hashes.drain(..));
-    set_root_hash(&frontcode_files_hashes);
             
     let new_cts_data: CTSData = CTSData{
         cycles_market_main: Principal::from_text("").unwrap(),
@@ -345,6 +344,7 @@ fn post_upgrade() {
         cycles_transferrer_canister_code: old_cts_data.cycles_transferrer_canister_code,
         frontcode_files: old_cts_data.frontcode_files,
         frontcode_files_hashes,
+        cb_auths: CBAuths::default(),
         cbs_maps: old_cts_data.cbs_maps,
         create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
         cycles_transferrer_canisters: old_cts_data.cycles_transferrer_canisters,
@@ -357,6 +357,9 @@ fn post_upgrade() {
         users_lengthen_membership_cb_cycles_payment: HashMap::new(), 
         
     };
+    
+    set_root_hash(&new_cts_data);
+    
     
     with_mut(&CTS_DATA, |cts_data| {
         *cts_data = new_cts_data;    
@@ -1192,7 +1195,15 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     
 
 
-    with_mut(&CTS_DATA, |cts_data| { cts_data.users_purchase_cycles_bank.remove(&user_id); });
+    with_mut(&CTS_DATA, |cts_data| { 
+        cts_data.users_purchase_cycles_bank.remove(&user_id); 
+        
+        // check if need to prune old certifications
+        put_cb_auth(&mut cts_data.cb_auths, UserAndCB{ user_id, cb_id: purchase_cycles_bank_data.cycles_bank_canister.as_ref().unwrap().clone() });
+        set_root_hash(cts_data);
+        
+    });
+    
     
     Ok(PurchaseCyclesBankSuccess {
         cycles_bank_canister_id: purchase_cycles_bank_data.cycles_bank_canister.unwrap()
@@ -1258,6 +1269,44 @@ async fn find_cycles_bank_(user_id: &Principal) -> Result<Option<Principal>, Fin
 
 
 
+// cb-auths
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum SetCBAuthError {
+    CBNotFound,
+    FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),
+}
+
+
+#[update]
+pub async fn set_cb_auth() -> Result<(), SetCBAuthError> {
+    let user_id: Principal = caller();
+    
+    match find_cycles_bank_(&user_id).await.map_err(
+        |find_user_in_the_cbsms_error| { 
+            SetCBAuthError::FindUserInTheCBSMapsError(find_user_in_the_cbsms_error) 
+        }
+    )? {
+        Some(cb_id) => {
+            with_mut(&CTS_DATA, |cts_data| {
+                put_cb_auth(&mut cts_data.cb_auths, UserAndCB{user_id, cb_id});
+                set_root_hash(cts_data);
+            });
+            Ok(())
+        },
+        None => {
+            // return an error here (don't trap) bc after an await.
+            return Err(SetCBAuthError::CBNotFound);
+        }
+    }   
+}
+
+#[query]
+pub fn get_cb_auth(cb_id: Principal) -> Vec<u8> {
+    get_cb_auth_(UserAndCB{user_id: caller(), cb_id })
+}
 
 
 
@@ -3305,7 +3354,7 @@ pub fn controller_upload_file(q: UploadFile) {
                 q.filename.clone(), 
                 sha256(&q.first_chunk)
             );
-            set_root_hash(&cts_data.frontcode_files_hashes);
+            set_root_hash(&cts_data);
         }
         cts_data.frontcode_files.insert(
             q.filename, 
@@ -3351,7 +3400,7 @@ pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: Byt
                                 hasher.finalize().into()
                             }
                         );
-                        set_root_hash(&cts_data.frontcode_files_hashes);
+                        set_root_hash(&cts_data);
                     });
                 }
             },
@@ -3376,7 +3425,7 @@ pub fn controller_clear_files() {
 
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files_hashes = FilesHashes::new();
-        set_root_hash(&cts_data.frontcode_files_hashes);
+        set_root_hash(&cts_data);
     });
 }
 
@@ -3387,7 +3436,7 @@ pub fn controller_clear_file(filename: String) {
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files.remove(&filename);
         cts_data.frontcode_files_hashes.delete(filename.as_bytes());
-        set_root_hash(&cts_data.frontcode_files_hashes);
+        set_root_hash(&cts_data);
     });
 }
 

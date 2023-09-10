@@ -19,7 +19,6 @@ use cts_lib::{
                 reply_raw,
             },
         },
-        export::{candid::{CandidType}},
         update,
     },
     stable_memory_tools::{
@@ -28,6 +27,7 @@ use cts_lib::{
     },
     consts::GiB,
 };
+use candid::CandidType;
 
 use ic_stable_structures::{
     Memory,

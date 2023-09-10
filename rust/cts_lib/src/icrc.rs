@@ -1,21 +1,26 @@
 use crate::{
     ic_cdk::{
-        export::{Principal},
         call,
     },
     types::CallError,
     tools::call_error_as_u32_and_string,
 };
+use candid::Principal;
+
 pub use icrc_ledger_types::{
-    Account as IcrcId,
-    Subaccount as IcrcSub,
-    DEFAULT_SUBACCOUNT as ICRC_DEFAULT_SUBACCOUNT,
-    BlockIndex as BlockId,
-    transaction::{
-        Memo as IcrcMemo,
-        TransferArg as TokenTransferArg,
-        TransferError as TokenTransferError,
-    },
+    icrc1::{
+        account::{
+            Account as IcrcId,
+            Subaccount as IcrcSub,    
+            DEFAULT_SUBACCOUNT as ICRC_DEFAULT_SUBACCOUNT,    
+        },
+        transfer::{
+            BlockIndex as BlockId,
+            Memo as IcrcMemo,
+            TransferArg as TokenTransferArg,
+            TransferError as TokenTransferError,
+        }
+    }
 };
 
 

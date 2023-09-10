@@ -1,5 +1,5 @@
 
-use crate::ic_cdk::export::{Principal, candid::{CandidType, Deserialize}};
+use candid::{Principal, CandidType, Deserialize};
 use serde::Serialize;
 
 #[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone)]

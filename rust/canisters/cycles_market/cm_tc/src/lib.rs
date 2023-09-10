@@ -37,6 +37,7 @@ use cts_lib::{
         CallError,
         canister_code::CanisterCode,
         cycles_market::{tc::{*, trade_log}, cm_caller::*},
+        cts::UserAndCB,
     },
     management_canister,
     icrc::{
@@ -70,16 +71,6 @@ use cts_lib::{
             is_controller,
            
         },
-        export::{
-            Principal,
-            candid::{
-                self, 
-                CandidType,
-                Deserialize,
-                utils::{encode_one, decode_one},
-                error::Error as CandidError,
-            }
-        },
         update,
         query,
         init,
@@ -88,6 +79,16 @@ use cts_lib::{
     },
     stable_memory_tools::{self, MemoryId},
 };
+
+use candid::{
+    self, 
+    Principal,
+    CandidType,
+    Deserialize,
+    utils::{encode_one, decode_one},
+    error::Error as CandidError,
+};
+
 use cm_storage_lib::LogStorageInit;
 
 
@@ -105,6 +106,8 @@ use payouts::do_payouts;
 mod flush_logs;
 use flush_logs::FlushLogsStorageError;
 
+mod cts_cb_authorizations;
+use cts_cb_authorizations::is_cts_cb_authorization_valid;
 // ---------------
 
 // round robin on multiple cm_callers if the load gets heavy. scalable payouts!
@@ -392,6 +395,7 @@ thread_local! {
     static TOKEN_LEDGER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static TOKEN_LEDGER_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
     static STOP_CALLS: Cell<bool> = Cell::new(false);   
+    pub static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[])); 
 }
 
 
@@ -420,6 +424,7 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
     
     localkey::cell::set(&TOKEN_LEDGER_ID, cm_init.icrc1_token_ledger);
     localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_init.icrc1_token_ledger_transfer_fee);
+    localkey::cell::set(&CTS_ID, cm_init.cts_id);
 } 
 
 // ------------------ UPGRADES ------------------------
@@ -438,6 +443,7 @@ fn post_upgrade() {
     with(&CM_DATA, |cm_data| {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
         localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data.icrc1_token_ledger_transfer_fee);
+        localkey::cell::set(&CTS_ID, cm_data.cts_id);    
     });
     
     // ---------
@@ -602,11 +608,21 @@ fn minus_one_ongoing_buy_call(cm_data: &mut CMData) {
 
 
 #[update(manual_reply = true)]
-pub fn buy_tokens(q: BuyTokensQuest) { // -> BuyTokensResult
-    
-    with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_buy_call(cm_data); });
+pub fn buy_tokens(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> BuyTokensResult
     
     let caller: Principal = caller();
+    
+    if is_cts_cb_authorization_valid(
+        UserAndCB{
+            user_id: user_of_the_cb,
+            cb_id: caller,
+        },
+        cts_cb_authorization
+    ) == false {
+        trap("Caller must be a CTS-CYCLES-BANK.");
+    }
+    
+    with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_buy_call(cm_data); });
     
     let buy_tokens_result: BuyTokensResult = buy_tokens_(caller, q);
     
@@ -748,9 +764,19 @@ fn minus_one_ongoing_sell_call(cm_data: &mut CMData) {
 }
 
 #[update(manual_reply = true)]
-pub async fn sell_tokens(q: SellTokensQuest) { // -> SellTokensResult
+pub async fn sell_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> SellTokensResult
  
     let caller: Principal = caller();
+    
+    if is_cts_cb_authorization_valid(
+        UserAndCB{
+            user_id: user_of_the_cb,
+            cb_id: caller,
+        },
+        cts_cb_authorization
+    ) == false {
+        trap("Caller must be a CTS-CYCLES-BANK.");
+    }
     
     with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_sell_call(cm_data); });
     

@@ -8,14 +8,6 @@ use cts_lib::{
                 reply,
             },
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType, 
-                Deserialize,
-                utils::{encode_one}
-            },
-        },
         init,
         pre_upgrade,
         post_upgrade,
@@ -45,6 +37,14 @@ use cts_lib::{
 };
 use std::cell::{RefCell};
 use serde::Serialize;
+use candid::{
+    Principal,
+    CandidType, 
+    Deserialize,
+    utils::{encode_one}
+};
+        
+
 
 
 #[derive(CandidType, Serialize, Deserialize)]

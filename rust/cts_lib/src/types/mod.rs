@@ -6,16 +6,14 @@ use crate::{
                 CallResult
             },
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-            }
-        }
     }
 };
 
+use candid::{
+    CandidType,
+    Deserialize,
+    Principal,
+};
 
 
 
@@ -155,12 +153,32 @@ pub mod cache {
 pub mod cts {
     use super::*;
     
+    pub const CTS_CB_AUTHORIZATIONS_SEED: &'static [u8; 21] = b"CTS-CB-AUTHORIZATIONS";
+    
+    pub struct UserAndCB {
+        pub user_id: Principal,
+        pub cb_id: Principal
+    }
+    impl UserAndCB {
+        pub fn create_cts_cb_authorization_msg(&self) -> Vec<u8> {
+            let user_id_slice = self.user_id.as_slice();
+            let cb_id_slice = self.cb_id.as_slice();
+            
+            let mut v: Vec<u8> = Vec::new();
+            v.push(user_id_slice.len() as u8);
+            v.extend(user_id_slice);
+            v.push(cb_id_slice.len() as u8);
+            v.extend(cb_id_slice);
+            v
+        }
+    }
+        
+    
     #[derive(CandidType, Deserialize)]
     pub struct CyclesBankLifetimeTerminationQuest {
         pub user_id: Principal,
         pub cycles_balance: Cycles
     }
-    
 
     #[derive(CandidType, serde::Serialize, Deserialize, Clone)]
     pub struct LengthenMembershipQuest {

@@ -8,16 +8,14 @@ use crate::{
                 call,
             },
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-            }
-        }
     }
 };
 use serde::Serialize;
+use candid::{
+    Principal,
+    CandidType,
+    Deserialize,
+};
 
 
 #[derive(CandidType, Deserialize)]

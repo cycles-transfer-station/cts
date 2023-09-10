@@ -8,7 +8,6 @@ use cts_lib::{
     },
     ic_cdk::{
         self,
-        export::Principal,
         update,
         query,
         init,
@@ -21,7 +20,7 @@ use cts_lib::{
     },
     types::cycles_market::tc::{PositionId, position_log},
 };
-
+use candid::Principal;
 
 use cm_storage_lib::{
     self,

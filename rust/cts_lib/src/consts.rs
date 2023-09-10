@@ -1,5 +1,4 @@
 use crate::{
-    ic_cdk::export::Principal,
     ic_ledger_types::{
         IcpMemo
     },
@@ -7,7 +6,9 @@ use crate::{
         Cycles
     }
 };
+use candid::Principal;
  
+   
 #[allow(non_upper_case_globals)]
 pub const KiB: usize = 1024;
 #[allow(non_upper_case_globals)]

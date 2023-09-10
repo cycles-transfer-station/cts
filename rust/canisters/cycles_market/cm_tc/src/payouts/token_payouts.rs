@@ -149,7 +149,7 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
         let call_future = call_raw128(
             with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
             "cm_call",
-            &match encode_one(
+            match encode_one(
                 CMCallQuest{
                     cm_call_id: q.cm_call_id(),
                     for_the_canister: q.token_payout_payee(),

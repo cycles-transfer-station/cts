@@ -42,7 +42,10 @@ impl StorageLogTrait for PositionLog {
     const STABLE_MEMORY_SERIALIZE_SIZE: usize = position_log::STABLE_MEMORY_SERIALIZE_SIZE;  
     const STABLE_MEMORY_VERSION: u16 = 0;
     fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
-        todo!()
+        let mut s: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] = [0u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE];
+        s[0..0].copy_from_slice(&[]);
+        s.to_vec();
+        todo!();
     }  
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
         position_log::log_id_of_the_log_serialization(log_b)

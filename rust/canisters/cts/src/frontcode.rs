@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use cts_lib::{
     ic_cdk::{
-        export::candid::{CandidType, Deserialize, Func, Nat},
         api::{data_certificate, set_certified_data}
     },
     ic_certified_map::{self, RbTree, HashTree, AsHashTree},
@@ -14,11 +13,10 @@ use cts_lib::{
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 
+use candid::{CandidType, Deserialize, Func, Nat};
+
 use crate::CTS_DATA;
 
-
-
-const LABEL_ASSETS: &[u8; 11] = b"http_assets";
 
 #[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct File {
@@ -77,32 +75,6 @@ pub struct StreamCallbackHttpResponse<'a> {
 
 
 
-
-
-
-pub fn set_root_hash(tree: &FilesHashes) {
-    let root_hash = ic_certified_map::labeled_hash(LABEL_ASSETS, &tree.root_hash());
-    set_certified_data(&root_hash[..]);
-}
-
-
-pub fn make_file_certificate_header(file_name: &str) -> (String, String) {
-    let certificate: Vec<u8> = data_certificate().unwrap_or(vec![]);
-    with(&CTS_DATA, |cts_data| {
-        let witness: HashTree = cts_data.frontcode_files_hashes.witness(file_name.as_bytes());
-        let tree: HashTree = ic_certified_map::labeled(LABEL_ASSETS, witness);
-        let mut serializer = serde_cbor::ser::Serializer::new(vec![]);
-        serializer.self_describe().unwrap();
-        tree.serialize(&mut serializer).unwrap();
-        (
-            "IC-Certificate".to_string(),
-            format!("certificate=:{}:, tree=:{}:",
-                base64::encode(&certificate),
-                base64::encode(&serializer.into_inner())
-            )
-        )
-    })
-}
 
 
 pub fn create_opt_stream_callback_token<'a>(file_name: &'a str, file: &'a File, chunk_i: usize) -> Option<StreamCallbackToken<'a>> {

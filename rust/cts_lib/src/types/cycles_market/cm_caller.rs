@@ -1,4 +1,4 @@
-use crate::ic_cdk::export::{Principal, candid::{CandidType, Deserialize}};
+use candid::{Principal, CandidType, Deserialize};
 use crate::types::Cycles;
 use serde::Serialize;
 

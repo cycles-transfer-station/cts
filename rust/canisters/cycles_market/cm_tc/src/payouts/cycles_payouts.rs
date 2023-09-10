@@ -39,7 +39,7 @@ pub async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutR
         let mut call_future = call_raw128(
             with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
             "cm_call",
-            &encode_one(
+            encode_one(
                 CMCallQuest{
                     cm_call_id: q.cm_call_id(),
                     for_the_canister: q.cycles_payout_payee(),

@@ -47,14 +47,6 @@ use cts_lib::{
                 call,
                 call_with_payment128,
             },
-        },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-                utils::{encode_one, decode_one},
-            },
         }
     },
     ic_ledger_types::{
@@ -75,6 +67,12 @@ use cts_lib::{
         MAINNET_CYCLES_MINTING_CANISTER_ID,
         ICP_LEDGER_TRANSFER_DEFAULT_FEE
     }
+};
+use candid::{
+    Principal,
+    CandidType,
+    Deserialize,
+    utils::{encode_one, decode_one},
 };
 
 

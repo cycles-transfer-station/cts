@@ -1,7 +1,6 @@
 use sha2::Digest;
 use crate::{
     ic_cdk::{
-        export::{Principal},
         trap,
         api::{is_controller, call::RejectionCode}
     },
@@ -21,6 +20,7 @@ use crate::{
     },
     icrc::{Tokens},
 };
+use candid::Principal;
 use std::thread::LocalKey;
 use std::cell::Cell;
 use ic_stable_structures::Memory;

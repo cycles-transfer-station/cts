@@ -1,8 +1,8 @@
 use crate::ic_cdk::{
     api::call::{RejectionCode, CallResult},
-    export::Principal,
 };
 
+use candid::Principal;
 
 
 pub use ic_ledger_types::{
