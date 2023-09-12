@@ -6,7 +6,6 @@ use serde::Serialize;
 pub struct Icrc1TokenTradeContract {
     pub icrc1_ledger_canister_id: Principal,
     pub trade_contract_canister_id: Principal,
-    pub opt_cm_caller: Option<Principal>
 }
 
 

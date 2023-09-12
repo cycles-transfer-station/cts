@@ -83,7 +83,7 @@ async fn _do_payouts() {
         let mut i: usize = 0;
         while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
             let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
-            if vcp.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() == false
+            if vcp.cycles_payout_data.is_complete() == false
             && vcp.cycles_payout_lock == false {
                 vcp.cycles_payout_lock = true;
                 void_cycles_positions_cycles_payouts_chunk.push(
@@ -111,7 +111,7 @@ async fn _do_payouts() {
         let mut i: usize = 0;
         while i < cm_data.void_token_positions.len() && void_token_positions_token_payouts_chunk.len() < DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE {
             let vtp: &mut VoidTokenPosition = &mut cm_data.void_token_positions[i];
-            if vtp.token_payout_data.is_waiting_for_the_cmcaller_callback() == false 
+            if vtp.token_payout_data.is_complete() == false 
             && vtp.token_payout_lock == false {
                 vtp.token_payout_lock = true;
                 void_token_positions_token_payouts_chunk.push(
@@ -141,7 +141,6 @@ async fn _do_payouts() {
         while i < cm_data.trade_logs.len() {
             let tl: &mut TradeLog = &mut cm_data.trade_logs[i];                    
             if tl.cycles_payout_data.is_complete() == false 
-            && tl.cycles_payout_data.is_waiting_for_the_cycles_transferrer_transfer_cycles_callback() == false
             && tl.cycles_payout_lock == false
             && trade_logs_cycles_payouts_chunk.len() < DO_TRADE_LOGS_CYCLES_PAYOUTS_CHUNK_SIZE {
                 tl.cycles_payout_lock = true;    
@@ -153,7 +152,6 @@ async fn _do_payouts() {
                 );
             }
             if tl.token_payout_data.is_complete() == false
-            && tl.token_payout_data.is_waiting_for_the_cmcaller_callback() == false
             && tl.token_payout_lock == false
             && trade_logs_token_payouts_chunk.len() < DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE {
                 tl.token_payout_lock = true;
@@ -295,22 +293,16 @@ async fn _do_payouts() {
 fn handle_do_cycles_payout_result(cpd: &mut CyclesPayoutData, do_cycles_payout_result: DoCyclesPayoutResult) {
     if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
         match do_cycles_payout_sponse {
-            DoCyclesPayoutSponse::CMCallerCyclesPayoutCallSuccessTimestampNanos(opt_timestamp_ns) => {
-                cpd.cmcaller_cycles_payout_call_success_timestamp_nanos = opt_timestamp_ns;                            
-            },
-            DoCyclesPayoutSponse::ManagementCanisterPositCyclesCallSuccess(management_canister_posit_cycles_call_success) => {
-                cpd.management_canister_posit_cycles_call_success = management_canister_posit_cycles_call_success;
+            DoCyclesPayoutSponse::CyclesPayoutSuccess => {
+                cpd.cycles_payout = true;                            
             },
             DoCyclesPayoutSponse::NothingToDo => {}
         }
     }
 }
 
-// we use this function (instead of replacing the whole token_payout_data) 
-// cause the cm_caller-cm_call manual-callback can come back before this output is put back on the purchase/vcp. 
-// so we use this function so that only the fields that the do_token_payout fn sets get re-place.
 fn handle_do_token_payout_sponse(tpd: &mut TokenPayoutData, sponse: TokenPayoutData) {
     tpd.token_transfer = sponse.token_transfer;
     tpd.token_fee_collection = sponse.token_fee_collection;
-    tpd.cm_message_call_success_timestamp_nanos = sponse.cm_message_call_success_timestamp_nanos;
+    tpd.cm_message_call = sponse.cm_message_call;
 }

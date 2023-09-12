@@ -319,29 +319,16 @@ fn find_current_position_available_rate(
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {
-    pub cmcaller_cycles_payout_call_success_timestamp_nanos: Option<u128>,
-    pub cmcaller_cycles_payout_callback_complete: Option<(CyclesTransferRefund, Option<(u32, String)>)>,
-    pub management_canister_posit_cycles_call_success: bool // this is use for when the payout-cycles-transfer-refund != 0, call the management_canister-deposit_cycles(payout-cycles-transfer-refund)
+    pub cycles_payout: bool,
 }
 impl CyclesPayoutData {
     pub fn new() -> Self {
         Self {
-            cmcaller_cycles_payout_call_success_timestamp_nanos: None,
-            cmcaller_cycles_payout_callback_complete: None,
-            management_canister_posit_cycles_call_success: false
+            cycles_payout: false,
         }
-    }
-    pub fn is_waiting_for_the_cycles_transferrer_transfer_cycles_callback(&self) -> bool {
-        self.cmcaller_cycles_payout_call_success_timestamp_nanos.is_some() 
-        && self.cmcaller_cycles_payout_callback_complete.is_none()
     }
     pub fn is_complete(&self) -> bool {
-        if let Some((cycles_transfer_refund, _)) = self.cmcaller_cycles_payout_callback_complete {
-            if cycles_transfer_refund == 0 || self.management_canister_posit_cycles_call_success == true {
-                return true;
-            }
-        }
-        false
+        self.cycles_payout 
     }
 }
 
@@ -354,8 +341,6 @@ pub trait CyclesPayoutDataTrait {
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError>;
     fn cycles(&self) -> Cycles;
     fn cycles_payout_fee(&self) -> Cycles;
-    fn cm_call_id(&self) -> u128;
-    fn cm_call_callback_method(&self) -> &'static str;
 }
 
 
@@ -370,8 +355,7 @@ pub struct TokenTransferData {
 pub struct TokenPayoutData {
     pub token_transfer: Option<TokenTransferData>,
     pub token_fee_collection: Option<TokenTransferData>,
-    pub cm_message_call_success_timestamp_nanos: Option<u128>,
-    pub cm_message_callback_complete: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-positor-message-call-error
+    pub cm_message_call: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-message-call-error
 }
 impl TokenPayoutData {
     // separate new fns because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferData)
@@ -379,8 +363,7 @@ impl TokenPayoutData {
         Self{
             token_transfer: None,
             token_fee_collection: None,
-            cm_message_call_success_timestamp_nanos: None,
-            cm_message_callback_complete: None    
+            cm_message_call: None,
         }
     }
     pub fn new_for_a_void_token_position() -> Self {
@@ -395,22 +378,11 @@ impl TokenPayoutData {
                 timestamp_nanos: time_nanos(),
                 ledger_transfer_fee: 0,
             }),
-            cm_message_call_success_timestamp_nanos: None,
-            cm_message_callback_complete: None            
+            cm_message_call: None,
         }
-    }
-    
-    
-    pub fn is_waiting_for_the_cmcaller_callback(&self) -> bool {
-        self.cm_message_call_success_timestamp_nanos.is_some() 
-        && self.cm_message_callback_complete.is_none()
     }
     pub fn is_complete(&self) -> bool {
-        if self.cm_message_callback_complete.is_some() {
-            // maybe add a check for if there is an error sending the cm_message and re-try on some cases 
-            return true;
-        }
-        false
+        self.cm_message_call.is_some()
     }
 }
 
@@ -426,8 +398,6 @@ pub trait TokenPayoutDataTrait {
     fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo>;
     fn token_ledger_transfer_fee(&self) -> Tokens;
     fn tokens_payout_fee(&self) -> Tokens;
-    fn cm_call_id(&self) -> u128;
-    fn cm_call_callback_method(&self) -> &'static str; 
 }
 
 
@@ -545,13 +515,6 @@ impl CyclesPayoutDataTrait for TradeLog {
     }
     fn cycles(&self) -> Cycles { self.cycles }
     fn cycles_payout_fee(&self) -> Cycles { self.cycles_payout_fee }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { 
-        match self.position_kind { 
-            PositionKind::Cycles => CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER,
-            PositionKind::Token => CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_POSITOR
-        }
-    }
 }
 impl TokenPayoutDataTrait for TradeLog {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
@@ -617,13 +580,6 @@ impl TokenPayoutDataTrait for TradeLog {
     }
     fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
     fn tokens_payout_fee(&self) -> Tokens { self.tokens_payout_fee }
-    fn cm_call_id(&self) -> u128 { self.id }
-    fn cm_call_callback_method(&self) -> &'static str { 
-        match self.position_kind { 
-            PositionKind::Cycles => CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR, 
-            PositionKind::Token => CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_PURCHASER
-        }
-    } 
 }
 
 
@@ -700,12 +656,6 @@ impl CyclesPayoutDataTrait for VoidCyclesPosition {
     fn cycles_payout_fee(&self) -> Cycles {
         0
     }
-    fn cm_call_id(&self) -> u128 {
-        self.position_id
-    }
-    fn cm_call_callback_method(&self) -> &'static str {
-        CMCALLER_CALLBACK_VOID_CYCLES_POSITION_POSITOR
-    }
 }
 
 
@@ -758,8 +708,6 @@ impl TokenPayoutDataTrait for VoidTokenPosition {
     fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
     fn token_ledger_transfer_fee(&self) -> Tokens { trap("void-token-position does not call the ledger."); }
     fn tokens_payout_fee(&self) -> Tokens { 0 } // trap("void-token-position does not call the ledger.");
-    fn cm_call_id(&self) -> u128 { self.position_id }  
-    fn cm_call_callback_method(&self) -> &'static str { CMCALLER_CALLBACK_VOID_TOKEN_POSITION_POSITOR } 
 }
 
 

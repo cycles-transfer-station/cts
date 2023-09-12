@@ -968,32 +968,6 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest, (user_of_the_cb, ct
 }
 
 
-/*
-// no check of the ctsfuel-balance here, cause of the check in the user_transfer_cycles-method. set on the side the ctsfuel for the callback?
-
-#[update]
-pub fn cycles_transferrer_transfer_cycles_callback(q: cycles_transferrer::TransferCyclesCallbackQuest) -> () {
-    
-    if with(&CB_DATA, |cb_data| { cb_data.cycles_transferrer_canisters.contains(&caller()) }) == false {
-        trap("caller must be one of the CTS-cycles-transferrer-canisters for this method.");
-    }
-    
-    //maintenance_check(); // make sure that when set a stop-call-flag, there are 0 ongoing-$cycles-transfers. cycles-transfer-callback errors will hold for
-    
-    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128()); 
-
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_transfer_refund);
-        if let Some(cycles_transfer_out/*: &mut CyclesTransferOut*/) = cb_data.user_data.cycles_transfers_out.iter_mut().rev().find(|cycles_transfer_out: &&mut CyclesTransferOut| { (**cycles_transfer_out).id == q.user_cycles_transfer_id }) {
-            cycles_transfer_out.cycles_refunded = Some(cycles_transfer_refund);
-            cycles_transfer_out.opt_cycles_transfer_call_error = q.opt_cycles_transfer_call_error;
-        }
-    });
-
-}
-*/
-
-
 
 
 #[query(manual_reply = true)]
@@ -1696,6 +1670,7 @@ pub fn cm_message_cycles_position_purchase_positor(q: cm_icrc1token_trade_contra
 pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest) {
     
     let cycles_purchase: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    // log a CyclesTransferIn
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_purchase); 
@@ -1714,6 +1689,7 @@ pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_cont
 pub fn cm_message_token_position_purchase_positor(q: cm_icrc1token_trade_contract::CMTokenPositionPurchasePositorMessageQuest) {
     
     let cycles_payment: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    // log a CyclesTransferIn
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_payment); 
@@ -1746,6 +1722,8 @@ pub fn cm_message_token_position_purchase_purchaser(q: cm_icrc1token_trade_contr
 pub fn cm_message_void_cycles_position_positor(q: cm_icrc1token_trade_contract::CMVoidCyclesPositionPositorMessageQuest) {
     
     let void_cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
+    
+    // log a CyclesTransferIn
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(void_cycles); 

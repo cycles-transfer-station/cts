@@ -3,7 +3,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{HashSet, VecDeque},
-    time::Duration,
+    //time::Duration,
     thread::LocalKey,
 };
 use cts_lib::{
@@ -27,17 +27,15 @@ use cts_lib::{
     consts::{
         KiB,
         MiB,
-        MANAGEMENT_CANISTER_ID,
         NANOS_IN_A_SECOND,
         SECONDS_IN_AN_HOUR,
         TRILLION,
     },
     types::{
         Cycles,
-        CyclesTransferRefund,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{tc::{*, trade_log}, cm_caller::*},
+        cycles_market::{tc::{*, trade_log}},
         cts::UserAndCB,
     },
     management_canister,
@@ -60,7 +58,6 @@ use cts_lib::{
             caller,
             call::{
                 call,
-                call_with_payment128,
                 call_raw128,
                 reply,
                 reply_raw,
@@ -86,7 +83,7 @@ use candid::{
     Principal,
     CandidType,
     Deserialize,
-    utils::{encode_one, decode_one},
+    utils::{encode_one},
     error::Error as CandidError,
 };
 
@@ -124,7 +121,6 @@ struct OldCMData {}
 struct CMData {
     cts_id: Principal,
     cm_main_id: Principal,
-    cm_caller: Principal,
     icrc1_token_ledger: Principal,
     icrc1_token_ledger_transfer_fee: Tokens,
     positions_id_counter: u128,
@@ -145,7 +141,6 @@ impl CMData {
         Self {
             cts_id: Principal::from_slice(&[]),
             cm_main_id: Principal::from_slice(&[]),
-            cm_caller: Principal::from_slice(&[]),
             icrc1_token_ledger: Principal::from_slice(&[]),
             icrc1_token_ledger_transfer_fee: 0,
             positions_id_counter: 0,
@@ -318,13 +313,6 @@ const CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER: &'static str = "cm_m
 const CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_POSITOR: &'static str      = "cm_message_token_position_purchase_positor";
 const CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER: &'static str    = "cm_message_token_position_purchase_purchaser";
 
-const CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_PURCHASER: &'static str = "cm_message_cycles_position_purchase_purchaser_cmcaller_callback";
-const CMCALLER_CALLBACK_CYCLES_POSITION_PURCHASE_POSITOR: &'static str = "cm_message_cycles_position_purchase_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_PURCHASER: &'static str = "cm_message_token_position_purchase_purchaser_cmcaller_callback";
-const CMCALLER_CALLBACK_TOKEN_POSITION_PURCHASE_POSITOR: &'static str = "cm_message_token_position_purchase_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_VOID_CYCLES_POSITION_POSITOR: &'static str = "cm_message_void_cycles_position_positor_cmcaller_callback";
-const CMCALLER_CALLBACK_VOID_TOKEN_POSITION_POSITOR: &'static str = "cm_message_void_token_position_positor_cmcaller_callback";
-
 
 mod token_transfer_memo_mod {
     use crate::{PositionKind, PurchaseId};
@@ -409,7 +397,6 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
     with_mut(&CM_DATA, |cm_data| { 
         cm_data.cts_id = cm_init.cts_id; 
         cm_data.cm_main_id = cm_init.cm_main_id; 
-        cm_data.cm_caller = cm_init.cm_caller;
         cm_data.icrc1_token_ledger = cm_init.icrc1_token_ledger; 
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
     });
@@ -445,32 +432,9 @@ fn post_upgrade() {
         localkey::cell::set(&CTS_ID, cm_data.cts_id);    
     });
     
-    // ---------
-    
-    // when this token_trade_contract canister is upgrade, we stop the canister first then upgrade then start the canister. 
-    // if the cm_caller tries to name-call-back this canister it might be between after it stopped and before it started.
-    // so therefore after upgrade, call the cm_caller controller_do_try_callbacks to push through the name-call-backs.
-    // 2-minutes to make sure the cm_caller gets back it's system callback - which logs the try-name-callback result - from it's name-call-back call try.
-    //set_timer(2-minutes, call cm_caller controller_do_try_callbacks)
-    ic_cdk_timers::set_timer(Duration::from_secs(120), || ic_cdk::spawn(call_cm_caller_do_try_callbacks()));
 }
 
-async fn call_cm_caller_do_try_callbacks() {
-    match call_raw128(
-        with(&CM_DATA, |cm_data| { cm_data.cm_caller }),
-        "controller_do_try_callbacks",
-        &[68, 73, 68, 76, 0, 0],
-        0
-    ).await {
-        Ok(_) => {
-            // can decode Vec<TryCallback> see if there are leftovers
-            // if leftovers can set the timer
-        },
-        Err(_call_error) => {
-            // can set the timer if need
-        }
-    };
-}
+
 
 
 // -------------------------------------------------------------
@@ -1753,140 +1717,6 @@ fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'stati
 
 
 
-// ------------------ CMCALLER-CALLBACKS -----------------------
-
-#[update(manual_reply = true)]
-pub fn cm_message_cycles_position_purchase_purchaser_cmcaller_callback(q: CMCallbackQuest) -> () {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-
-    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(cycles_position_purchase_cycles_positions_purchases_i) = cm_data.trade_logs.binary_search_by_key(&q.cm_call_id, |cycles_position_purchase| { cycles_position_purchase.id }) {
-            cm_data.trade_logs[cycles_position_purchase_cycles_positions_purchases_i]
-            .cycles_payout_data
-            .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_call_error));
-        }
-    });
-
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-#[update(manual_reply = true)]
-pub fn cm_message_cycles_position_purchase_positor_cmcaller_callback(q: CMCallbackQuest) {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(cycles_position_purchase_cycles_positions_purchases_i) = cm_data.trade_logs.binary_search_by_key(&q.cm_call_id, |cycles_position_purchase| { cycles_position_purchase.id }) {
-            cm_data.trade_logs[cycles_position_purchase_cycles_positions_purchases_i]
-            .token_payout_data
-            .cm_message_callback_complete = Some(q.opt_call_error);
-        }
-    });
-    
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-#[update(manual_reply = true)]
-pub fn cm_message_token_position_purchase_purchaser_cmcaller_callback(q: CMCallbackQuest) {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-        
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(token_position_purchase_token_positions_purchases_i) = cm_data.trade_logs.binary_search_by_key(&q.cm_call_id, |token_position_purchase| { token_position_purchase.id }) {
-            cm_data.trade_logs[token_position_purchase_token_positions_purchases_i]
-            .token_payout_data
-            .cm_message_callback_complete = Some(q.opt_call_error);
-        }
-    });
-    
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-#[update(manual_reply = true)]
-pub fn cm_message_token_position_purchase_positor_cmcaller_callback(q: CMCallbackQuest) {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-
-    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(token_position_purchase_token_positions_purchases_i) = cm_data.trade_logs.binary_search_by_key(&q.cm_call_id, |token_position_purchase| { token_position_purchase.id }) {
-            cm_data.trade_logs[token_position_purchase_token_positions_purchases_i]
-            .cycles_payout_data
-            .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_call_error));
-        }
-    });
-    
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-#[update(manual_reply = true)]
-pub fn cm_message_void_cycles_position_positor_cmcaller_callback(q: CMCallbackQuest) {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-    
-    let cycles_transfer_refund: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(void_cycles_position_void_cycles_positions_i) = cm_data.void_cycles_positions.binary_search_by_key(&q.cm_call_id, |void_cycles_position| { void_cycles_position.position_id }) {
-            cm_data.void_cycles_positions[void_cycles_position_void_cycles_positions_i]
-            .cycles_payout_data
-            .cmcaller_cycles_payout_callback_complete = Some((cycles_transfer_refund, q.opt_call_error));
-            
-            if cm_data.void_cycles_positions[void_cycles_position_void_cycles_positions_i]
-            .can_remove() {
-                cm_data.void_cycles_positions.remove(void_cycles_position_void_cycles_positions_i);
-            }
-        }
-    });
-    
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-#[update(manual_reply = true)]
-pub fn cm_message_void_token_position_positor_cmcaller_callback(q: CMCallbackQuest) {
-    if caller() != with(&CM_DATA, |cm_data| { cm_data.cm_caller }) {
-        trap("this method is for the cycles_market-caller");
-    }
-
-    with_mut(&CM_DATA, |cm_data| {
-        if let Ok(void_token_position_void_token_positions_i) = cm_data.void_token_positions.binary_search_by_key(&q.cm_call_id, |void_token_position| { void_token_position.position_id }) {
-            cm_data.void_token_positions[void_token_position_void_token_positions_i]
-            .token_payout_data
-            .cm_message_callback_complete = Some(q.opt_call_error);
-            
-            if cm_data.void_token_positions[void_token_position_void_token_positions_i]
-            .can_remove() {
-                cm_data.void_token_positions.remove(void_token_position_void_token_positions_i);
-            }
-        }
-    });
-    
-    reply::<()>(());
-    ic_cdk::spawn(do_payouts());
-    return;
-}
-
-
-
 
 // --------------- STOP-CALLS-FLAG --------------------
 
@@ -1898,7 +1728,7 @@ pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
 }
 
 #[query]
-pub fn controller_see_stop_calls_flag() -> bool {
+pub fn controller_view_stop_calls_flag() -> bool {
     caller_is_controller_gaurd(&caller());
     
     localkey::cell::get(&STOP_CALLS)

@@ -345,17 +345,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cm_caller"
-version = "0.1.0"
-dependencies = [
- "candid 0.9.6",
- "cts_lib",
- "futures",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
 name = "cm_main"
 version = "0.1.0"
 dependencies = [
@@ -560,16 +549,6 @@ dependencies = [
 
 [[package]]
 name = "cycles_bank"
-version = "0.1.0"
-dependencies = [
- "candid 0.9.6",
- "cts_lib",
- "futures",
- "serde",
-]
-
-[[package]]
-name = "cycles_transferrer"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",

@@ -12,7 +12,6 @@ pub type CyclesPerToken = Cycles;
 pub struct CMIcrc1TokenTradeContractInit {
     pub cts_id: Principal,
     pub cm_main_id: Principal,
-    pub cm_caller: Principal,
     pub icrc1_token_ledger: Principal,
     pub icrc1_token_ledger_transfer_fee: Tokens,
     pub trades_storage_canister_code: CanisterCode,

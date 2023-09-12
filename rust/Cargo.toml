@@ -7,13 +7,11 @@ members = [
     "canisters/cts",
     "canisters/cbs_map",
     "canisters/cycles_bank",
-    "canisters/cycles_transferrer",
     "canisters/cycles_market/cm_main",
     "canisters/cycles_market/cm_tc",
     "canisters/cycles_market/cm_storage_lib",
     "canisters/cycles_market/cm_trades_storage",
     "canisters/cycles_market/cm_positions_storage",
-    "canisters/cycles_market/cm_caller",
     "canister_authorizations",
 ]
 
