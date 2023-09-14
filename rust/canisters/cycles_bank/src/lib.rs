@@ -84,8 +84,8 @@ use cts_lib::{
     },
     icrc::{Tokens,IcrcId, BlockId},
     global_allocator_counter::get_allocated_bytes_count,
-    stable_memory_tools::{self, MemoryId},
 };
+use canister_tools::{self, MemoryId};
 use candid::{
     Principal,
     CandidType,
@@ -516,7 +516,7 @@ thread_local! {
 #[init]
 fn canister_init(user_canister_init: CyclesBankInit) {
     
-    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION);
+    canister_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION);
     
     with_mut(&CB_DATA, |cb_data| {
         *cb_data = CBData{
@@ -542,7 +542,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
@@ -550,7 +550,7 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES);
 
-    // custom stable memory read then load then overwrite old stable memory zeros then call stable_memory_tools::init
+    // custom stable memory read then load then overwrite old stable memory zeros then call canister_tools::init
     const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
     
     let mut uc_upgrade_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
@@ -577,7 +577,6 @@ fn post_upgrade() {
                     Icrc1TokenTradeContract{
                         icrc1_ledger_canister_id: MAINNET_LEDGER_CANISTER_ID,
                         trade_contract_canister_id: Principal::from_text("").unwrap(),
-                        opt_cm_caller: Some(Principal::from_text("").unwrap())
                     },
                     CMTradeContractLogs::new()
                 )
@@ -594,10 +593,10 @@ fn post_upgrade() {
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; uc_upgrade_data_candid_bytes_len_u64 as usize * 2 + 8]);
     
     
-    stable_memory_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION); 
+    canister_tools::init(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION); 
     
     // change for the post_upgrade for the next upgrade
-    // stable_memory_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(OldCTSData) -> CTSData>);
+    // canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(OldCTSData) -> CTSData>);
 }
 
 // ---------------------------
@@ -1065,22 +1064,20 @@ pub async fn transfer_icp(transfer_arg_raw: Vec<u8>) {
 // cycles-market methods
 
 
-
-/*
+use cts_lib::types::cycles_market::tc as cm_tc;
 
 #[derive(CandidType)]
 pub enum CBBuyTokensError {
-    CTSFuelTooLow,
     MemoryIsFull,
     CyclesBalanceTooLow{ cycles_balance: Cycles },
     CMBuyTokensCallError((u32, String)),
     CMBuyTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
 }
 
-type CBBuyTokensResult = Result<CM::BuyTokensResult, CBBuyTokensError>;
+type CBBuyTokensResult = Result<cm_tc::BuyTokensResult, CBBuyTokensError>;
 
 #[update]
-pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: CM::BuyTokensQuest) -> CBBuyTokensResult {
+pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::BuyTokensQuest) -> CBBuyTokensResult {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1088,10 +1085,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
     let put_call_cycles: Cycles = tokens_transform_cycles(q.tokens, q.cycles_per_token_rate);
     
     with(&CB_DATA, |cb_data| { 
-        if ctsfuel_balance(cb_data) < 30_000_000_000 {
-            return Err(CBBuyTokensError::CTSFuelTooLow);
-        }
-        if calculate_free_storage(cb_data) < std::mem::size_of::<CMCyclesPosition>() as u128 {
+        if calculate_free_storage(cb_data) < 200 {
             return Err(CBBuyTokensError::MemoryIsFull);
         }
         if cb_data.user_data.cycles_balance < put_call_cycles {
@@ -1100,12 +1094,14 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
         Ok(())
     })?;
     
-    let mut call_future = call_raw128(
-        icrc1token_trade_contract.trade_contract_canister_id,
-        "buy_tokens",
-        &encode_one(&q).unwrap(),
-        put_call_cycles
-    );
+    let mut call_future = with(&CB_DATA, |cb_data| { 
+        call_raw128(
+            icrc1token_trade_contract.trade_contract_canister_id,
+            "buy_tokens",
+            encode_args((&q, (cb_data.user_id, &cb_data.cts_cb_authorization))).unwrap(),
+            put_call_cycles
+        )
+    });
     
     if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
         let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
@@ -1124,20 +1120,21 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
     });
     
     match call_result {
-        Ok(sponse_bytes) => match decode_one::<CM::BuyTokensResult>(&sponse_bytes) {
+        Ok(sponse_bytes) => match decode_one::<cm_tc::BuyTokensResult>(&sponse_bytes) {
             Ok(cm_buy_tokens_result) => {
                 if let Ok(ref cm_buy_tokens_ok) = cm_buy_tokens_result {
                     with_mut(&CB_DATA, |cb_data| {
-                        
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions.push(
-                            CMCyclesPosition{
-                                id: cm_create_cycles_position_success.position_id,
-                                create_cycles_position_quest: q,
-                                create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
+                        cb_data.user_data.cycles_transfers_out.push(
+                            CyclesTransferOut{
+                                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
+                                for_the_canister: icrc1token_trade_contract.trade_contract_canister_id,
+                                cycles_sent: put_call_cycles,
+                                cycles_refunded: Some(msg_cycles_refunded128()),   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
+                                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-buy-tokens: {}", cm_buy_tokens_ok.position_id)),
                                 timestamp_nanos: time_nanos(),
+                                opt_cycles_transfer_call_error: None,
                             }
-                        );
-                        
+                        );                        
                     });
                 }
                 Ok(cm_buy_tokens_result)
@@ -1147,15 +1144,75 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
             }
         },
         Err(call_error) => {
-            return Err(CBBuyTokensError::CMBuyTokensCallError((call_error.0 as u32, call_error.1)));
+            return Err(CBBuyTokensError::CMBuyTokensCallError(call_error_as_u32_and_string(call_error)));
         }
     }
     
-    
-    
 }
 
-*/
+
+
+#[derive(CandidType)]
+pub enum CBSellTokensError {
+    MemoryIsFull,
+    CMSellTokensCallError(CallError),
+    CMSellTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+}
+
+type CBSellTokensResult = Result<cm_tc::SellTokensResult, CBSellTokensError>;
+
+#[update]
+pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::SellTokensQuest) -> CBSellTokensResult {
+    if caller() != user_id() {
+        trap("Caller must be the user for this method.");
+    }
+        
+    with(&CB_DATA, |cb_data| { 
+        if calculate_free_storage(cb_data) < 200 {
+            return Err(CBSellTokensError::MemoryIsFull);
+        }
+        Ok(())
+    })?;
+    
+    // create icrc2 approval for the tc.
+    
+    
+    
+    let mut call_future = with(&CB_DATA, |cb_data| {
+        call_raw128(
+            icrc1token_trade_contract.trade_contract_canister_id,
+            "sell_tokens",
+            encode_args((&q, (cb_data.user_id, &cb_data.cts_cb_authorization))).unwrap(),
+            0
+        )
+    });
+    
+    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
+        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
+        return Err(CBSellTokensError::CMSellTokensCallError((call_error.0 as u32, "call_perform error".to_string())));
+    }
+    
+    with_mut(&CB_DATA, |cb_data| {
+        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
+    });
+    
+    let call_result: CallResult<Vec<u8>> = call_future.await;
+    
+    match call_result {
+        Ok(sponse_bytes) => match decode_one::<cm_tc::SellTokensResult>(&sponse_bytes) {
+            Ok(cm_sell_tokens_result) => {
+                Ok(cm_sell_tokens_result)
+            },
+            Err(candid_decode_error) => {
+                return Err(CBSellTokensError::CMSellTokensCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
+            }
+        },
+        Err(call_error) => {
+            return Err(CBSellTokensError::CMSellTokensCallError(call_error_as_u32_and_string(call_error)));
+        }
+    }
+    
+}
 
 
 
@@ -1642,9 +1699,7 @@ fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData)
     cb_data.user_data.cm_trade_contracts
         .iter_mut()
         .find(|(k,_v): &(&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
-            let mut possible_callers: Vec<Principal> = vec![k.trade_contract_canister_id];
-            if let Some(cm_caller) = k.opt_cm_caller { possible_callers.push(cm_caller); }
-            possible_callers.contains(&caller())
+            k.trade_contract_canister_id == caller()
         })
         .map(|(_k,v): (&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
             v
@@ -2038,7 +2093,7 @@ pub fn user_upload_cts_cb_authorization(auth: Vec<u8>) {
             UserAndCB{ user_id: caller(), cb_id: ic_cdk::api::id() },
             auth.clone(),
         ) == false {
-            
+            trap("Void-Authorization.");
         }
         cb_data.cts_cb_authorization = auth;
     });    

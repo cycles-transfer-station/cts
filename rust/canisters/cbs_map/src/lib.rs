@@ -21,17 +21,6 @@ use cts_lib::{
                 stable64_write,
             }
         },
-        export::{
-            Principal,
-            candid::{
-                CandidType,
-                Deserialize,
-                utils::{
-                    encode_one,
-                    decode_one
-                }
-            },
-        },
         update, 
         query, 
         init, 
@@ -74,7 +63,16 @@ use cts_lib::{
     global_allocator_counter::get_allocated_bytes_count
 };
 
-
+use candid::{
+    Principal,
+    CandidType,
+    Deserialize,
+    utils::{
+        encode_one,
+        decode_one
+    }
+};
+      
 
 
 type UsersMap = HashMap<Principal, CBSMUserData>;

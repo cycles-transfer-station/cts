@@ -14,12 +14,10 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-    stable_memory_tools::{
-        self,
-        MemoryId,
-    },
     types::cycles_market::tc::{PositionId, position_log},
 };
+use canister_tools::{self, MemoryId};
+
 use candid::Principal;
 
 use cm_storage_lib::{
@@ -55,8 +53,8 @@ thread_local!{
 
 #[init]
 fn init(q: LogStorageInit) {
-    stable_memory_tools::init(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID);
-    stable_memory_tools::init(&USER_POSITIONS, USER_POSITIONS_MEMORY_ID);
+    canister_tools::init(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID);
+    canister_tools::init(&USER_POSITIONS, USER_POSITIONS_MEMORY_ID);
         
     with_mut(&STORAGE_DATA, |data| {
         data.set_log_size(q.log_size);
@@ -65,13 +63,13 @@ fn init(q: LogStorageInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::post_upgrade(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID, None::<fn(OldStorageData) -> StorageData>);
-    stable_memory_tools::post_upgrade(&USER_POSITIONS, USER_POSITIONS_MEMORY_ID, None::<fn(UserPositions) -> UserPositions>);
+    canister_tools::post_upgrade(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID, None::<fn(OldStorageData) -> StorageData>);
+    canister_tools::post_upgrade(&USER_POSITIONS, USER_POSITIONS_MEMORY_ID, None::<fn(UserPositions) -> UserPositions>);
 }
 
 

@@ -18,15 +18,15 @@ use cts_lib::{
                 msg_cycles_accept128,
                 reply_raw,
             },
+            stable::{
+                WASM_PAGE_SIZE_IN_BYTES
+            }
         },
         update,
     },
-    stable_memory_tools::{
-        self,
-        locate_minimum_memory
-    },
     consts::GiB,
 };
+
 use candid::CandidType;
 
 use ic_stable_structures::{
@@ -89,7 +89,7 @@ thread_local!{
 
 
 pub fn get_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
-    stable_memory_tools::get_stable_memory(LOGS_STABLE_MEMORY_ID)
+    canister_tools::get_virtual_memory(LOGS_STABLE_MEMORY_ID)
 }
 
 
@@ -263,6 +263,26 @@ pub fn cm_update_log(log_id: u128, log_b: Vec<u8>) {
 }
 
 
+
+
+
+
+
+
+
+fn locate_minimum_memory(memory: &VirtualMemory<DefaultMemoryImpl>, want_memory_size_bytes: u64) -> Result<(),()> {
+    let memory_size_wasm_pages: u64 = memory.size();
+    let memory_size_bytes: u64 = memory_size_wasm_pages * WASM_PAGE_SIZE_IN_BYTES as u64;
+    
+    if memory_size_bytes < want_memory_size_bytes {
+        let grow_result: i64 = memory.grow(((want_memory_size_bytes - memory_size_bytes) / WASM_PAGE_SIZE_IN_BYTES as u64) + 1);
+        if grow_result == -1 {
+            return Err(());
+        }
+    }
+    
+    Ok(())
+}
 
 
 

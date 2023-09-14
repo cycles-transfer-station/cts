@@ -3,12 +3,14 @@ use crate::{
     types::{
         cycles_market::{
             tc::{
-                CyclesPerToken
+                CyclesPerToken,
+                PositionKind,
             }
         }        
-    }
+    },
+    ic_cdk::trap,
 };
-use super::PositionId;
+use super::{PositionId};
 
 
 
@@ -27,6 +29,13 @@ pub fn rate_of_the_log_serialization(log_b: &[u8]) -> CyclesPerToken {
 }
 pub fn timestamp_nanos_of_the_log_serialization(log_b: &[u8]) -> u128 {
     u128::from_be_bytes(log_b[143..159].try_into().unwrap())        
+}
+pub fn position_kind_of_the_log_serialization(log_b: &[u8]) -> PositionKind {
+    match log_b[142] {
+        0 => PositionKind::Cycles,
+        1 => PositionKind::Token,
+        x => trap(&format!("unknown position kind log serialization {x}"))
+    }
 }
 
 

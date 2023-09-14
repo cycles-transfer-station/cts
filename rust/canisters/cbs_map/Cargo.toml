@@ -14,3 +14,4 @@ serde = { workspace = true }
 candid = { workspace = true }
 futures = { workspace = true }
 serde_bytes = { workspace = true }
+canister-tools = { workspace = true }

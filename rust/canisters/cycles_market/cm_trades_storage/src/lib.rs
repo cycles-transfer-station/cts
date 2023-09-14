@@ -15,10 +15,6 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-    stable_memory_tools::{
-        self,
-        MemoryId,
-    },
     types::cycles_market::tc::{
         PositionId, 
         PurchaseId, 
@@ -29,7 +25,7 @@ use cts_lib::{
         trade_log,
     },
 };
-
+use canister_tools::MemoryId;
 
 use cm_storage_lib::{
     self,
@@ -71,8 +67,8 @@ thread_local!{
 
 #[init]
 fn init(q: LogStorageInit) {
-    stable_memory_tools::init(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID);
-    stable_memory_tools::init(&POSITIONS_PURCHASES, POSITIONS_PURCHASES_MEMORY_ID);
+    canister_tools::init(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID);
+    canister_tools::init(&POSITIONS_PURCHASES, POSITIONS_PURCHASES_MEMORY_ID);
         
     with_mut(&STORAGE_DATA, |data| {
         data.set_log_size(q.log_size);
@@ -81,13 +77,13 @@ fn init(q: LogStorageInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::post_upgrade(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID, None::<fn(OldStorageData) -> StorageData>);
-    stable_memory_tools::post_upgrade(&POSITIONS_PURCHASES, POSITIONS_PURCHASES_MEMORY_ID, None::<fn(PositionsPurchases) -> PositionsPurchases>);
+    canister_tools::post_upgrade(&STORAGE_DATA, STORAGE_DATA_MEMORY_ID, None::<fn(OldStorageData) -> StorageData>);
+    canister_tools::post_upgrade(&POSITIONS_PURCHASES, POSITIONS_PURCHASES_MEMORY_ID, None::<fn(PositionsPurchases) -> PositionsPurchases>);
 }
 
 
@@ -155,7 +151,8 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
                     trade_log::log_id_of_the_log_serialization(&log),
                     trade_log::tokens_quantity_of_the_log_serialization(&log),
                     trade_log::rate_of_the_log_serialization(&log),
-                    trade_log::timestamp_nanos_of_the_log_serialization(&log).try_into().unwrap() // good for a couple hundred years
+                    trade_log::timestamp_nanos_of_the_log_serialization(&log).try_into().unwrap(), // good for a couple hundred years
+                    trade_log::position_kind_of_the_log_serialization(&log),
                 )); 
                 
             }

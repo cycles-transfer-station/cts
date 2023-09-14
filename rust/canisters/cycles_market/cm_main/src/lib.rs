@@ -19,7 +19,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{cm_main::*, cm_caller::CMCallerInit, icrc1token_trade_contract::CMIcrc1TokenTradeContractInit}
+        cycles_market::{cm_main::*, tc::CMIcrc1TokenTradeContractInit}
     },
     tools::{
         localkey::{
@@ -32,9 +32,10 @@ use cts_lib::{
         sha256,
         time_nanos_u64,
     },
-    stable_memory_tools::{self, MemoryId},
     icrc::Tokens,
 };
+use canister_tools::{self, MemoryId};
+
 use std::cell::{RefCell};
 use serde::Serialize;
 use candid::{
@@ -66,7 +67,6 @@ struct CMMainData {
     icrc1token_trade_contract_canister_code: CanisterCode,
     icrc1token_trades_storage_canister_code: CanisterCode,
     icrc1token_positions_storage_canister_code: CanisterCode,
-    cm_caller_canister_code: CanisterCode,
     controller_create_icrc1token_trade_contract_mid_call_data: Option<ControllerCreateIcrc1TokenTradeContractMidCallData>,
 }
 
@@ -78,7 +78,6 @@ impl CMMainData {
             icrc1token_trade_contract_canister_code: CanisterCode::empty(),
             icrc1token_trades_storage_canister_code: CanisterCode::empty(),
             icrc1token_positions_storage_canister_code: CanisterCode::empty(),
-            cm_caller_canister_code: CanisterCode::empty(),
             controller_create_icrc1token_trade_contract_mid_call_data: None,
         }
     }
@@ -111,7 +110,7 @@ struct CMMainInit {
 
 #[init]
 fn init(cm_main_init: CMMainInit) {
-    stable_memory_tools::init(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID);
+    canister_tools::init(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID);
 
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         cm_main_data.cts_id = cm_main_init.cts_id;
@@ -122,12 +121,12 @@ fn init(cm_main_init: CMMainInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(OldCMMainData) -> CMMainData>);
+    canister_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(OldCMMainData) -> CMMainData>);
 
 }
 
@@ -168,16 +167,6 @@ pub fn controller_upload_icrc1token_positions_storage_canister_code(canister_cod
     });
 }
 
-#[update]
-pub fn controller_upload_cm_caller_canister_code(canister_code: CanisterCode) {
-    caller_is_controller_gaurd(&caller());
-    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
-        trap("module hash is not as given");
-    } 
-    with_mut(&CM_MAIN_DATA, |data| {
-        data.cm_caller_canister_code = canister_code;
-    });
-}
 
 // ------------------------------------------------------
 
@@ -205,8 +194,6 @@ pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
     controller_create_icrc1token_trade_contract_quest: ControllerCreateIcrc1TokenTradeContractQuest,
     // options are for the steps
     icrc1token_trade_contract_canister_id: Option<Principal>,
-    cm_caller_canister_id: Option<Principal>,
-    cm_caller_module_hash: Option<[u8; 32]>,
     icrc1token_trade_contract_module_hash: Option<[u8; 32]>
 }
 
@@ -220,7 +207,6 @@ pub struct ControllerCreateIcrc1TokenTradeContractQuest {
 #[derive(CandidType, Deserialize)]
 pub struct ControllerCreateIcrc1TokenTradeContractSuccess {
     icrc1token_trade_contract_canister_id: Principal,
-    cm_caller_canister_id: Option<Principal>,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -232,8 +218,6 @@ pub enum ControllerCreateIcrc1TokenTradeContractError {
 
 #[derive(CandidType, Deserialize)]
 pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
-    CreateCanisterCmCallerCallError(CallError),
-    InstallCodeCmCallerCallError(CallError),
     InstallCodeIcrc1TokenTradeContractCallError(CallError),
 }
 
@@ -269,8 +253,6 @@ pub async fn controller_create_icrc1token_trade_contract(q: ControllerCreateIcrc
                     lock: true,
                     controller_create_icrc1token_trade_contract_quest: q,
                     icrc1token_trade_contract_canister_id: None,
-                    cm_caller_canister_id: None,
-                    cm_caller_module_hash: None,
                     icrc1token_trade_contract_module_hash: None,       
                 };
                 data.controller_create_icrc1token_trade_contract_mid_call_data = Some(mid_call_data.clone());
@@ -315,60 +297,6 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
         }
     }
     
-    if mid_call_data.cm_caller_canister_id.is_none() {
-        match create_canister(
-            ManagementCanisterCreateCanisterQuest{
-                settings: Some(ManagementCanisterOptionalCanisterSettings{
-                    controllers : Some(vec![
-                        ic_cdk::api::id(), 
-                        with(&CM_MAIN_DATA, |data| data.cts_id), 
-                        mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone()
-                    ]),
-                    compute_allocation : None,
-                    memory_allocation : None,
-                    freezing_threshold : None,
-                })
-            },
-            NEW_ICRC1TOKEN_TRADE_CONTRACT_CM_CALLER_CYCLES
-        ).await {
-            Ok(canister_id) => {
-                mid_call_data.cm_caller_canister_id = Some(canister_id);
-            }
-            Err(create_canister_call_error) => {
-                unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mid_call_data);
-                return Err(ControllerCreateIcrc1TokenTradeContractError::MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError::CreateCanisterCmCallerCallError(create_canister_call_error)));
-            }
-        }
-    }
-    
-    if mid_call_data.cm_caller_module_hash.is_none() {
-        
-        let cm_caller_canister_code: CanisterCode = with(&CM_MAIN_DATA, |data| { data.cm_caller_canister_code.clone() });
-        
-        let module_hash: [u8; 32] = cm_caller_canister_code.module_hash().clone();
-        
-        let cm_caller_init: Vec<u8> = encode_one(CMCallerInit {
-            cycles_market_token_trade_contract: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
-        }).unwrap();
-        
-        match install_code(
-            ManagementCanisterInstallCodeQuest{
-                mode: ManagementCanisterInstallCodeMode::install,
-                canister_id: mid_call_data.cm_caller_canister_id.as_ref().unwrap().clone(),
-                wasm_module: cm_caller_canister_code.module(),
-                arg: &cm_caller_init
-            }
-        ).await {
-            Ok(()) => {
-                mid_call_data.cm_caller_module_hash = Some(module_hash);
-            } 
-            Err(call_error) => {
-                unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mid_call_data);
-                return Err(ControllerCreateIcrc1TokenTradeContractError::MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError::InstallCodeCmCallerCallError(call_error)));
-            }
-        }
-    }
-    
     if mid_call_data.icrc1token_trade_contract_module_hash.is_none() {
         
         let icrc1token_trade_contract_canister_code: CanisterCode = with(&CM_MAIN_DATA, |data| { data.icrc1token_trade_contract_canister_code.clone() });
@@ -379,7 +307,6 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
             encode_one(CMIcrc1TokenTradeContractInit{
                 cts_id: data.cts_id,
                 cm_main_id: ic_cdk::api::id(),
-                cm_caller: mid_call_data.cm_caller_canister_id.as_ref().unwrap().clone(),
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,
                 trades_storage_canister_code: data.icrc1token_trades_storage_canister_code.clone(),
@@ -411,14 +338,12 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
             Icrc1TokenTradeContract {
                 icrc1_ledger_canister_id: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
-                opt_cm_caller: Some(mid_call_data.cm_caller_canister_id.as_ref().unwrap().clone())
             }
         );
     });
     
     Ok(ControllerCreateIcrc1TokenTradeContractSuccess {
         icrc1token_trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.unwrap(),
-        cm_caller_canister_id: Some(mid_call_data.cm_caller_canister_id.unwrap()),
     })
 
 }

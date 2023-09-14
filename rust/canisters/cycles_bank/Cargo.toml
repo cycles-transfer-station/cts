@@ -13,3 +13,4 @@ cts_lib = { path = "../../cts_lib" }
 serde = { workspace = true }
 candid = { workspace = true }
 futures = { workspace = true }
+canister-tools = { workspace = true }

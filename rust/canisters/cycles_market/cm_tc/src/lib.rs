@@ -75,9 +75,8 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-    stable_memory_tools::{self, MemoryId},
 };
-
+use canister_tools::{self, MemoryId};
 use candid::{
     self, 
     Principal,
@@ -390,9 +389,9 @@ thread_local! {
 
 #[init]
 fn init(cm_init: CMIcrc1TokenTradeContractInit) {
-    stable_memory_tools::init(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION);
-    stable_memory_tools::init(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID);
-    stable_memory_tools::init(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID);
+    canister_tools::init(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION);
+    canister_tools::init(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID);
+    canister_tools::init(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID);
         
     with_mut(&CM_DATA, |cm_data| { 
         cm_data.cts_id = cm_init.cts_id; 
@@ -417,14 +416,14 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    stable_memory_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(OldCMData) -> CMData>);
-    stable_memory_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
-    stable_memory_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(OldCMData) -> CMData>);
+    canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
+    canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
     with(&CM_DATA, |cm_data| {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
@@ -531,35 +530,6 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
 // -----------------
 
 
-
-
-
-pub type BuyTokensQuest = MatchTokensQuest;
-
-#[derive(CandidType, Deserialize)]
-pub enum BuyTokensError {
-    BuyTokensMinimum(Tokens),
-    RateCannotBeZero,
-    MsgCyclesTooLow,
-    CyclesMarketIsBusy,
-}
-
-/*
-#[derive(CandidType, Deserialize)]
-pub enum CreateCyclesPositionError{
-    CyclesMarketIsBusy,
-    PositionsAreFullBumpData{ 
-        cycles_positions_lowest_rate: CyclesPerToken, 
-        cycles_positions_lowest_rate_tokens: Tokens  
-    },
-}
-*/
-#[derive(CandidType, Deserialize)]
-pub struct BuyTokensSuccess {
-    pub position_id: PositionId,
-}
-
-pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
 
 
 fn plus_one_ongoing_buy_call(cm_data: &mut CMData) {
@@ -679,45 +649,6 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
 }
 
 
-
-
-pub type SellTokensQuest = MatchTokensQuest;
-
-#[derive(CandidType, Deserialize)]
-pub enum SellTokensError {
-    SellTokensMinimum(Tokens),
-    RateCannotBeZero,
-    CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
-    CyclesMarketIsBusy,
-    CheckUserCyclesMarketTokenLedgerBalanceError(CallError),
-    UserTokenBalanceTooLow{ user_token_balance: Tokens },
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub struct SellTokensSuccess {
-    position_id: PositionId,
-    //sell_tokens_so_far: Tokens,
-    //cycles_payout_so_far: Cycles,
-    //position_closed: bool
-}
-/*
-#[derive(CandidType, Deserialize)]
-pub enum CreateTokenPositionError {
-    CyclesMarketIsBusy,
-    PositionsAreFullBumpData{ 
-        token_positions_highest_rate: CyclesPerToken, 
-        token_positions_highest_rate_tokens: Tokens  
-    }
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct CreateTokenPositionSuccess {
-    position_id: PositionId   
-}
-*/
-
-pub type SellTokensResult = Result<SellTokensSuccess, SellTokensError>;
 
 
 fn plus_one_ongoing_sell_call(cm_data: &mut CMData) {
@@ -862,11 +793,6 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
 
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
-pub struct MatchTokensQuest {
-    tokens: Tokens,
-    cycles_per_token_rate: CyclesPerToken
-}
 
 fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: CurrentPositionTrait>(
     caller: Principal, 
@@ -1449,7 +1375,15 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
         cm_data.trade_logs.make_contiguous(); // since we are using a vecdeque here
         let tls: &[TradeLog] = &cm_data.trade_logs.as_slices().0[..q.opt_start_before_id.map(|sbid| cm_data.trade_logs.binary_search_by_key(&sbid, |tl| tl.id).unwrap_or_else(|e| e)).unwrap_or(cm_data.trade_logs.len())];
         if let Some(tl_chunk) = tls.rchunks(MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA).next() {  
-            trades_data = tl_chunk.into_iter().map(|tl| (tl.id,tl.tokens,tl.cycles_per_token_rate,tl.timestamp_nanos as u64)).collect();
+            trades_data = tl_chunk.into_iter().map(|tl| {
+                (
+                    tl.id,
+                    tl.tokens,
+                    tl.cycles_per_token_rate,
+                    tl.timestamp_nanos as u64,
+                    tl.position_kind,
+                )
+            }).collect();
         }
         if trades_data.len() < MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA {
             // check-storage_buffer
@@ -1467,7 +1401,8 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
                             TradeLog::log_id_of_the_log_serialization(s),
                             trade_log::tokens_quantity_of_the_log_serialization(s),
                             trade_log::rate_of_the_log_serialization(s),
-                            trade_log::timestamp_nanos_of_the_log_serialization(s) as u64
+                            trade_log::timestamp_nanos_of_the_log_serialization(s) as u64,
+                            trade_log::position_kind_of_the_log_serialization(s),
                         )
                     })
                     .collect::<Vec<LatestTradesDataItem>>();
@@ -1682,8 +1617,7 @@ pub struct StorageCanister {
     // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
     // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
     log_size: u32,
-    // Callback to fetch the storage logs in this storage canister.
-    callback : candid::Func,
+    canister_id : Principal,
 }
 
 #[query]
@@ -1706,7 +1640,7 @@ fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'stati
                     first_log_id : storage_canister.first_log_id,
                     length: storage_canister.length as u128,
                     log_size: storage_canister.log_size,
-                    callback : candid::Func{ principal: storage_canister.canister_id, method: "map_logs_rchunks".to_string() }
+                    canister_id : storage_canister.canister_id,
                 }
             );
         }

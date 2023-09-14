@@ -6,6 +6,5 @@ pub mod tools;
 pub mod ic_ledger_types;
 pub mod icrc;
 pub mod global_allocator_counter;
-pub mod stable_memory_tools;
 pub mod management_canister;
 pub mod cts_cb_authorizations;

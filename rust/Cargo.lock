@@ -296,6 +296,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "canister-tools"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01709e4f6973f06aa87d6d0dd04bb808a25388ff8a7de4fcc6e5f4d9d463ba5b"
+dependencies = [
+ "bincode",
+ "candid 0.9.6",
+ "ic-cdk 0.10.0",
+ "ic-stable-structures",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "canister_authorizations"
 version = "0.1.0"
 dependencies = [
@@ -309,6 +323,7 @@ name = "cbs_map"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cts_lib",
  "futures",
  "serde",
@@ -349,6 +364,7 @@ name = "cm_main"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cts_lib",
  "futures",
  "ic-stable-structures",
@@ -361,6 +377,7 @@ name = "cm_positions_storage"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cm_storage_lib",
  "cts_lib",
  "ic-stable-structures",
@@ -373,6 +390,7 @@ name = "cm_storage_lib"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cts_lib",
  "ic-stable-structures",
  "serde",
@@ -384,6 +402,7 @@ name = "cm_tc"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cm_storage_lib",
  "cts_lib",
  "futures",
@@ -398,6 +417,7 @@ name = "cm_trades_storage"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cm_storage_lib",
  "cts_lib",
  "ic-stable-structures",
@@ -512,6 +532,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.13.1",
  "candid 0.9.6",
+ "canister-tools",
  "cts_lib",
  "futures",
  "num-traits",
@@ -532,7 +553,6 @@ dependencies = [
  "ic-ledger-types",
  "ic-stable-structures",
  "icrc-ledger-types",
- "rmp-serde",
  "serde",
  "serde_bytes",
  "sha2 0.9.9",
@@ -552,6 +572,7 @@ name = "cycles_bank"
 version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
+ "canister-tools",
  "cts_lib",
  "futures",
  "serde",
@@ -2091,28 +2112,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
 
 [[package]]
-name = "rmp"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44519172358fd6d58656c86ab8e7fbc9e1490c3e8f14d35ed78ca0dd07403c9f"
-dependencies = [
- "byteorder",
- "num-traits",
- "paste",
-]
-
-[[package]]
-name = "rmp-serde"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5b13be192e0220b8afb7222aa5813cb62cc269ebb5cac346ca6487681d2913e"
-dependencies = [
- "byteorder",
- "rmp",
- "serde",
-]
-
-[[package]]
 name = "rustix"
 version = "0.38.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2384,6 +2383,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "temp_fid"
+version = "0.1.0"
+dependencies = [
+ "candid 0.9.6",
+ "cts_lib",
+ "futures",
+ "serde",
 ]
 
 [[package]]

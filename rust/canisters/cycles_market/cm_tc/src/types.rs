@@ -43,9 +43,23 @@ impl StorageLogTrait for PositionLog {
     const STABLE_MEMORY_VERSION: u16 = 0;
     fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
         let mut s: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] = [0u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE];
-        s[0..0].copy_from_slice(&[]);
-        s.to_vec();
-        todo!();
+        s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());        
+        s[2..18].copy_from_slice(&self.id.to_be_bytes());
+        s[18..48].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
+        s[48..64].copy_from_slice(&self.match_tokens_quest.tokens.to_be_bytes());
+        s[64..80].copy_from_slice(&self.match_tokens_quest.cycles_per_token_rate.to_be_bytes());
+        s[80] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
+        s[81..97].copy_from_slice(&self.mainder_position_quantity.to_be_bytes());
+        s[97..113].copy_from_slice(&self.fill_quantity.to_be_bytes());
+        s[113..129].copy_from_slice(&self.fill_average_rate.to_be_bytes());
+        s[129..145].copy_from_slice(&self.payouts_fees_sum.to_be_bytes());
+        s[145..153].copy_from_slice(&(self.creation_timestamp_nanos as u64).to_be_bytes());
+        if let Some(ref data) = self.position_termination { 
+            s[153] = 1; 
+            s[154..162].copy_from_slice(&(data.timestamp_nanos as u64).to_be_bytes());
+            s[162] = data.cause.ser();
+        }        
+        s.to_vec()
     }  
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
         position_log::log_id_of_the_log_serialization(log_b)
@@ -67,8 +81,16 @@ pub enum PositionTerminationCause {
     Bump, // the position got bumped
     TimePass, // expired
     UserCallVoidPosition, // the user cancelled the position by calling void_position
-    
-        
+}
+impl PositionTerminationCause {
+    pub fn ser(&self) -> u8 {
+        match self {
+            PositionTerminationCause::Fill => 0,
+            PositionTerminationCause::Bump => 1,
+            PositionTerminationCause::TimePass => 2,
+            PositionTerminationCause::UserCallVoidPosition => 3
+        }
+    }
 }
 
 
@@ -423,12 +445,6 @@ pub struct TradeLog {
     pub token_payout_lock: bool,
     pub cycles_payout_data: CyclesPayoutData,
     pub token_payout_data: TokenPayoutData
-}
-
-#[derive(Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PositionKind {
-    Cycles,
-    Token
 }
 
 impl TradeLog {

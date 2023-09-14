@@ -1,6 +1,6 @@
 use candid::{Principal, CandidType, Deserialize};
 use crate::icrc::{IcrcId, Tokens, TokenTransferError, BlockId};
-use crate::types::{Cycles,canister_code::CanisterCode};
+use crate::types::{Cycles, CallError, canister_code::CanisterCode};
 use crate::consts::KiB;
 use serde::Serialize;
 
@@ -19,6 +19,66 @@ pub struct CMIcrc1TokenTradeContractInit {
 }
 
 // ----
+
+
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct MatchTokensQuest {
+    pub tokens: Tokens,
+    pub cycles_per_token_rate: CyclesPerToken
+}
+
+
+
+pub type BuyTokensQuest = MatchTokensQuest;
+
+#[derive(CandidType, Deserialize)]
+pub enum BuyTokensError {
+    BuyTokensMinimum(Tokens),
+    RateCannotBeZero,
+    MsgCyclesTooLow,
+    CyclesMarketIsBusy,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct BuyTokensSuccess {
+    pub position_id: PositionId,
+}
+
+pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
+
+
+
+
+
+
+pub type SellTokensQuest = MatchTokensQuest;
+
+#[derive(CandidType, Deserialize)]
+pub enum SellTokensError {
+    SellTokensMinimum(Tokens),
+    RateCannotBeZero,
+    CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
+    CyclesMarketIsBusy,
+    CheckUserCyclesMarketTokenLedgerBalanceError(CallError),
+    UserTokenBalanceTooLow{ user_token_balance: Tokens },
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct SellTokensSuccess {
+    pub position_id: PositionId,
+    //sell_tokens_so_far: Tokens,
+    //cycles_payout_so_far: Cycles,
+    //position_closed: bool
+}
+
+
+pub type SellTokensResult = Result<SellTokensSuccess, SellTokensError>;
+
+
+
+
+
 /*
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CreateCyclesPositionQuest {
@@ -250,12 +310,19 @@ pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem:
 
 
 
+#[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PositionKind {
+    Cycles,
+    Token
+}
+
+
 #[derive(CandidType, Deserialize)]
 pub struct ViewLatestTradesQuest {
     pub opt_start_before_id: Option<PurchaseId>,
 }
 
-pub type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64);
+pub type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64, PositionKind);
 
 #[derive(CandidType, Deserialize)]
 pub struct ViewLatestTradesSponse {

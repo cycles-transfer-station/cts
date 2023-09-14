@@ -65,10 +65,6 @@ use cts_lib::{
         caller_is_controller_gaurd,
         call_error_as_u32_and_string,
     },
-    stable_memory_tools::{
-        self,
-        MemoryId,
-    },
     ic_cdk::{
         self,
         api::{
@@ -126,6 +122,13 @@ use candid::{
         decode_one
     }
 };
+
+use canister_tools::{
+    self,
+    MemoryId,
+};
+
+
 
 #[cfg(test)]
 mod t;
@@ -299,7 +302,7 @@ struct CTSInit {
 
 #[init]
 fn init(cts_init: CTSInit) {
-    stable_memory_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID);
+    canister_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID);
 
     with_mut(&CTS_DATA, |cts_data| { 
         cts_data.cycles_market_main = cts_init.cycles_market_main; 
@@ -312,7 +315,7 @@ fn init(cts_init: CTSInit) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    stable_memory_tools::pre_upgrade();
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
@@ -356,12 +359,12 @@ fn post_upgrade() {
     stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; cts_upgrade_data_candid_bytes_len_u64 as usize * 2 + 8]);
     
     
-    stable_memory_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID); 
+    canister_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID); 
     
     
     // change into post_upgrade for the next upgrade
     /*
-    stable_memory_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(OldCTSData) -> CTSData>);
+    canister_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(OldCTSData) -> CTSData>);
     with(&CTS_DATA, |cts_data| {
         set_root_hash(&cts_data.frontcode_files_hashes);
     });
