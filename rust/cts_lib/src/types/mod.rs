@@ -98,7 +98,7 @@ pub mod cache {
     use std::collections::{HashMap};
     
     // private
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
     struct CacheData<T> {
         timestamp_nanos: u64,
         data: T,
@@ -108,6 +108,7 @@ pub mod cache {
     // on a new user, put/update insert the new user into this cache
     // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
     use core::hash::Hash;
+    #[derive(serde::Serialize, serde::Deserialize)]
     pub struct Cache<E: Eq + PartialEq + Hash + Clone, T> {
         hashmap: HashMap<E, CacheData<T>>,
         max_size: usize
@@ -224,7 +225,7 @@ pub mod cbs_map {
     
     pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBErrorKind);
 
-    #[derive(CandidType, Deserialize, Clone, Debug)]
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]
     pub enum CBSMUpgradeCBErrorKind {
         StopCanisterCallError(u32, String),
         UpgradeCodeCallError{wasm_module_hash: [u8; 32], call_error: (u32, String)},

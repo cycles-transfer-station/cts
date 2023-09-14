@@ -18,17 +18,14 @@ use cts_lib::{
         ManagementCanisterInstallCodeQuest,
         ManagementCanisterCreateCanisterQuest,
         ManagementCanisterOptionalCanisterSettings,
-        ManagementCanisterCanisterStatusRecord,
-        ManagementCanisterCanisterStatusVariant,
         CanisterIdRecord,
-        ChangeCanisterSettingsRecord,    
     },
     consts::{
         MiB,
         MANAGEMENT_CANISTER_ID,
         ICP_LEDGER_TOP_UP_CANISTER_MEMO,
-        NETWORK_CANISTER_CREATION_FEE_CYCLES
-        
+        NETWORK_CANISTER_CREATION_FEE_CYCLES,
+        TRILLION,
     },
     tools::{
         localkey::{
@@ -45,7 +42,6 @@ use cts_lib::{
                 CallResult,
                 call_raw128,
                 call,
-                call_with_payment128,
             },
         }
     },
@@ -180,134 +176,19 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
 
 
 
-
-
-
-
-enum SetCanisterError {
-    CanisterStatusCallError((u32, String)),
-    UninstallCanisterCallError((u32, String)),
-    StartCanisterCallError((u32, String)),
-    UpdateSettingsCallError((u32, String)),    
-    PositCyclesCallError((u32, String)),
-}
-
-async fn set_canister(canister_id: Principal, optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, SetCanisterError> {
-    // get status
-    let canister_status_record: ManagementCanisterCanisterStatusRecord = match call::<(CanisterIdRecord,), (ManagementCanisterCanisterStatusRecord,)>(
-        MANAGEMENT_CANISTER_ID,
-        "canister_status",
-        (CanisterIdRecord { canister_id: canister_id },),
-    ).await {
-        Ok((canister_status_record,)) => canister_status_record,
-        Err(canister_status_call_error) => return Err(SetCanisterError::CanisterStatusCallError((canister_status_call_error.0 as u32, canister_status_call_error.1)))
-    };
-    
-    // make sure is empty
-    if canister_status_record.module_hash.is_some() {
-        match call::<(CanisterIdRecord,), ()>(
-            MANAGEMENT_CANISTER_ID,
-            "uninstall_code",
-            (CanisterIdRecord{ canister_id: canister_id },)
-        ).await {
-            Ok(()) => {},
-            Err(uninstall_canister_call_error) => return Err(SetCanisterError::UninstallCanisterCallError((uninstall_canister_call_error.0 as u32, uninstall_canister_call_error.1)))
-        }
-    }
-    
-    // make sure is running 
-    if canister_status_record.status != ManagementCanisterCanisterStatusVariant::running {
-        match call::<(CanisterIdRecord,), ()>(
-            MANAGEMENT_CANISTER_ID,
-            "start_canister",
-            (CanisterIdRecord{ canister_id: canister_id },)
-        ).await {
-            Ok(()) => {},
-            Err(start_canister_call_error) => return Err(SetCanisterError::StartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1)))
-        }
-    
-    }
-    
-    // update settings if different
-    let mut settings: ManagementCanisterOptionalCanisterSettings = ManagementCanisterOptionalCanisterSettings{
-        controllers : Some(vec![id()]),
-        compute_allocation : Some(0),
-        memory_allocation : Some(0),
-        freezing_threshold : Some(2592000), //(30 days).
-    };
-    
-    if let Some(canister_settings) = optional_canister_settings {
-        if let Some(controllers) = canister_settings.controllers {
-            settings.controllers = Some(controllers);
-        }
-        if let Some(compute_allocation) = canister_settings.compute_allocation {
-            settings.compute_allocation = Some(compute_allocation);
-        }
-        if let Some(memory_allocation) = canister_settings.memory_allocation {
-            settings.memory_allocation = Some(memory_allocation);
-        }
-        if let Some(freezing_threshold) = canister_settings.freezing_threshold {
-            settings.freezing_threshold = Some(freezing_threshold);
-        }
-    }
-    match call::<(ChangeCanisterSettingsRecord,), ()>(
-        MANAGEMENT_CANISTER_ID,
-        "update_settings",
-        (ChangeCanisterSettingsRecord{
-            canister_id,
-            settings
-        },)
-    ).await {
-        Ok(()) => {},
-        Err(update_settings_call_error) => return Err(SetCanisterError::UpdateSettingsCallError((update_settings_call_error.0 as u32, update_settings_call_error.1)))
-    }
-    
-    
-    // put cycles (or take cycles? later.) if not enough
-    if canister_status_record.cycles < with_cycles {
-        match call_with_payment128::<>(
-            MANAGEMENT_CANISTER_ID,
-            "deposit_cycles",
-            (CanisterIdRecord{ canister_id: canister_id },),
-            with_cycles - canister_status_record.cycles
-        ).await {
-            Ok(()) => {},
-            Err(posit_cycles_call_error) => return Err(SetCanisterError::PositCyclesCallError((posit_cycles_call_error.0 as u32, posit_cycles_call_error.1)))
-        }
-    }
-    
-    Ok(canister_id)
-}
-
-
-
-
-
 #[derive(CandidType, Deserialize)]
-pub enum GetNewCanisterError {
+pub enum CreateCanisterError {
     CreateCanisterManagementCallQuestCandidError(String),
     CreateCanisterManagementCallSponseCandidError{candid_error: String, candid_bytes: Vec<u8>},
     CreateCanisterManagementCallError((u32, String))
 }
 
-pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, GetNewCanisterError> {
+pub async fn create_canister(optional_canister_settings: Option<ManagementCanisterOptionalCanisterSettings>, with_cycles: Cycles) -> Result<Principal, CreateCanisterError> {
     
-    if with(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.len() }) >= 1 {
-        let new_canister: Principal = with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.take(&(cts_data.canisters_for_the_use.iter().next().unwrap().clone())).unwrap() }); 
-     
-        match set_canister(new_canister, optional_canister_settings.clone(), with_cycles).await {
-            Ok(canister_id) => return Ok(canister_id),
-            Err(_set_canister_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_canister); });
-                // continue
-            }
-        }
-    }
-
     let create_canister_management_call_quest_candid_bytes: Vec<u8> = match encode_one(&ManagementCanisterCreateCanisterQuest { settings: optional_canister_settings }) {
         Ok(candid_bytes) => candid_bytes,
         Err(candid_error) => {
-            return Err(GetNewCanisterError::CreateCanisterManagementCallQuestCandidError(format!("{}", candid_error)));
+            return Err(CreateCanisterError::CreateCanisterManagementCallQuestCandidError(format!("{}", candid_error)));
         }
     };
 
@@ -320,16 +201,14 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
         Ok(call_sponse_candid_bytes) => match decode_one::<CanisterIdRecord>(&call_sponse_candid_bytes) {
             Ok(canister_id_record) => canister_id_record.canister_id,
             Err(candid_error) => {
-                return Err(GetNewCanisterError::CreateCanisterManagementCallSponseCandidError{ candid_error: format!("{}", candid_error), candid_bytes: call_sponse_candid_bytes });
+                return Err(CreateCanisterError::CreateCanisterManagementCallSponseCandidError{ candid_error: format!("{}", candid_error), candid_bytes: call_sponse_candid_bytes });
             }
         },
         Err(call_error) => {
-            return Err(GetNewCanisterError::CreateCanisterManagementCallError((call_error.0 as u32, call_error.1)));
+            return Err(CreateCanisterError::CreateCanisterManagementCallError((call_error.0 as u32, call_error.1)));
         }
     };
     
-    // are new canisters running?
-
     Ok(canister_id)
 
 }
@@ -349,6 +228,7 @@ pub async fn get_new_canister(optional_canister_settings: Option<ManagementCanis
 pub struct CmcNotifyCreateCanisterQuest {
     pub block_index: IcpBlockHeight,
     pub controller: Principal,
+    pub subnet_type: &'static str
 }
 
 
@@ -526,7 +406,7 @@ pub async fn put_new_user_into_a_cbsm(user_id: Principal, cbsm_user_data: CBSMUs
 pub enum CreateNewCBSMError {
     MaxCBSMapCanisters,
     CreateNewCBSMapLockIsOn,
-    GetNewCanisterError(GetNewCanisterError),
+    GetNewCanisterError(CreateCanisterError),
     CBSMapCanisterCodeNotFound,
     InstallCodeCallError(String)
 }
@@ -539,28 +419,37 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
     if with(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock }) == true {
         return Err(CreateNewCBSMError::CreateNewCBSMapLockIsOn);
     }
-    with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = true; });
+    let mut possible_c: Option<Principal> = with_mut(&CTS_DATA, |cts_data| { 
+        cts_data.create_new_cbs_map_lock = true; 
+        cts_data.temp_create_new_cbsmap_holder.take()     
+    });
     
-    let new_cbs_map_canister_id: Principal = match get_new_canister(
-        Some(ManagementCanisterOptionalCanisterSettings{
-            controllers : None,
-            compute_allocation : None,
-            memory_allocation : Some(100 * MiB as u128),
-            freezing_threshold : None,
-        }),
-        /*TEST-VALUE*/3_000_000_000_000  //7_000_000_000_000
-    ).await {
-        Ok(canister_id) => canister_id,
-        Err(get_new_canister_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
-            return Err(CreateNewCBSMError::GetNewCanisterError(get_new_canister_error));
-        }
-    };    
+    if possible_c.is_none() { 
+        possible_c = match create_canister(
+            Some(ManagementCanisterOptionalCanisterSettings{
+                controllers : None,
+                compute_allocation : None,
+                memory_allocation : Some(100 * MiB as u128),
+                freezing_threshold : None,
+            }),
+            10 * TRILLION
+        ).await {
+            Ok(canister_id) => Some(canister_id),
+            Err(get_new_canister_error) => {
+                with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+                return Err(CreateNewCBSMError::GetNewCanisterError(get_new_canister_error));
+            }
+        };    
+    }
+    
+    let c: Principal = possible_c.unwrap();
     
     // install code
     if with(&CTS_DATA, |cts_data| cts_data.cbs_map_canister_code.module().len() ) == 0 {
-        with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cbs_map_canister_id); });
-        with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+        with_mut(&CTS_DATA, |cts_data| { 
+            cts_data.temp_create_new_cbsmap_holder = Some(c);
+            cts_data.create_new_cbs_map_lock = false; 
+        });
         return Err(CreateNewCBSMError::CBSMapCanisterCodeNotFound);
     }
     
@@ -569,7 +458,7 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
         "install_code",
         (ManagementCanisterInstallCodeQuest{
             mode : ManagementCanisterInstallCodeMode::install,
-            canister_id : new_cbs_map_canister_id,
+            canister_id : c,
             wasm_module : unsafe{&*with(&CTS_DATA, |cts_data| { cts_data.cbs_map_canister_code.module() as *const Vec<u8> })},
             arg : &encode_one(&CBSMInit{
                 cts_id: id()
@@ -577,13 +466,17 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
         },)
     ).await {
         Ok(_) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.cbs_maps.push(new_cbs_map_canister_id); }); 
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
-            Ok(new_cbs_map_canister_id)    
+            with_mut(&CTS_DATA, |cts_data| { 
+                cts_data.cbs_maps.push(c); 
+                cts_data.create_new_cbs_map_lock = false; 
+            });
+            Ok(c)    
         },
         Err(install_code_call_error) => {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.canisters_for_the_use.insert(new_cbs_map_canister_id); });
-            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+            with_mut(&CTS_DATA, |cts_data| { 
+                cts_data.temp_create_new_cbsmap_holder = Some(c);
+                cts_data.create_new_cbs_map_lock = false; 
+            });
             return Err(CreateNewCBSMError::InstallCodeCallError(format!("{:?}", install_code_call_error)));
         }
     }

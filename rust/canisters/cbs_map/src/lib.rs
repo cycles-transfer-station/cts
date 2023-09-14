@@ -72,13 +72,14 @@ use candid::{
         decode_one
     }
 };
+use serde::{Serialize};
       
+use canister_tools::MemoryId;
 
 
 type UsersMap = HashMap<Principal, CBSMUserData>;
 
-
-#[derive(CandidType, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CBSMData {
     cts_id: Principal,
     users_map: UsersMap,
@@ -97,31 +98,14 @@ impl CBSMData {
 }
 
 
-#[derive(CandidType, Deserialize)]
-struct OldCBSMData {
-    cts_id: Principal,
-    users_map: UsersMap,
-    cycles_bank_canister_code: CanisterCode,
-    cycles_bank_canister_upgrade_fails: Vec<OldCBSMUpgradeCBError>,
-}
-
-type OldCBSMUpgradeCBError = (Principal, OldCBSMUpgradeCBCallErrorType, (u32, String));
-
-#[derive(CandidType, Deserialize)]
-enum OldCBSMUpgradeCBCallErrorType {
-    StopCanisterCallError,
-    UpgradeCodeCallError{wasm_module_hash: [u8; 32]},
-    StartCanisterCallError
-}
+#[derive(Serialize, Deserialize)]
+struct Stub;
 
 
-
-
+const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
 
 const MAX_USERS: usize = 20_000; 
-
-const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
 
 const CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE: usize = 500;
 const SEE_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
@@ -143,85 +127,21 @@ thread_local! {
 
 #[init]
 fn init(users_map_canister_init: CBSMInit) {
+    canister_tools::init(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID);
+    
     with_mut(&CBSM_DATA, |cbsm_data| {
         cbsm_data.cts_id = users_map_canister_init.cts_id; 
     });
 }
 
-
-
-
-
-fn create_cbsm_data_candid_bytes() -> Vec<u8> {
-    let mut cbsm_data_candid_bytes: Vec<u8> = with(&CBSM_DATA, |cbsm_data| { encode_one(cbsm_data).unwrap() });
-    cbsm_data_candid_bytes.shrink_to_fit();
-    cbsm_data_candid_bytes
-}
-
-fn re_store_cbsm_data_candid_bytes(cbsm_data_candid_bytes: Vec<u8>) {
-    let cbsm_data: CBSMData = match decode_one::<CBSMData>(&cbsm_data_candid_bytes) {
-        Ok(cbsm_data) => cbsm_data,
-        Err(_) => {
-            //trap("error decode of the CBSMData");
-            
-            let old_cbsm_data: OldCBSMData = decode_one::<OldCBSMData>(&cbsm_data_candid_bytes).unwrap();
-            let cbsm_data: CBSMData = CBSMData{
-                cts_id: old_cbsm_data.cts_id,
-                users_map: old_cbsm_data.users_map,
-                cycles_bank_canister_code: old_cbsm_data.cycles_bank_canister_code,
-                cycles_bank_canister_upgrade_fails: old_cbsm_data.cycles_bank_canister_upgrade_fails.into_iter().map(
-                    |old_e: (Principal, OldCBSMUpgradeCBCallErrorType, (u32, String))| {
-                        (
-                            old_e.0, 
-                            match old_e.1 {
-                                OldCBSMUpgradeCBCallErrorType::StopCanisterCallError => CBSMUpgradeCBErrorKind::StopCanisterCallError(old_e.2.0, old_e.2.1),
-                                OldCBSMUpgradeCBCallErrorType::UpgradeCodeCallError{wasm_module_hash} => CBSMUpgradeCBErrorKind::UpgradeCodeCallError{wasm_module_hash, call_error: (old_e.2.0, old_e.2.1)},
-                                OldCBSMUpgradeCBCallErrorType::StartCanisterCallError => CBSMUpgradeCBErrorKind::StartCanisterCallError(old_e.2.0, old_e.2.1),
-                            }
-                        )
-                    }
-                ).collect::<Vec<CBSMUpgradeCBError>>(),
-            };
-            cbsm_data            
-        }
-    };
-
-    std::mem::drop(cbsm_data_candid_bytes);    
-
-    with_mut(&CBSM_DATA, |umcd| {
-        *umcd = cbsm_data;
-    });
-    
-}
-
-
 #[pre_upgrade]
 fn pre_upgrade() {
-    let cbsm_data_candid_bytes: Vec<u8> = create_cbsm_data_candid_bytes();
-    
-    let current_stable_size_wasm_pages: u64 = stable64_size();
-    let current_stable_size_bytes: u64 = current_stable_size_wasm_pages * WASM_PAGE_SIZE_BYTES as u64;
-    
-    let want_stable_memory_size_bytes: u64 = STABLE_MEMORY_HEADER_SIZE_BYTES + 8/*u64 len of the cbsm_data_candid_bytes*/ + cbsm_data_candid_bytes.len() as u64; 
-    if current_stable_size_bytes < want_stable_memory_size_bytes {
-        stable64_grow(((want_stable_memory_size_bytes - current_stable_size_bytes) / WASM_PAGE_SIZE_BYTES as u64) + 1).unwrap();
-    }
-    
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &((cbsm_data_candid_bytes.len() as u64).to_be_bytes()));
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &cbsm_data_candid_bytes);
-
+    canister_tools::pre_upgrade();
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-    let mut cbsm_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut cbsm_data_candid_bytes_len_u64_be_bytes);
-    let cbsm_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(cbsm_data_candid_bytes_len_u64_be_bytes); 
-    
-    let mut cbsm_data_candid_bytes: Vec<u8> = vec![0; cbsm_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut cbsm_data_candid_bytes);
-    
-    re_store_cbsm_data_candid_bytes(cbsm_data_candid_bytes);
+    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, None::<fn(Stub) -> CBSMData>)
 }
 
 #[no_mangle]
@@ -328,26 +248,7 @@ pub fn update_user() {
 
 
 
-// -------------------------------
-
-/*
-
-#[update]
-pub fn cb_lengthen_lifetime(q: cycles_bank::LengthenLifetimeQuest) -> () {
-    with_mut(&CBSM_DATA, |cbsm_data| {
-        let (_user_id, data): (&Principal, &mut CBSMUserData) = cbsm_data.users_map.iter_mut().find(|(_user_id, data): &(&Principal, &mut CBSMUserData)| { data.cycles_bank_canister_id == caller() }).unwrap_or_else(|| { trap("caller must be a cycles_bank in this cbs_map") });
-        data.cycles_bank_lifetime_termination_timestamp_seconds = q.set_lifetime_termination_timestamp_seconds;
-    });
-}
-
-*/
-
-
-
-
-
-// ------------------------------------------------------------------------------------
-
+  
   
  
 // ----- STOP_CALLS-METHODS --------------------------
@@ -362,7 +263,7 @@ pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {
 }
 
 #[query]
-pub fn cts_see_stop_calls_flag() -> bool {
+pub fn cts_view_stop_calls_flag() -> bool {
     if caller() != cts_id() {
         trap("caller must be the CTS");
     }
@@ -370,71 +271,6 @@ pub fn cts_see_stop_calls_flag() -> bool {
 }
 
 
-
-
-
-// ----- STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES-METHODS --------------------------
-
-#[update]
-pub fn cts_create_state_snapshot() -> u64/*len of the state_snapshot_candid_bytes*/ {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    with_mut(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-        *state_snapshot_cbsm_data_candid_bytes = create_cbsm_data_candid_bytes();
-        state_snapshot_cbsm_data_candid_bytes.len() as u64
-    })
-}
-
-
-
-#[export_name = "canister_query cts_download_state_snapshot"]
-pub fn cts_download_state_snapshot() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    let chunk_size: usize = 1 * MiB as usize;
-    with(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-        let (chunk_i,): (u128,) = arg_data::<(u128,)>(); // starts at 0
-        reply::<(Option<&[u8]>,)>((state_snapshot_cbsm_data_candid_bytes.chunks(chunk_size).nth(chunk_i as usize),));
-    });
-}
-
-
-#[update]
-pub fn cts_clear_state_snapshot() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    with_mut(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-        *state_snapshot_cbsm_data_candid_bytes = Vec::new();
-    });    
-}
-
-#[update]
-pub fn cts_append_state_snapshot_candid_bytes(mut append_bytes: Vec<u8>) {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    with_mut(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-        state_snapshot_cbsm_data_candid_bytes.append(&mut append_bytes);
-    });
-}
-
-#[update]
-pub fn cts_re_store_cbsm_data_out_of_the_state_snapshot() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    re_store_cbsm_data_candid_bytes(
-        with_mut(&STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES, |state_snapshot_cbsm_data_candid_bytes| {
-            let mut v: Vec<u8> = Vec::new();
-            v.append(state_snapshot_cbsm_data_candid_bytes);
-            v
-        })
-    );
-
-}
 
 
 
@@ -628,7 +464,7 @@ pub async fn cts_upgrade_ucs_chunk() {
 
 
 #[query(manual_reply = true)]
-pub fn cts_see_user_canister_upgrade_fails() {
+pub fn cts_view_user_canister_upgrade_fails() {
     if caller() != cts_id() {
         trap("caller must be the CTS");            
     }

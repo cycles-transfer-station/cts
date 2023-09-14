@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell}, 
-    collections::{HashSet, HashMap},
+    collections::{HashMap},
 };
 use futures::task::Poll;
 
@@ -86,10 +86,6 @@ use cts_lib::{
                 reject,
                 reply,
             },
-            stable::{
-                stable64_read,
-                stable64_write,
-            }
         },
         update, 
         query, 
@@ -119,7 +115,6 @@ use candid::{
     Func,
     utils::{
         encode_one, 
-        decode_one
     }
 };
 
@@ -139,8 +134,6 @@ use tools::{
     CheckCurrentXdrPerMyriadPerIcpCmcRateError,
     CheckCurrentXdrPerMyriadPerIcpCmcRateSponse,
     check_current_xdr_permyriad_per_icp_cmc_rate,
-    get_new_canister,
-    GetNewCanisterError,
     IcpXdrConversionRate,
     transfer_user_icp_ledger,
     CmcNotifyError,
@@ -174,25 +167,8 @@ use certification::*;
 
 // -------
 
-#[derive(CandidType, Deserialize)]
-pub struct OldCTSData {
-    controllers: Vec<Principal>,
-    cycles_market_id: Principal,
-    cycles_market_cmcaller: Principal,
-    cycles_bank_canister_code: CanisterCode,
-    cbs_map_canister_code: CanisterCode,
-    cycles_transferrer_canister_code: CanisterCode,
-    frontcode_files: Files,
-    frontcode_files_hashes: Vec<(String, [u8; 32])>, // field is [only] use for the upgrades.
-    cbs_maps: Vec<Principal>,
-    create_new_cbs_map_lock: bool,
-    cycles_transferrer_canisters: Vec<Principal>,
-    cycles_transferrer_canisters_round_robin_counter: u32,
-    canisters_for_the_use: HashSet<Principal>,
-    users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
-    users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
-    users_transfer_icp: HashMap<Principal, TransferIcpData>
-}
+#[derive(Serialize, Deserialize)]
+pub struct Stub;
 
 // --------
 
@@ -206,12 +182,13 @@ pub struct CTSData {
     cb_auths: CBAuths,
     cbs_maps: Vec<Principal>,
     create_new_cbs_map_lock: bool,
-    canisters_for_the_use: HashSet<Principal>,
+    temp_create_new_cbsmap_holder: Option<Principal>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
     users_burn_icp_mint_cycles: HashMap<Principal, BurnIcpMintCyclesData>,
     users_transfer_icp: HashMap<Principal, TransferIcpData>,
     users_lengthen_membership: HashMap<Principal, LengthenMembershipMidCallData>,
     users_lengthen_membership_cb_cycles_payment: HashMap<Principal, LengthenMembershipMidCallData>,
+    cb_cache: Cache<Principal/*user-id*/, Option<Principal/*cycles-bank*/>>,
 }
 impl CTSData {
     fn new() -> Self {
@@ -224,12 +201,13 @@ impl CTSData {
             cb_auths: CBAuths::default(),
             cbs_maps: Vec::new(),
             create_new_cbs_map_lock: false,
-            canisters_for_the_use: HashSet::new(),
+            temp_create_new_cbsmap_holder: None,
             users_purchase_cycles_bank: HashMap::new(),
             users_burn_icp_mint_cycles: HashMap::new(),
             users_transfer_icp: HashMap::new(),
             users_lengthen_membership: HashMap::new(),
             users_lengthen_membership_cb_cycles_payment: HashMap::new(),
+            cb_cache: Cache::<Principal, Option<Principal>>::new(1400)
         }
     }
 }
@@ -273,8 +251,6 @@ const MAX_USERS_LENGTHEN_MEMBERSHIP_CB_CYCLES_PAYMENT: usize = 170;
 pub const MINIMUM_CTS_CYCLES_TRANSFER_IN_CYCLES: Cycles = 5_000_000_000;
 
 
-const STABLE_MEMORY_HEADER_SIZE_BYTES: u64 = 1024;
-
 const STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID: MemoryId = MemoryId::new(0);
 
 
@@ -285,7 +261,6 @@ thread_local! {
     
     // not save through the upgrades
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
-    static     CYCLES_BANKS_CACHE: RefCell<Cache<Principal/*user-id*/, Option<Principal/*cycles-bank*/>>> = RefCell::new(Cache::<Principal, Option<Principal>>::new(1400));
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
     
 }
@@ -319,56 +294,12 @@ fn pre_upgrade() {
 }
 
 #[post_upgrade]
-fn post_upgrade() {
-    let mut cts_upgrade_data_candid_bytes_len_u64_be_bytes: [u8; 8] = [0; 8];
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES, &mut cts_upgrade_data_candid_bytes_len_u64_be_bytes);
-    let cts_upgrade_data_candid_bytes_len_u64: u64 = u64::from_be_bytes(cts_upgrade_data_candid_bytes_len_u64_be_bytes); 
+fn post_upgrade() { 
+    canister_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(Stub) -> CTSData>);
     
-    let mut cts_upgrade_data_candid_bytes: Vec<u8> = vec![0; cts_upgrade_data_candid_bytes_len_u64 as usize]; // usize is u32 on wasm32 so careful with the cast len_u64 as usize 
-    stable64_read(STABLE_MEMORY_HEADER_SIZE_BYTES + 8, &mut cts_upgrade_data_candid_bytes);
-    
-    let mut old_cts_data: OldCTSData = decode_one::<OldCTSData>(&cts_upgrade_data_candid_bytes).unwrap(); 
-    
-    let frontcode_files_hashes: FilesHashes = FilesHashes::from_iter(old_cts_data.frontcode_files_hashes.drain(..));
-            
-    let new_cts_data: CTSData = CTSData{
-        cycles_market_main: Principal::from_text("").unwrap(),
-        cycles_bank_canister_code: old_cts_data.cycles_bank_canister_code,
-        cbs_map_canister_code: old_cts_data.cbs_map_canister_code,
-        frontcode_files: old_cts_data.frontcode_files,
-        frontcode_files_hashes,
-        cb_auths: CBAuths::default(),
-        cbs_maps: old_cts_data.cbs_maps,
-        create_new_cbs_map_lock: old_cts_data.create_new_cbs_map_lock,
-        canisters_for_the_use: old_cts_data.canisters_for_the_use,
-        users_purchase_cycles_bank: old_cts_data.users_purchase_cycles_bank,
-        users_burn_icp_mint_cycles: old_cts_data.users_burn_icp_mint_cycles,
-        users_transfer_icp: old_cts_data.users_transfer_icp,
-        users_lengthen_membership: HashMap::new(), 
-        users_lengthen_membership_cb_cycles_payment: HashMap::new(), 
-        
-    };
-    
-    set_root_hash(&new_cts_data);
-    
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        *cts_data = new_cts_data;    
-    });
-    
-    stable64_write(STABLE_MEMORY_HEADER_SIZE_BYTES, &vec![0u8; cts_upgrade_data_candid_bytes_len_u64 as usize * 2 + 8]);
-    
-    
-    canister_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID); 
-    
-    
-    // change into post_upgrade for the next upgrade
-    /*
-    canister_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(OldCTSData) -> CTSData>);
     with(&CTS_DATA, |cts_data| {
-        set_root_hash(&cts_data.frontcode_files_hashes);
+        set_root_hash(&cts_data);
     });
-    */
 } 
 
 
@@ -827,7 +758,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             };
             
             purchase_cycles_bank_data.cycles_bank_canister = Some(cycles_bank_canister);
-            with_mut(&CYCLES_BANKS_CACHE, |cbs_cache| { cbs_cache.put(user_id, Some(cycles_bank_canister)); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
             purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
             
         }
@@ -875,7 +806,8 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                 "notify_create_canister",
                 (CmcNotifyCreateCanisterQuest {
                     controller: id(),
-                    block_index: purchase_cycles_bank_data.create_cycles_bank_canister_block_height.unwrap()
+                    block_index: purchase_cycles_bank_data.create_cycles_bank_canister_block_height.unwrap(),
+                    subnet_type: "fiduciary"
                 },)
             ).await {
                 Ok((notify_result,)) => match notify_result {
@@ -906,7 +838,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             };
             
             purchase_cycles_bank_data.cycles_bank_canister = Some(cycles_bank_canister);
-            with_mut(&CYCLES_BANKS_CACHE, |cbs_cache| { cbs_cache.put(user_id, Some(cycles_bank_canister)); });
+            with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
             purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
         }
     }
@@ -1242,7 +1174,7 @@ pub async fn find_cycles_bank() -> Result<Option<Principal>, FindCyclesBankError
 
 
 async fn find_cycles_bank_(user_id: &Principal) -> Result<Option<Principal>, FindUserInTheCBSMapsError> {
-    if let Some(opt_cb) = with_mut(&CYCLES_BANKS_CACHE, |uc_cache| { uc_cache.check(user_id).cloned() }) {
+    if let Some(opt_cb) = with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.check(user_id).cloned() }) {
         return Ok(opt_cb);
     } 
     let opt_cb: Option<Principal> = find_user_in_the_cbs_maps(user_id.clone())
@@ -1250,8 +1182,8 @@ async fn find_cycles_bank_(user_id: &Principal) -> Result<Option<Principal>, Fin
         .map(|cbsm_user_data_and_cbsm_id| { 
             cbsm_user_data_and_cbsm_id.0.cycles_bank_canister_id 
         });
-    with_mut(&CYCLES_BANKS_CACHE, |uc_cache| {
-        uc_cache.put(user_id.clone(), opt_cb.clone());
+    with_mut(&CTS_DATA, |cts_data| { 
+        cts_data.cb_cache.put(user_id.clone(), opt_cb.clone());
     });    
     Ok(opt_cb) 
 } 
@@ -2911,33 +2843,6 @@ pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Opti
 
 
 
-// ----- NEW_CANISTERS-METHODS --------------------------
-
-#[update]
-pub fn controller_put_canisters_for_the_use(canisters_for_the_use: Vec<Principal>) {
-    caller_is_controller_gaurd(&caller());
-    with_mut(&CTS_DATA, |cts_data| {
-        for canister_for_the_use in canisters_for_the_use.into_iter() {
-            cts_data.canisters_for_the_use.insert(canister_for_the_use);
-        }
-    });
-}
-
-#[export_name = "canister_query controller_see_canisters_for_the_use"]
-pub fn controller_see_canisters_for_the_use() -> () {
-    caller_is_controller_gaurd(&caller());
-    with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(&HashSet<Principal>,)>((&(cts_data.canisters_for_the_use),));
-    });
-
-}
-
-
-
-
-
-
-
 // ----- STOP_CALLS-METHODS --------------------------
 
 #[update]
@@ -3009,7 +2914,6 @@ pub struct CTSMetrics {
     global_allocator_counter: u64,
     stable_size: u64,
     cycles_balance: u128,
-    canisters_for_the_use_count: u64,
     cbsm_code_hash: Option<[u8; 32]>,
     cycles_bank_canister_code_hash: Option<[u8; 32]>,
     cbsms_count: u64,
@@ -3029,7 +2933,6 @@ pub fn controller_see_metrics() -> CTSMetrics {
             global_allocator_counter: get_allocated_bytes_count() as u64,
             stable_size: ic_cdk::api::stable::stable64_size(),
             cycles_balance: ic_cdk::api::canister_balance128(),
-            canisters_for_the_use_count: cts_data.canisters_for_the_use.len() as u64,
             cbsm_code_hash: if cts_data.cbs_map_canister_code.module().len() != 0 { Some(cts_data.cbs_map_canister_code.module_hash().clone()) } else { None },
             cycles_bank_canister_code_hash: if cts_data.cycles_bank_canister_code.module().len() != 0 { Some(cts_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
             cbsms_count: cts_data.cbs_maps.len() as u64,

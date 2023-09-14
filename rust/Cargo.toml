@@ -32,7 +32,7 @@ debug = false
 
 [workspace.dependencies]
 ic-cdk = "0.10.0"
-ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "212b8c34ec17f849a256feedac9003c26a38e84b" } 
+ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "9c9a7cd55c77fcdd12330952cae95b484eeb3690" } 
 ic-ledger-types = "0.7.0"
 candid = "0.9.5"
 sha2 = "0.9.1"
@@ -42,6 +42,6 @@ icrc-ledger-types = { git = "https://github.com/cycles-transfer-station/ic.git",
 ic-stable-structures = "0.5.3"
 futures = "0.3.23"
 num-traits = "0.2.15"
-canister-tools = "0.1.3"
+canister-tools = "0.1.4"
 
 
