@@ -45,7 +45,7 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                 },
                 fee: Some(ledger_transfer_fee.into()),
                 from_subaccount: Some(principal_token_subaccount(&q.token_payout_payor())),
-                to: IcrcId{owner: ic_cdk::api::id(), subaccount: Some(principal_token_subaccount(&q.token_payout_payee()))},
+                to: IcrcId{owner: q.token_payout_payee(), subaccount: None},
                 created_at_time: Some(token_transfer_created_at_time)
             }
         ).await {

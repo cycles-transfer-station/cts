@@ -390,11 +390,7 @@ impl TokenPayoutData {
     }
     pub fn new_for_a_void_token_position() -> Self {
         TokenPayoutData{
-            token_transfer: Some(TokenTransferData{
-                block_height: None,
-                timestamp_nanos: time_nanos(),
-                ledger_transfer_fee: 0,
-            }),
+            token_transfer: None,
             token_fee_collection: Some(TokenTransferData{
                 block_height: None,
                 timestamp_nanos: time_nanos(),
@@ -720,10 +716,10 @@ impl TokenPayoutDataTrait for VoidTokenPosition {
         )
     }
     fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
-    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { trap("void-token-position does not call the ledger."); }
-    fn token_ledger_transfer_fee(&self) -> Tokens { trap("void-token-position does not call the ledger."); }
-    fn tokens_payout_fee(&self) -> Tokens { 0 } // trap("void-token-position does not call the ledger.");
+    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(Vec::from(*b"vtp").into()) }
+    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { None }
+    fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
+    fn tokens_payout_fee(&self) -> Tokens { 0 } 
 }
 
 
