@@ -50,6 +50,7 @@ use cts_lib::{
         CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO,
         NANOS_IN_A_SECOND,
         SECONDS_IN_A_DAY,
+        CTS_LOCAL_ID,
     },
     tools::{
         sha256,
@@ -157,6 +158,7 @@ use frontcode::{
     HttpResponse, 
     create_opt_stream_callback_token,
     StreamStrategy,
+    StreamCallback,
     StreamCallbackTokenBackwards,
     StreamCallbackHttpResponse,
 };
@@ -310,7 +312,7 @@ pub fn canister_inspect_message() {
     use ic_cdk::api::call::{method_name,accept_message};
     
     if caller() == Principal::anonymous() 
-        && !["view_fees"].contains(&&method_name()[..])
+        && !["view_fees", "local_put_ic_root_key"].contains(&&method_name()[..])
         {
         trap("caller cannot be anonymous for this method.");
     }
@@ -723,7 +725,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     }
     
     // if local env 
-    if ic_cdk::api::id() == Principal::from_slice(b"cts_local_") {
+    if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) {
         
         if purchase_cycles_bank_data.cycles_bank_canister.is_none() {
         
@@ -3007,19 +3009,17 @@ pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: Byt
                     }
                 }
                 if is_upload_complete == true {
-                    with_mut(&CTS_DATA, |cts_data| {
-                        cts_data.frontcode_files_hashes.insert(
-                            file_path.clone(), 
-                            {
-                                let mut hasher: sha2::Sha256 = sha2::Sha256::new();
-                                for chunk in file.content_chunks.iter() {
-                                    hasher.update(chunk);    
-                                }
-                                hasher.finalize().into()
+                    cts_data.frontcode_files_hashes.insert(
+                        file_path.clone(), 
+                        {
+                            let mut hasher: sha2::Sha256 = sha2::Sha256::new();
+                            for chunk in file.content_chunks.iter() {
+                                hasher.update(chunk);    
                             }
-                        );
-                        set_root_hash(&cts_data);
-                    });
+                            hasher.finalize().into()
+                        }
+                    );
+                    set_root_hash(&cts_data);
                 }
             },
             None => {
@@ -3039,9 +3039,6 @@ pub fn controller_clear_files() {
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files = Files::new();
-    });
-
-    with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files_hashes = FilesHashes::new();
         set_root_hash(&cts_data);
     });
@@ -3106,10 +3103,10 @@ pub fn http_request() {
                         body: &file.content_chunks[0],
                         streaming_strategy: if let Some(stream_callback_token) = create_opt_stream_callback_token(file_name, file, 0) {
                             Some(StreamStrategy::Callback{ 
-                                callback: Func{
+                                callback: StreamCallback(Func{
                                     principal: ic_cdk::api::id(),
                                     method: "http_request_stream_callback".to_string(),
-                                },
+                                }),
                                 token: stream_callback_token 
                             })
                         } else {

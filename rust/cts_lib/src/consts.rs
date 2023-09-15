@@ -71,7 +71,7 @@ pub const CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO: IcpMemo = IcpMemo(u
 
 
 
-
+pub const CTS_LOCAL_ID: &'static [u8; 10] = b"cts_local_";
 
 
 

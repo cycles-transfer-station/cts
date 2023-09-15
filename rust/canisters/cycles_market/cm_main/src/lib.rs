@@ -105,7 +105,7 @@ thread_local! {
 #[derive(CandidType, Deserialize)]
 struct CMMainInit {
     cts_id: Principal,
-    icrc1_token_trade_contracts: Vec<Icrc1TokenTradeContract>
+    icrc1_token_trade_contracts: Option<Vec<Icrc1TokenTradeContract>>
 }
 
 #[init]
@@ -114,7 +114,9 @@ fn init(cm_main_init: CMMainInit) {
 
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         cm_main_data.cts_id = cm_main_init.cts_id;
-        cm_main_data.trade_contracts.icrc1_token_trade_contracts = cm_main_init.icrc1_token_trade_contracts;
+        if let Some(tcs) = cm_main_init.icrc1_token_trade_contracts {
+            cm_main_data.trade_contracts.icrc1_token_trade_contracts = tcs;
+        }
     });
 }
 

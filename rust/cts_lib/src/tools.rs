@@ -11,7 +11,7 @@ use crate::{
     },
     consts::{
         CYCLES_PER_XDR,
-        NANOS_IN_A_SECOND
+        NANOS_IN_A_SECOND,
     },
     types::{
         Cycles,
@@ -271,9 +271,6 @@ pub fn stable_read_into_vec<M: Memory>(memory: &M, start: u64, len: usize) -> Ve
     memory.read(start, &mut v);    
     v
 }
-
-
-
 
 
 

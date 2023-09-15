@@ -338,7 +338,8 @@ fn canister_inspect_message() {
     use cts_lib::ic_cdk::api::call::{method_name, accept_message};
     
     let public_methods = [
-        "get_cts_cb_auth",  
+        "get_cts_cb_auth",
+        "local_put_ic_root_key"
     ];
     if public_methods.contains(&&method_name()[..]) == false {
         if caller() != user_id() {

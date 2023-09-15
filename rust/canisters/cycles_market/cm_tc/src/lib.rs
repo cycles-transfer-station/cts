@@ -444,11 +444,11 @@ fn canister_inspect_message() {
     
     if [
         "",
-        "",        
+        "local_put_ic_root_key",        
     ].contains(&&method_name()[..]) {
         accept_message();
     } else {
-        trap("this method must be call by a canister or a query call.");
+        trap(&format!("this method {} must be call by a canister or a query call.", method_name()));
     }
     
 }

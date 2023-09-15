@@ -10,7 +10,7 @@ use cts_lib::{
 use serde::Serialize;
 use serde_bytes::ByteBuf;
 
-use candid::{CandidType, Deserialize, Func, Nat};
+use candid::{CandidType, Deserialize, Nat};
 
 use crate::CTS_DATA;
 
@@ -41,9 +41,11 @@ pub struct HttpResponse<'a> {
     pub streaming_strategy: Option<StreamStrategy<'a>>,
 }
 
+candid::define_function!(pub StreamCallback : (StreamCallbackTokenBackwards) -> (StreamCallbackHttpResponse) query);
+
 #[derive(Clone, Debug, CandidType)]
 pub enum StreamStrategy<'a> {
-    Callback { callback: Func, token: StreamCallbackToken<'a>},
+    Callback { callback: StreamCallback, token: StreamCallbackToken<'a>},
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
