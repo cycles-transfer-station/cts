@@ -904,11 +904,7 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
             return Err(CBSellTokensError::MemoryIsFull);
         }
         Ok(())
-    })?;
-    
-    // create icrc2 approval for the tc.
-    
-    
+    })?;    
     
     let mut call_future = with(&CB_DATA, |cb_data| {
         call_raw128(
