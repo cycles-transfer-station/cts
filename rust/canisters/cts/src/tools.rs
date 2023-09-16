@@ -228,7 +228,7 @@ pub async fn create_canister(optional_canister_settings: Option<ManagementCanist
 pub struct CmcNotifyCreateCanisterQuest {
     pub block_index: IcpBlockHeight,
     pub controller: Principal,
-    pub subnet_type: &'static str
+    pub subnet_type: Option<&'static str>
 }
 
 

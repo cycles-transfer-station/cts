@@ -106,6 +106,7 @@ use cts_lib::{
         icp_transfer,
         IcpTransferArgs, 
         IcpTransferError,
+        ICP_DEFAULT_SUBACCOUNT,
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -457,6 +458,7 @@ pub struct PurchaseCyclesBankData {
     purchase_cycles_bank_quest: PurchaseCyclesBankQuest,
     // the options and bools are for the memberance of the steps
     current_xdr_icp_rate: Option<XdrPerMyriadPerIcp>,
+    original_user_icp_ledger_balance: Option<IcpTokens>,
     look_if_user_is_in_the_cbs_maps: bool,
     referral_cycles_bank_canister_id: Option<Principal>, // use if a referral
     create_cycles_bank_canister_block_height: Option<IcpBlockHeight>,
@@ -469,7 +471,8 @@ pub struct PurchaseCyclesBankData {
     collect_cycles_cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
     collect_cycles_cmc_notify_cycles: Option<Cycles>,
     referral_user_referral_payment_cycles_transfer: bool,
-    user_referral_payment_cycles_transfer: bool
+    user_referral_payment_cycles_transfer: bool,
+    transfer_mainder_user_cts_icp_balance: Option<u64>,
     
 }
 
@@ -496,6 +499,8 @@ pub enum PurchaseCyclesBankMidCallError{
     UserReferralPaymentCyclesTransferCallError((u32, String)),
     CollectIcpTransferError(IcpTransferError),
     CollectIcpTransferCallError((u32, String)),
+    TransferMainderUserCTSICPTransferCallError(CallError),
+    TransferMainderUserCTSICPTransferError(IcpTransferError),
     
 }
 
@@ -563,6 +568,7 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<Purchase
             purchase_cycles_bank_quest: q,
             // the options and bools are for the memberance of the steps
             current_xdr_icp_rate: None,
+            original_user_icp_ledger_balance: None,
             look_if_user_is_in_the_cbs_maps: false,
             referral_cycles_bank_canister_id: None,
             create_cycles_bank_canister_block_height: None,
@@ -575,7 +581,8 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<Purchase
             collect_cycles_cmc_icp_transfer_block_height: None,
             collect_cycles_cmc_notify_cycles: None,
             referral_user_referral_payment_cycles_transfer: false,
-            user_referral_payment_cycles_transfer: false
+            user_referral_payment_cycles_transfer: false,
+            transfer_mainder_user_cts_icp_balance: None,
         };
         cts_data.users_purchase_cycles_bank.insert(user_id, purchase_cycles_bank_data.clone());
         Ok(purchase_cycles_bank_data)
@@ -670,6 +677,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         }   
         
         purchase_cycles_bank_data.current_xdr_icp_rate = Some(current_xdr_icp_rate);
+        purchase_cycles_bank_data.original_user_icp_ledger_balance = Some(user_icp_ledger_balance);
     }
     
     
@@ -725,6 +733,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     }
     
     // if local env 
+    /*
     if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) {
         
         if purchase_cycles_bank_data.cycles_bank_canister.is_none() {
@@ -768,6 +777,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         
         
     } else { 
+    */
         // mainnet
     
         if purchase_cycles_bank_data.create_cycles_bank_canister_block_height.is_none() {
@@ -809,7 +819,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                 (CmcNotifyCreateCanisterQuest {
                     controller: id(),
                     block_index: purchase_cycles_bank_data.create_cycles_bank_canister_block_height.unwrap(),
-                    subnet_type: "fiduciary"
+                    subnet_type: if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) { None } else { Some("fiduciary") }
                 },)
             ).await {
                 Ok((notify_result,)) => match notify_result {
@@ -843,7 +853,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
             purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
         }
-    }
+    //}
     
     if purchase_cycles_bank_data.cbs_map.is_none() {
         
@@ -1117,6 +1127,43 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     
     }
     
+    if purchase_cycles_bank_data.transfer_mainder_user_cts_icp_balance.is_none() {
+        let block_height: IcpBlockHeight = match icp_transfer(
+            MAINNET_LEDGER_CANISTER_ID,
+            IcpTransferArgs {
+                memo: IcpMemo(u64::from_be_bytes(*b"pcbtmuci")),
+                amount: {
+                    IcpTokens::from_e8s(
+                        purchase_cycles_bank_data.original_user_icp_ledger_balance.unwrap().e8s()
+                        .saturating_sub(
+                            cycles_to_icptokens(MEMBERSHIP_COST_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()).e8s()
+                            + ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2
+                        )
+                        .saturating_sub(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s()) // for this transfer
+                    )
+                },
+                fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                from_subaccount: Some(principal_icp_subaccount(&user_id)),
+                to: IcpId::new(&purchase_cycles_bank_data.cycles_bank_canister.unwrap(), &ICP_DEFAULT_SUBACCOUNT),
+                created_at_time: None, //Some(IcpTimestamp { timestamp_nanos: time() })
+            }
+        ).await {
+            Ok(transfer_result) => match transfer_result {
+                Ok(block_height) => block_height,
+                Err(transfer_error) => {
+                    purchase_cycles_bank_data.lock = false;
+                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::TransferMainderUserCTSICPTransferError(transfer_error)));                    
+                }
+            },
+            Err(transfer_call_error) => {
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::TransferMainderUserCTSICPTransferCallError(call_error_as_u32_and_string(transfer_call_error))));
+            }
+        };
+        purchase_cycles_bank_data.transfer_mainder_user_cts_icp_balance = Some(block_height);
+    }
 
 
     with_mut(&CTS_DATA, |cts_data| { 
