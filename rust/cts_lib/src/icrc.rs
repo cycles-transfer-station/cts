@@ -48,18 +48,6 @@ pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: TokenTransferArg) -> 
         (q,),
     ).await.map_err(|e| call_error_as_u32_and_string(e)).map(|(s,)| s)
 }
-/*   
-    let client: ICRC1Client<CdkRuntime> = ICRC1Client::<CdkRuntime>{
-        runtime: CdkRuntime{},
-        ledger_canister_id: icrc1_ledger_id
-    };
-    
-    client.transfer(q)
-        .await
-        .map(|o| { o.map(|o2| { BlockId::from(o2) }) })
-        .map_err(|e| { (e.0 as u32, e.1) })
-}
-*/
 
 pub async fn icrc1_balance_of(icrc1_ledger_id: Principal, count_id: IcrcId) -> Result<Tokens, (u32, String)> {
     call(
@@ -68,17 +56,4 @@ pub async fn icrc1_balance_of(icrc1_ledger_id: Principal, count_id: IcrcId) -> R
         (count_id,),
     ).await.map_err(|e| (e.0 as u32, e.1)).map(|(s,)| s)
 }
-/*
-    let client: ICRC1Client<CdkRuntime> = ICRC1Client::<CdkRuntime>{
-        runtime: CdkRuntime{},
-        ledger_canister_id: icrc1_ledger_id
-    };
-    
-    client.balance_of(account)
-        .await
-        .map(|t| { Tokens::from(t) })
-        .map_err(|e| { (e.0 as u32, e.1) })
-
-}
-*/
 
