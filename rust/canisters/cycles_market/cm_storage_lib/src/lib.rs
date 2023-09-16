@@ -195,7 +195,6 @@ pub fn map_logs_rchunks<K>(k: &K, opt_start_before_id: Option<u128>, chunk_size:
 where
     K: PartialEq + Eq + Hash,
 {
-
     match map.get(k) {
         None => return,
         Some(vec) => {
@@ -217,11 +216,14 @@ where
                 for log_id in rchunk.into_iter() {
                     let mut log_b: Vec<u8> = vec![0; data.log_size as usize];
                     log_storage_memory.read((log_id - data.first_log_id) as u64 * data.log_size as u64, &mut log_b);
-                    reply_raw(&log_b);
+                    if log_b.len() != 0 {
+                        unsafe { ic0::msg_reply_data_append(log_b.as_ptr() as i32, log_b.len() as i32); }
+                    }
                 }
             });
         }
     }
+    unsafe { ic0::msg_reply(); }
 
 }
 
