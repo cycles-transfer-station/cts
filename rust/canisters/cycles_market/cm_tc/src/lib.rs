@@ -790,10 +790,10 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         trap("MatcherPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
     }
         
-    let mut matcher_position: &mut MatcherPositionType = &mut matcher_positions[start_matcher_positions_i];
+    let mut matcher_position_i: usize = start_matcher_positions_i;
         
-    let matcher_position_id: PositionId = matcher_position.id();
-    let mut match_rate: CyclesPerToken = matcher_position.current_position_available_cycles_per_token_rate();
+    let matcher_position_id: PositionId = matcher_positions[matcher_position_i].id();
+    let mut match_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
         
     ic_cdk::println!("match_trades start. matcher_position_id: {matcher_position_id}");      
           
@@ -804,14 +804,16 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
             ic_cdk::println!("inner-loop. i: {i}");
             if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
                 if trade_logs.len() >= MAX_TRADE_LOGS {
-                    break 'outer;
+                    break 'outer; // log that this matcher-position still needs matching.
                 }
                 //ic_cdk::println!("found match, trade-rate: {:?}", trade_rate);
                 let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
                 ic_cdk::println!("found match. matchee_position.id: {}", matchee_position.id());
                 
                 let matchee_position_vailable_rate_before_trade: CyclesPerToken = matchee_position.current_position_available_cycles_per_token_rate();
-                                        
+                
+                let matcher_position: &mut MatcherPositionType = &mut matcher_positions[matcher_position_i];
+                                                                                        
                 let purchase_tokens: Tokens = std::cmp::min(matcher_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
                 let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
                 let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
@@ -861,14 +863,12 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 
                 let mut matcher_position_is_void: bool = false;
                 if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() { 
-                    //std::mem::drop(matcher_position);
-                    if let Ok(i) = matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
-                        let matcher_position: MatcherPositionType = matcher_positions.remove(i); 
-                        matcher_void_positions.insert(
-                            matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
-                            matcher_position.into_void_position_type(Some(PositionTerminationCause::Fill))
-                        );
-                    }
+                    std::mem::drop(matcher_position);
+                    let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
+                    matcher_void_positions.insert(
+                        matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
+                        matcher_position.into_void_position_type(Some(PositionTerminationCause::Fill))
+                    );
                     matcher_position_is_void = true;
                 }    
                 
@@ -895,11 +895,12 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         trade_logs, 
                         trade_logs_id_counter,
                     );
-                    matcher_position = match matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
-                        Ok(i) => &mut matcher_positions[i],
+                    matcher_position_i = match matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
+                        Ok(matcher_position_i) => matcher_position_i,
                         Err(_) => break 'outer,
                     };
                     i = 0;
+                    match_rate = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
                 } else {
                     i = i + 1;
                 }
@@ -913,7 +914,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
             }
         }
         
-        let balance_rate: CyclesPerToken = matcher_position.current_position_available_cycles_per_token_rate();
+        let balance_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
         match MatcheePositionType::POSITION_KIND {
             PositionKind::Token => {
                 assert!(balance_rate >= match_rate);
