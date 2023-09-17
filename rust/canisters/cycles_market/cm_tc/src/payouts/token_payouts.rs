@@ -34,6 +34,13 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
     if let None = token_payout_data.token_transfer {
         let token_transfer_created_at_time: u64 = time_nanos_u64()-NANOS_IN_A_SECOND as u64;
         let ledger_transfer_fee: Tokens = q.token_ledger_transfer_fee(); 
+        ic_cdk::println!(
+            "token payout transfer amount{:?}, fee: {:?}",
+            q.tokens()
+                .saturating_sub(q.tokens_payout_fee())
+                .saturating_sub(ledger_transfer_fee),
+            ledger_transfer_fee,
+        );  
         match token_transfer(
             TokenTransferArg{
                 memo: q.token_transfer_memo(),
@@ -59,13 +66,15 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                         }
                     )
                 },
-                Err(_token_transfer_error) => {
+                Err(token_transfer_error) => {
                     // log // return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferError(token_transfer_error));
+                    ic_cdk::println!("token payout transfer error {:?}", token_transfer_error);
                     return token_payout_data;
                 }
             },
-            Err(_token_transfer_call_error) => {
+            Err(token_transfer_call_error) => {
                 // log // return DoTokenPayoutSponse::TokenTransferError(TokenTransferErrorType::TokenTransferCallError(token_transfer_call_error));
+                ic_cdk::println!("token payout transfer call error {:?}", token_transfer_call_error);
                 return token_payout_data;
             }
         }
@@ -97,11 +106,13 @@ pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
                         }
                     )
                 },
-                Err(_token_transfer_error) => {
+                Err(token_transfer_error) => {
+                    ic_cdk::println!("token payout fee collection transfer error {:?}", token_transfer_error);
                     return token_payout_data;
                 }
             },
-            Err(_token_transfer_call_error) => {
+            Err(token_transfer_call_error) => {
+                ic_cdk::println!("token payout fee collection transfer call error {:?}", token_transfer_call_error);
                 return token_payout_data;
             }
         }

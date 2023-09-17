@@ -393,6 +393,7 @@ dependencies = [
  "canister-tools",
  "cts_lib",
  "ic-stable-structures",
+ "ic0",
  "serde",
  "serde_bytes",
 ]

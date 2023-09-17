@@ -514,10 +514,10 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
         })
         .fold(0, |mut cummulator: Tokens, tl: &TradeLog| {
             if tl.token_payout_data.token_transfer.is_none() {
-                cummulator += tl.tokens.saturating_sub(tl.tokens_payout_fee).saturating_sub(tl.token_ledger_transfer_fee()); 
+                cummulator += tl.tokens.saturating_sub(tl.tokens_payout_fee);//.saturating_sub(tl.token_ledger_transfer_fee()); 
             }
             if tl.token_payout_data.token_fee_collection.is_none() {
-                cummulator += tl.tokens_payout_fee.saturating_add(tl.token_ledger_transfer_fee())
+                cummulator += tl.tokens_payout_fee;//.saturating_add(tl.token_ledger_transfer_fee())
             }
             cummulator
         })
@@ -619,26 +619,17 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
             positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
-        let cycles_position: CyclesPosition = match_trades(
-            caller, 
-            cycles_position,
+        cm_data.cycles_positions.push(cycles_position);  
+        
+        match_trades(
+            cm_data.cycles_positions.len() - 1,
+            &mut cm_data.cycles_positions,  
             &mut cm_data.token_positions, 
-            &mut cm_data.void_token_positions, 
+            &mut cm_data.void_cycles_positions,
+            &mut cm_data.void_token_positions,
             &mut cm_data.trade_logs,
             &mut cm_data.trade_logs_id_counter
-        ); 
-                
-        if cycles_position.current_position_tokens(cycles_position.current_position_available_cycles_per_token_rate()) >= minimum_tokens_match() {
-            cm_data.cycles_positions.insert(
-                cm_data.cycles_positions.binary_search_by_key(&cycles_position.id, |cp| cp.id).unwrap_err(),
-                cycles_position
-            );
-        } else {
-            cm_data.void_cycles_positions.insert(
-                cm_data.void_cycles_positions.binary_search_by_key(&cycles_position.id, |vcp| vcp.position_id).unwrap_err(),
-                cycles_position.into_void_position_type(Some(PositionTerminationCause::Fill))
-            );
-        }
+        );
         
         Ok(BuyTokensSuccess{
             position_id: cycles_position_id
@@ -760,26 +751,17 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
             positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
-        let token_position: TokenPosition = match_trades(
-            caller, 
-            token_position,
+        cm_data.token_positions.push(token_position);
+        
+        match_trades(
+            cm_data.token_positions.len() - 1,
+            &mut cm_data.token_positions,  
             &mut cm_data.cycles_positions, 
-            &mut cm_data.void_cycles_positions, 
+            &mut cm_data.void_token_positions,
+            &mut cm_data.void_cycles_positions,
             &mut cm_data.trade_logs,
             &mut cm_data.trade_logs_id_counter
-        ); 
-      
-        if token_position.current_position_tokens >= minimum_tokens_match() {
-            cm_data.token_positions.insert(
-                cm_data.token_positions.binary_search_by_key(&token_position.id, |tp| tp.id).unwrap_err(),
-                token_position
-            );
-        } else {
-            cm_data.void_token_positions.insert(
-                cm_data.void_token_positions.binary_search_by_key(&token_position.id, |vtp| vtp.position_id).unwrap_err(),
-                token_position.into_void_position_type(Some(PositionTerminationCause::Fill))
-            );
-        }
+        );
         
         Ok(SellTokensSuccess{
             position_id: token_position_id,
@@ -794,6 +776,171 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
 
 
 
+fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: CurrentPositionTrait>(
+    start_matcher_positions_i: usize,
+    matcher_positions: &mut Vec<MatcherPositionType>,  
+    matchee_positions: &mut Vec<MatcheePositionType>, 
+    matcher_void_positions: &mut Vec<MatcherPositionType::VoidPositionType>,
+    matchee_void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
+    trade_logs: &mut VecDeque<TradeLog>, 
+    trade_logs_id_counter: &mut PurchaseId,
+) {       
+    
+    if MatcherPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
+        trap("MatcherPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
+    }
+        
+    let mut matcher_position: &mut MatcherPositionType = &mut matcher_positions[start_matcher_positions_i];
+        
+    let matcher_position_id: PositionId = matcher_position.id();
+    let mut match_rate: CyclesPerToken = matcher_position.current_position_available_cycles_per_token_rate();
+        
+    ic_cdk::println!("match_trades start. matcher_position_id: {matcher_position_id}");      
+          
+    'outer: loop {
+        ic_cdk::println!("outer-loop. match_rate: {match_rate}");
+        let mut i: usize = 0;
+        'inner: while i < matchee_positions.len() {
+            ic_cdk::println!("inner-loop. i: {i}");
+            if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
+                if trade_logs.len() >= MAX_TRADE_LOGS {
+                    break 'outer;
+                }
+                //ic_cdk::println!("found match, trade-rate: {:?}", trade_rate);
+                let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
+                ic_cdk::println!("found match. matchee_position.id: {}", matchee_position.id());
+                
+                let matchee_position_vailable_rate_before_trade: CyclesPerToken = matchee_position.current_position_available_cycles_per_token_rate();
+                                        
+                let purchase_tokens: Tokens = std::cmp::min(matcher_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
+                let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
+                let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
+                                                
+                let payment_cycles: Cycles = tokens_transform_cycles(purchase_tokens, trade_rate); 
+                
+                
+                let tokens_payout_fee: Tokens = cycles_transform_tokens(
+                    {
+                        if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
+                            matcher_position_payout_fee_cycles
+                        } else {
+                            matchee_position_payout_fee_cycles
+                        }
+                    },
+                    trade_rate
+                );
+                let cycles_payout_fee: Cycles = {
+                    if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+                        matcher_position_payout_fee_cycles
+                    } else {
+                        matchee_position_payout_fee_cycles
+                    }
+                };
+                
+                let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
+                trade_logs.push_back(
+                    TradeLog{
+                        position_id_matcher: matcher_position.id(),
+                        position_id_matchee: matchee_position.id(),
+                        id: trade_log_id,
+                        positor: matchee_position.positor(),
+                        purchaser: matcher_position.positor(),
+                        tokens: purchase_tokens,
+                        cycles: payment_cycles,
+                        cycles_per_token_rate: trade_rate,
+                        position_kind: MatcheePositionType::POSITION_KIND,
+                        timestamp_nanos: time_nanos(),
+                        tokens_payout_fee,
+                        cycles_payout_fee,
+                        cycles_payout_lock: false,
+                        token_payout_lock: false,
+                        cycles_payout_data: CyclesPayoutData::new(),
+                        token_payout_data: TokenPayoutData::new_for_a_trade_log()
+                    }
+                );
+                
+                let mut matcher_position_is_void: bool = false;
+                if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() { 
+                    //std::mem::drop(matcher_position);
+                    if let Ok(i) = matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
+                        let matcher_position: MatcherPositionType = matcher_positions.remove(i); 
+                        matcher_void_positions.insert(
+                            matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
+                            matcher_position.into_void_position_type(Some(PositionTerminationCause::Fill))
+                        );
+                    }
+                    matcher_position_is_void = true;
+                }    
+                
+                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {            
+                    //std::mem::drop(matchee_position);
+                    let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
+                    let position_for_the_void_void_positions_insertion_i: usize = { 
+                        matchee_void_positions.binary_search_by_key(
+                            &position_for_the_void.id(),
+                            |void_position| { void_position.position_id() }
+                        ).unwrap_err()
+                    };
+                    matchee_void_positions.insert(
+                        position_for_the_void_void_positions_insertion_i,
+                        position_for_the_void.into_void_position_type(Some(PositionTerminationCause::Fill))
+                    );
+                } else if matchee_position.current_position_available_cycles_per_token_rate() != matchee_position_vailable_rate_before_trade { 
+                    match_trades(
+                        i,
+                        matchee_positions,  
+                        matcher_positions, 
+                        matchee_void_positions,
+                        matcher_void_positions,
+                        trade_logs, 
+                        trade_logs_id_counter,
+                    );
+                    matcher_position = match matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
+                        Ok(i) => &mut matcher_positions[i],
+                        Err(_) => break 'outer,
+                    };
+                    i = 0;
+                } else {
+                    i = i + 1;
+                }
+                
+                if matcher_position_is_void {
+                    break 'outer;
+                }
+                
+            } else {
+                i = i + 1;
+            }
+        }
+        
+        let balance_rate: CyclesPerToken = matcher_position.current_position_available_cycles_per_token_rate();
+        match MatcheePositionType::POSITION_KIND {
+            PositionKind::Token => {
+                assert!(balance_rate >= match_rate);
+            },
+            PositionKind::Cycles => {
+                assert!(balance_rate <= match_rate);
+            } 
+        }
+        if balance_rate == match_rate {
+            break 'outer;
+        } else {
+            match_rate = balance_rate;
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+/*
 fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: CurrentPositionTrait>(
     caller: Principal, 
     mut caller_position: CallerPositionType,  
@@ -802,7 +949,7 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
     trade_logs: &mut VecDeque<TradeLog>, 
     trade_logs_id_counter: &mut PurchaseId,
 ) -> CallerPositionType/*caller_position*/ {
-                    
+                  
     if CallerPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
         trap("CallerPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
     }
@@ -811,12 +958,16 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
     let mut match_rate: CyclesPerToken = caller_position.current_position_available_cycles_per_token_rate();
             
     'outer: loop {
+        //ic_cdk::print("match outer loop");
+        //ic_cdk::println!("match_rate {:?}", match_rate);
         let mut i: usize = 0;
         while i < potential_matches_positions.len() {
+            //ic_cdk::print("match inner while loop");
             if let Some(trade_rate) = potential_matches_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
                 if trade_logs.len() >= MAX_TRADE_LOGS {
                     break 'outer;
                 }
+                //ic_cdk::println!("found match, trade-rate: {:?}", trade_rate);
                 let matchee_position: &mut MatcheePositionType = &mut potential_matches_positions[i];
                                         
                 let purchase_tokens: Tokens = std::cmp::min(caller_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
@@ -887,6 +1038,8 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                     break 'outer;
                 }    
                 
+            } else {
+                i = i + 1;
             }
         }
         
@@ -916,7 +1069,7 @@ fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: C
                 
     caller_position
 }
-
+*/
 
 
 
@@ -1514,25 +1667,29 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
 // only the logs, does not return current positions data
 #[query(manual_reply = true)]
 pub fn view_user_positions_logs(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+    let mut v: Vec<u8> = Vec::new();
     with(&PositionLog::LOG_STORAGE_DATA, |log_storage_data| {
         if let Some(iter) = view_storage_logs_::<PositionLog>(q, log_storage_data, 1*MiB+512*KiB / PositionLog::STABLE_MEMORY_SERIALIZE_SIZE) {
             for s in iter {
-                reply_raw(s);
+                v.extend_from_slice(s);
             }
         }
     });
+    reply_raw(&v);
 } 
 
 // only the payout-complete logs, does not return trade-logs pending payouts or other tasks
 #[query(manual_reply = true)]
 pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
+    let mut v: Vec<u8> = Vec::new();
     with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
         if let Some(iter) = view_storage_logs_::<TradeLog>(q, log_storage_data, 1*MiB+512*KiB / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE) {
             for s in iter {
-                reply_raw(s);
+                v.extend_from_slice(s);
             }
         }
     });
+    reply_raw(&v);
 } 
 
 
@@ -1555,7 +1712,7 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
         
         if log_storage_buffer.len() >= LogType::STABLE_MEMORY_SERIALIZE_SIZE {
             let first_log_id_in_the_storage_buffer: u128 = LogType::log_id_of_the_log_serialization(&log_storage_buffer[..LogType::STABLE_MEMORY_SERIALIZE_SIZE]);
-        
+            
             let logs_storage_buffer_till_start_before_id: &[u8] = &log_storage_buffer[
                 ..
                 q.opt_start_before_id
@@ -1690,7 +1847,6 @@ pub fn controller_clear_payouts_errors() {
         cm_data.do_payouts_errors = Vec::new();
     });    
 }
-
 
 
 

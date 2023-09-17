@@ -258,7 +258,21 @@ impl CurrentPositionTrait for TokenPosition {
             tokens: self.current_position_tokens,
             timestamp_nanos: time_nanos(),
             token_payout_lock: false,
-            token_payout_data: TokenPayoutData::new_for_a_void_token_position(),
+            token_payout_data: TokenPayoutData{
+                token_transfer: if self.current_position_tokens < localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) {
+                    Some(TokenTransferData{
+                        block_height: None,
+                        timestamp_nanos: time_nanos(),
+                        ledger_transfer_fee: 0,
+                    })                
+                } else { None },
+                token_fee_collection: Some(TokenTransferData{
+                    block_height: None,
+                    timestamp_nanos: time_nanos(),
+                    ledger_transfer_fee: 0,
+                }),
+                cm_message_call: None,
+            },
             update_storage_position_data: VPUpdateStoragePositionData::new(),
             update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
         }
@@ -385,17 +399,6 @@ impl TokenPayoutData {
         Self{
             token_transfer: None,
             token_fee_collection: None,
-            cm_message_call: None,
-        }
-    }
-    pub fn new_for_a_void_token_position() -> Self {
-        TokenPayoutData{
-            token_transfer: None,
-            token_fee_collection: Some(TokenTransferData{
-                block_height: None,
-                timestamp_nanos: time_nanos(),
-                ledger_transfer_fee: 0,
-            }),
             cm_message_call: None,
         }
     }
