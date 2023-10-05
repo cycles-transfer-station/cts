@@ -1,8 +1,1 @@
-# FOR THE CYCLES-TRANSFER-STATION.
-
-
-
-# Hello and Welcome.
-
-
-
+# :CYCLES-TRANSFER-STATION.
