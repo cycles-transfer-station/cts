@@ -63,13 +63,6 @@ pub mod canister_code {
     }
 
     impl CanisterCode {
-        pub fn new(mut module: Vec<u8>) -> Self { // :mut for the shrink_to_fit
-            module.shrink_to_fit();
-            Self {
-                module_hash: crate::tools::sha256(&module), // put this on the top if move error
-                module: module,
-            }
-        }
         pub fn empty() -> Self {
             Self {
                 module_hash: [0u8; 32],
@@ -82,8 +75,12 @@ pub mod canister_code {
         pub fn module_hash(&self) -> &[u8; 32] {
             &self.module_hash
         }
-        pub fn change_module(&mut self, module: Vec<u8>) {
-            *self = Self::new(module);
+        pub fn verify_module_hash(&self) -> Result<(), ()> {
+            if *(self.module_hash()) != crate::tools::sha256(self.module()) {
+                Err(())
+            } else {
+                Ok(())
+            }
         }
     }
 }

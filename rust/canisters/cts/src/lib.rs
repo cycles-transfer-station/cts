@@ -198,8 +198,8 @@ impl CTSData {
     fn new() -> Self {
         Self {
             cycles_market_main: Principal::from_slice(&[]),
-            cycles_bank_canister_code: CanisterCode::new(Vec::new()),
-            cbs_map_canister_code: CanisterCode::new(Vec::new()),
+            cycles_bank_canister_code: CanisterCode::empty(),
+            cbs_map_canister_code: CanisterCode::empty(),
             frontcode_files: Files::new(),
             frontcode_files_hashes: FilesHashes::new(),
             cb_auths: CBAuths::default(),
@@ -2553,9 +2553,7 @@ pub async fn controller_upgrade_cbsms(q: ControllerUpgradeCSQuest) -> Vec<(Princ
     
     let cc: CanisterCode = with_mut(&CTS_DATA, |cts_data| {
         if let Some(new_canister_code) = q.new_canister_code {
-            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
-                trap("new_canister_code module hash does not match module");
-            }
+            new_canister_code.verify_module_hash().unwrap();
             cts_data.cbs_map_canister_code = new_canister_code; 
         }
         cts_data.cbs_map_canister_code.clone()
@@ -2713,6 +2711,13 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Op
 #[update]
 pub async fn controller_upgrade_cbsm_cbs_chunk(cbsm: Principal, q: ControllerUpgradeCSQuest) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
     caller_is_controller_gaurd(&caller());
+    
+    if let Some(ref new_cc) = q.new_canister_code {
+        new_cc.verify_module_hash().unwrap();
+        with_mut(&CTS_DATA, |cts_data| {
+            cts_data.cycles_bank_canister_code = new_cc.clone();
+        });            
+    }
     
     call::<(ControllerUpgradeCSQuest,), (Vec<(Principal, UpgradeOutcome)>,)>(
         cbsm,

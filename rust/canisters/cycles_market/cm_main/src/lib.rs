@@ -413,9 +413,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
     
     let tc_cc: CanisterCode = with_mut(&CM_MAIN_DATA, |cm_main_data| {
         if let Some(new_canister_code) = q.new_canister_code {
-            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
-                trap("new_canister_code module hash does not match module");
-            }
+            new_canister_code.verify_module_hash().unwrap();
             cm_main_data.tc_canister_code = new_canister_code; 
         }
         cm_main_data.tc_canister_code.clone()
@@ -467,6 +465,17 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
 #[update]
 pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
     caller_is_controller_gaurd(&caller());
+    
+    if let Some(ref new_cc) = q.new_canister_code {
+        new_cc.verify_module_hash().unwrap();
+        with_mut(&CM_MAIN_DATA, |cm_main_data| {
+            let log_storage_cc: &mut CanisterCode = match log_storage_type {
+                LogStorageType::Trades => &mut cm_main_data.trades_storage_canister_code,
+                LogStorageType::Positions => &mut cm_main_data.positions_storage_canister_code
+            };
+            *log_storage_cc = new_cc.clone();
+        });
+    }
     
     call::<(ControllerUpgradeCSQuest, LogStorageType), (Vec<(Principal, UpgradeOutcome)>,)>(
         tc,

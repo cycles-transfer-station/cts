@@ -70,7 +70,7 @@ impl CBSMData {
         Self {
             cts_id: Principal::from_slice(&[]),
             users_map: UsersMap::new(),
-            cycles_bank_canister_code: CanisterCode::new(Vec::new()),
+            cycles_bank_canister_code: CanisterCode::empty(),
             cycles_bank_canister_upgrade_fails: Vec::new(),
         }
     }
@@ -293,9 +293,7 @@ pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(P
     
     let cc: CanisterCode = with_mut(&CBSM_DATA, |cbsm_data| {
         if let Some(new_canister_code) = q.new_canister_code {
-            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
-                trap("new_canister_code module hash does not match module");
-            }
+            new_canister_code.verify_module_hash().unwrap();
             cbsm_data.cycles_bank_canister_code = new_canister_code; 
         }
         cbsm_data.cycles_bank_canister_code.clone()
