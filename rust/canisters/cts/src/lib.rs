@@ -65,6 +65,7 @@ use cts_lib::{
         cycles_to_icptokens,
         caller_is_controller_gaurd,
         call_error_as_u32_and_string,
+        upgrade_canisters::*,
     },
     ic_cdk::{
         self,
@@ -183,7 +184,7 @@ pub struct CTSData {
     frontcode_files: Files,
     frontcode_files_hashes: FilesHashes,
     cb_auths: CBAuths,
-    cbs_maps: Vec<Principal>,
+    cbs_maps: Vec<(Principal, ModuleHash)>,
     create_new_cbs_map_lock: bool,
     temp_create_new_cbsmap_holder: Option<Principal>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
@@ -215,6 +216,8 @@ impl CTSData {
     }
 }
 
+ 
+type ModuleHash = [u8; 32];
  
  
  
@@ -2434,12 +2437,12 @@ pub fn controller_put_umc_code(canister_code: CanisterCode) -> () {
 
 
 // certification? or replication-calls?
-#[export_name = "canister_query controller_see_cbsms"]
-pub fn controller_see_cbsms() {
+#[export_name = "canister_query controller_view_cbsms"]
+pub fn controller_view_cbsms() {
     caller_is_controller_gaurd(&caller());
     
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(&Vec<Principal>,)>((&(cts_data.cbs_maps),));
+        ic_cdk::api::call::reply::<(Vec<&Principal>,)>((cts_data.cbs_maps.iter().map(|t| &t.0).collect(),));
     });
 }
 
@@ -2455,7 +2458,7 @@ pub enum ControllerUpgradeUMCCallErrorType {
 }
 
 
-
+/*
 #[update]
 pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Vec<ControllerUpgradeUMCError>/*umcs that upgrade call-fail*/ {
     caller_is_controller_gaurd(&caller());
@@ -2540,6 +2543,66 @@ pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, p
     ).collect::<Vec<ControllerUpgradeUMCError>>()
     
 }
+*/
+
+
+
+#[update]
+pub async fn controller_upgrade_cbsms(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
+    caller_is_controller_gaurd(&caller());
+    
+    let cc: CanisterCode = with_mut(&CTS_DATA, |cts_data| {
+        if let Some(new_canister_code) = q.new_canister_code {
+            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
+                trap("new_canister_code module hash does not match module");
+            }
+            cts_data.cbs_map_canister_code = new_canister_code; 
+        }
+        cts_data.cbs_map_canister_code.clone()
+    });
+    
+    let cbsms: Vec<Principal> = match q.specific_cs {
+        Some(specific_cbsms) => specific_cbsms.into_iter().collect(),
+        None => {
+            with(&CTS_DATA, |cts_data| {
+                cts_data.cbs_maps.iter()
+                .filter_map(|(cbsm, module_hash)| {
+                    if module_hash != cc.module_hash() {
+                        Some(cbsm.clone())
+                    } else {
+                        None
+                    }
+                })
+                .take(200)
+                .collect()
+            })
+        }
+    };
+    
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(cbsms, &cc, &q.post_upgrade_quest).await;
+    
+    with_mut(&CTS_DATA, |cts_data| {
+        for (cbsm, uo) in rs.iter() {
+            if let Some(ref r) = uo.install_code_result {
+                if r.is_ok() {
+                    if let Some(i) = cts_data.cbs_maps.iter_mut().find(|i| i.0 == *cbsm) {
+                        i.1 = cc.module_hash().clone();
+                    } else {
+                        ic_cdk::print("check this");
+                    } 
+                }
+            }
+        } 
+    });
+    
+    return rs;
+    
+}
+
+
+
+
+
 
 
 
@@ -2576,14 +2639,15 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal
         if let Some(call_umcs) = opt_umcs {
             with(&CTS_DATA, |cts_data| { 
                 call_umcs.iter().for_each(|call_umc| {
-                    if cts_data.cbs_maps.contains(&call_umc) == false {
+                    let cbs_maps: Vec<&Principal> = cts_data.cbs_maps.iter().map(|t| &t.0).collect();
+                    if cbs_maps.contains(&&call_umc) == false {
                         trap(&format!("cts cbs_maps does not contain: {:?}", call_umc));
                     }
                 });
             });    
             call_umcs
         } else {
-            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.clone() })
+            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.iter().map(|t| t.0.clone()).collect() })
         }
     };    
     
@@ -2629,7 +2693,7 @@ pub enum ControllerUpgradeUCSOnAUMCError {
 pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<CBSMUpgradeCBError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
     caller_is_controller_gaurd(&caller());
     
-    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.contains(&umc) }) == false {
+    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.iter().find(|t| t.0 == umc).is_none() }) {
         trap(&format!("cts cbs_maps does not contain: {:?}", umc));
     }
     
@@ -2644,6 +2708,21 @@ pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Op
 
 }
 
+
+
+#[update]
+pub async fn controller_upgrade_cbsm_cbs_chunk(cbsm: Principal, q: ControllerUpgradeCSQuest) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
+    caller_is_controller_gaurd(&caller());
+    
+    call::<(ControllerUpgradeCSQuest,), (Vec<(Principal, UpgradeOutcome)>,)>(
+        cbsm,
+        "controller_upgrade_cbs_chunk",
+        (q,)        
+    )
+    .await
+    .map(|t| t.0) // unwrap the one-tuple sponse
+    .map_err(call_error_as_u32_and_string)
+}
 
 
 

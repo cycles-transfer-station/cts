@@ -22,6 +22,12 @@ use cts_lib::{
         time_seconds,
         caller_is_controller_gaurd,
         call_error_as_u32_and_string,
+        sha256,
+        upgrade_canisters::{
+            upgrade_canisters_, 
+            ControllerUpgradeCSQuest, 
+            UpgradeOutcome,
+        },        
     },
     cts_cb_authorizations::is_cts_cb_authorization_valid,
     consts::{
@@ -35,7 +41,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{tc::{*, trade_log}},
+        cycles_market::{LogStorageType, tc::{*, trade_log}},
         cts::UserAndCB,
     },
     management_canister,
@@ -800,7 +806,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     'outer: loop {
         ic_cdk::println!("outer-loop. match_rate: {match_rate}");
         let mut i: usize = 0;
-        'inner: while i < matchee_positions.len() {
+        while i < matchee_positions.len() {
             ic_cdk::println!("inner-loop. i: {i}");
             if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
                 if trade_logs.len() >= MAX_TRADE_LOGS {
@@ -863,7 +869,6 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 
                 let mut matcher_position_is_void: bool = false;
                 if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() { 
-                    std::mem::drop(matcher_position);
                     let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
                     matcher_void_positions.insert(
                         matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
@@ -873,7 +878,6 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 }    
                 
                 if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {            
-                    //std::mem::drop(matchee_position);
                     let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
                     let position_for_the_void_void_positions_insertion_i: usize = { 
                         matchee_void_positions.binary_search_by_key(
@@ -930,147 +934,6 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-/*
-fn match_trades<CallerPositionType: CurrentPositionTrait, MatcheePositionType: CurrentPositionTrait>(
-    caller: Principal, 
-    mut caller_position: CallerPositionType,  
-    potential_matches_positions: &mut Vec<MatcheePositionType>, 
-    void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
-    trade_logs: &mut VecDeque<TradeLog>, 
-    trade_logs_id_counter: &mut PurchaseId,
-) -> CallerPositionType/*caller_position*/ {
-                  
-    if CallerPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
-        trap("CallerPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
-    }
-                    
-    // match positions and create a TradeLog for each match.
-    let mut match_rate: CyclesPerToken = caller_position.current_position_available_cycles_per_token_rate();
-            
-    'outer: loop {
-        //ic_cdk::print("match outer loop");
-        //ic_cdk::println!("match_rate {:?}", match_rate);
-        let mut i: usize = 0;
-        while i < potential_matches_positions.len() {
-            //ic_cdk::print("match inner while loop");
-            if let Some(trade_rate) = potential_matches_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
-                if trade_logs.len() >= MAX_TRADE_LOGS {
-                    break 'outer;
-                }
-                //ic_cdk::println!("found match, trade-rate: {:?}", trade_rate);
-                let matchee_position: &mut MatcheePositionType = &mut potential_matches_positions[i];
-                                        
-                let purchase_tokens: Tokens = std::cmp::min(caller_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
-                let caller_position_payout_fee_cycles: Cycles = caller_position.subtract_tokens(purchase_tokens, trade_rate);
-                let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
-                                                
-                let payment_cycles: Cycles = tokens_transform_cycles(purchase_tokens, trade_rate); 
-                
-                
-                let tokens_payout_fee: Tokens = cycles_transform_tokens(
-                    {
-                        if let PositionKind::Cycles = CallerPositionType::POSITION_KIND {
-                            caller_position_payout_fee_cycles
-                        } else {
-                            matchee_position_payout_fee_cycles
-                        }
-                    },
-                    trade_rate
-                );
-                let cycles_payout_fee: Cycles = {
-                    if let PositionKind::Token = CallerPositionType::POSITION_KIND {
-                        caller_position_payout_fee_cycles
-                    } else {
-                        matchee_position_payout_fee_cycles
-                    }
-                };
-                
-                let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
-                trade_logs.push_back(
-                    TradeLog{
-                        position_id_matcher: caller_position.id(),
-                        position_id_matchee: matchee_position.id(),
-                        id: trade_log_id,
-                        positor: matchee_position.positor(),
-                        purchaser: caller,
-                        tokens: purchase_tokens,
-                        cycles: payment_cycles,
-                        cycles_per_token_rate: trade_rate,
-                        position_kind: MatcheePositionType::POSITION_KIND,
-                        timestamp_nanos: time_nanos(),
-                        tokens_payout_fee,
-                        cycles_payout_fee,
-                        cycles_payout_lock: false,
-                        token_payout_lock: false,
-                        cycles_payout_data: CyclesPayoutData::new(),
-                        token_payout_data: TokenPayoutData::new_for_a_trade_log()
-                    }
-                );
-                
-                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {            
-                    std::mem::drop(matchee_position);
-                    let position_for_the_void: MatcheePositionType = potential_matches_positions.remove(i);
-                    let position_for_the_void_void_positions_insertion_i: usize = { 
-                        void_positions.binary_search_by_key(
-                            &position_for_the_void.id(),
-                            |void_position| { void_position.position_id() }
-                        ).unwrap_err()
-                    };
-                    void_positions.insert(
-                        position_for_the_void_void_positions_insertion_i,
-                        position_for_the_void.into_void_position_type(Some(PositionTerminationCause::Fill))
-                    );
-                } else {
-                    i = i + 1;
-                }
-                
-                if caller_position.current_position_tokens(caller_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {
-                    break 'outer;
-                }    
-                
-            } else {
-                i = i + 1;
-            }
-        }
-        
-        // add up wheight[ed] average of the better_rates_trades and set higher match_rate can balance out the better_rates. 
-        /*
-        let balance_rate: CyclesPerToken = {
-            let purchase_tokens_sum = q.tokens - match_tokens_mainder;
-            let average_rate_of_purchase_tokens = purchase_rate_times_quantity_sum / purchase_tokens_sum;
-            (q.cycles_per_token_rate * q.tokens - (average_rate_of_purchase_tokens * purchase_tokens_sum)) / match_tokens_mainder
-        };
-        */
-        let balance_rate: CyclesPerToken = caller_position.current_position_available_cycles_per_token_rate();
-        match MatcheePositionType::POSITION_KIND {
-            PositionKind::Token => {
-                assert!(balance_rate >= match_rate);
-            },
-            PositionKind::Cycles => {
-                assert!(balance_rate <= match_rate);
-            } 
-        }
-        if balance_rate == match_rate {
-            break 'outer;
-        } else {
-            match_rate = balance_rate;
-        };
-    }
-                
-    caller_position
-}
-*/
 
 
 
@@ -1191,19 +1054,7 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
             }
         }
     };    
-    /*
-    let user_token_ledger_balance: Tokens = match check_user_cycles_market_token_ledger_balance(&user_id).await {
-        Ok(token_ledger_balance) => token_ledger_balance,
-        Err(call_error) => {
-            with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-            return Err(TransferTokenBalanceError::CheckUserCyclesMarketTokenLedgerBalanceCallError((call_error.0 as u32, call_error.1)));            
-        }
-    };
-    
-    let user_token_balance_in_the_lock: Tokens = with(&CM_DATA, |cm_data| { check_user_token_balance_in_the_lock(cm_data, &user_id) });
-    
-    let usable_user_token_balance: Tokens = user_token_ledger_balance.saturating_sub(user_token_balance_in_the_lock);
-    */
+  
     if usable_user_token_balance < q.tokens.saturating_add(q.token_fee) {
         with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
         return Err(TransferTokenBalanceError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance });          
@@ -1242,67 +1093,8 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 
 
 // --------------- VIEW-POSITONS -----------------
-/*
-const VIEW_POSITIONS_CHUNK_SIZE: usize = 1000;
-
-#[derive(CandidType, Deserialize)]
-pub struct ViewPositionsQuest {
-    opt_start_after_position_id: Option<PositionId>, // if none, start at the earliest position-id
-}
-
-#[derive(CandidType)]
-pub struct ViewPositionsSponse<'a, T: 'a> {
-    positions: &'a [T],
-    is_last_chunk: bool // true if there are no more current positions
-}
 
 
-#[query(manual_reply = true)]
-pub fn view_cycles_positions(q: ViewPositionsQuest) {
-    with(&CM_DATA, |cm_data| {
-        view_positions(q, &cm_data.cycles_positions);
-    });
-}
-
-#[query(manual_reply = true)]
-pub fn view_token_positions(q: ViewPositionsQuest) {
-    with(&CM_DATA, |cm_data| {
-        view_positions(q, &cm_data.token_positions);
-    });
-}
-
-
-fn view_positions<T: CandidType + CurrentPositionTrait>(q: ViewPositionsQuest, positions: &Vec<T>) {
-    
-    let mut positions_chunk: &[T] = &[];
-    let mut is_last_chunk = true;
-    
-    if positions.len() > 0 {
-        let start_position_i: usize = match q.opt_start_after_position_id {
-            None => 0,
-            Some(start_after_position_id) => {
-                match positions.binary_search_by_key(&start_after_position_id, |p| p.id()) {
-                    Ok(i) => i + 1,
-                    Err(i) => i
-                }
-            }
-        };
-        let positions_with_start = &positions[start_position_i..]; 
-        let min_of_position_with_start_len_and_chunk_size: usize = std::cmp::min(positions_with_start.len(), VIEW_POSITIONS_CHUNK_SIZE); 
-        positions_chunk = &positions_with_start[..min_of_position_with_start_len_and_chunk_size];    
-        is_last_chunk = min_of_position_with_start_len_and_chunk_size == positions_with_start.len(); 
-    }
-    
-
-    reply::<(ViewPositionsSponse<T>,)>((
-        ViewPositionsSponse{
-            positions: positions_chunk,
-            is_last_chunk: is_last_chunk
-        }
-    ,));
-    
-}
-*/
 #[derive(CandidType, Deserialize)]
 pub struct ViewPositionBookQuest {
     opt_start_greater_than_rate: Option<CyclesPerToken>
@@ -1373,152 +1165,8 @@ fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, curren
 
 
 
-/*
+
 // --------------- VIEW-TRADE-LOGS -----------------
-
-
-const VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
-const VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES: usize = VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE * TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
-
-
-#[derive(CandidType, Deserialize)]
-pub struct ViewLatestTradeLogsQuest {
-    opt_start_before_id: Option<PurchaseId>
-}
-
-#[derive(CandidType)]
-pub struct ViewLatestTradeLogsSponse<'a> {
-    trade_logs_len: u128, // the last trade_log_id + 1
-    logs: &'a Bytes, // a list of the latest ( before the q.opt_start_before if Some) TradeLogs that are still on this canister
-    storage_canisters: Vec<StorageCanister>, // list of the storage-canisters and their logs ranges
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub struct StorageCanister {
-    // The id of the first log in this storage-canister
-    first_log_id : u128,
-    // The numbe8r of logs in this storage-canister
-    length : u128,
-    // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
-    // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
-    log_size: u32,
-    // Callback to fetch the storage logs in this storage canister.
-    callback : candid::Func,
-}
-
-//candid::define_function!(pub StorageSeeTradeLogsFunction : (SeeTradeLogsQuest) -> (StorageLogs) query);
-
-#[query(manual_reply = true)]
-pub fn view_trade_logs(q: ViewLatestTradeLogsQuest) { // -> ViewLatestTradeLogsSponse {
-    
-    with_mut(&CM_DATA, |cm_data| {
-        cm_data.trade_logs.make_contiguous();
-    });
-
-    with(&CM_DATA, |cm_data| {
-        
-        let trade_logs_len: u128 = cm_data.trade_logs_id_counter;        
-        
-        let mut logs_bytes: Vec<u8> = Vec::new();
-        
-        with(&TRADES_STORAGE_DATA, |trades_storage_data| {
-            let trade_log_storage_buffer = &trades_storage_data.storage_buffer;
-            
-            let first_trade_log_id_on_this_canister: Option<PurchaseId>/*none if there are no trade-logs on this canister*/ = if trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
-                Some(u128::from_be_bytes((&trade_log_storage_buffer[16..32]).try_into().unwrap()))
-            } else {
-                cm_data.trade_logs.front().map(|l| l.id)
-            };
-            if let Some(first_trade_log_id_on_this_canister) = first_trade_log_id_on_this_canister {
-                
-                let last_trade_log_id_on_this_canister: PurchaseId = {
-                    cm_data.trade_logs.back().map(|p| p.id)
-                    .unwrap_or(u128::from_be_bytes((&trade_log_storage_buffer[
-                        trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+16
-                        ..
-                        trade_log_storage_buffer.len()-TradeLog::STABLE_MEMORY_SERIALIZE_SIZE+32
-                    ]).try_into().unwrap())) // we know there is at least one trade-log on this canister at this point and if it's not in the cm_data.trade_logs it must be in the flush buffer
-                };
-                let start_before_id: PurchaseId = match q.opt_start_before_id {
-                    None => {
-                        last_trade_log_id_on_this_canister + 1
-                    }
-                    Some(q_start_before_id) => {
-                        if q_start_before_id > last_trade_log_id_on_this_canister {
-                            last_trade_log_id_on_this_canister + 1
-                        } else {
-                            q_start_before_id
-                        }
-                    }
-                };
-                if start_before_id > first_trade_log_id_on_this_canister {
-                    let cm_data_trade_logs_till_i: usize = {
-                        match cm_data.trade_logs.binary_search_by_key(&start_before_id, |l| l.id) {
-                            Ok(i) => i,
-                            Err(i) => {
-                                if i == cm_data.trade_logs.len() {
-                                    cm_data.trade_logs.len()
-                                } else {
-                                    0
-                                }
-                            }
-                        }
-                    };
-                    let cm_data_trade_logs_till_stop = &cm_data.trade_logs.as_slices().0[..cm_data_trade_logs_till_i];
-                    if cm_data_trade_logs_till_stop.len() > 0 {
-                        let cm_data_trade_logs_bytes: Vec<u8> = cm_data_trade_logs_till_stop.rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE).next().unwrap()
-                            .iter().map(|tl| { tl.stable_memory_serialize() })
-                            .collect::<Vec<[u8; TradeLog::STABLE_MEMORY_SERIALIZE_SIZE]>>()
-                            .concat();
-                        logs_bytes = cm_data_trade_logs_bytes;
-                    }
-                    if logs_bytes.len() < VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES 
-                    && trade_log_storage_buffer.len() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE {
-                        let trade_log_storage_buffer_first_log_id: PurchaseId = first_trade_log_id_on_this_canister; // since we are in trade_log_storage_buffer.len() > 0 we know that the first_trade_log_id_on_this_canister is in the trade_log_storage_buffer  
-                        let trade_log_storage_buffer_trade_logs_len: usize = trade_log_storage_buffer.len() / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE;
-                        let trade_log_storage_buffer_till_i: usize = {
-                            if start_before_id >= trade_log_storage_buffer_first_log_id + trade_log_storage_buffer_trade_logs_len as u128 {
-                                trade_log_storage_buffer.len()
-                            } else {
-                                // start_before_id must by within [1..] trade-logs in the trade_log_storage_buffer
-                                (start_before_id - trade_log_storage_buffer_first_log_id) as usize * TradeLog::STABLE_MEMORY_SERIALIZE_SIZE
-                            }
-                        };
-                        logs_bytes = vec![
-                            trade_log_storage_buffer[..trade_log_storage_buffer_till_i].rchunks(VIEW_TRADE_LOGS_ON_THIS_CANISTER_CHUNK_SIZE_BYTES - logs_bytes.len()).next().unwrap(), // unwrap is safe here bc we know that trade_log_storage_buffer is not empty and we know that start_before_id > first_trade_log_id_on_this_canister so trade_log_storage_buffer_till_i cannot be zero
-                            &logs_bytes
-                        ].concat();
-                    }
-                }
-            }
-            
-            let mut storage_canisters: Vec<StorageCanister> = Vec::new();
-            for storage_canister in trades_storage_data.storage_canisters.iter() {
-                storage_canisters.push(
-                    StorageCanister{
-                        first_log_id : storage_canister.first_log_id,
-                        length: storage_canister.length as u128,
-                        log_size: storage_canister.log_size,
-                        callback : candid::Func{ principal: storage_canister.canister_id, method: "view_trade_logs".to_string() }
-                    }
-                );
-            }
-            
-            reply::<(ViewLatestTradeLogsSponse,)>((
-                ViewLatestTradeLogsSponse{
-                    trade_logs_len,
-                    logs: &Bytes::new(&logs_bytes),
-                    storage_canisters          
-                }
-            ,));
-        })
-    })
-
-}
-
-// -----------
-*/
 
 
 #[query]
@@ -1848,6 +1496,80 @@ pub fn controller_clear_payouts_errors() {
         cm_data.do_payouts_errors = Vec::new();
     });    
 }
+
+
+
+// -------------- UPGRADE STORAGE CANISTERS ---------------
+
+
+#[update]
+pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Vec<(Principal, UpgradeOutcome)> {
+    caller_is_controller_gaurd(&caller());
+    
+    #[allow(non_snake_case)]
+    let LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = match log_storage_type {
+        LogStorageType::Trades => &TRADES_STORAGE_DATA,
+        LogStorageType::Positions => &POSITIONS_STORAGE_DATA,
+    };
+    
+    
+    let cc: CanisterCode = with_mut(&LOG_STORAGE_DATA, |log_storage_data| {
+        if let Some(new_canister_code) = q.new_canister_code {
+            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
+                trap("new_canister_code module hash does not match module");
+            }
+            log_storage_data.storage_canister_code = new_canister_code; 
+        }
+        log_storage_data.storage_canister_code.clone()
+    });
+    
+    let cs: Vec<Principal> = match q.specific_cs {
+        Some(cs) => cs.into_iter().collect(),
+        None => {
+            with(&LOG_STORAGE_DATA, |log_storage_data| {
+                log_storage_data.storage_canisters.iter()
+                .filter_map(|sc| {
+                    if &sc.module_hash != cc.module_hash() {
+                        Some(sc.canister_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .take(200)
+                .collect()
+            })
+        }
+    };
+    
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(cs, &cc, &q.post_upgrade_quest).await; 
+    
+    // update successes in the main data.
+    with_mut(&LOG_STORAGE_DATA, |log_storage_data| {
+        for (sc, uo) in rs.iter() {
+            if let Some(ref r) = uo.install_code_result {
+                if r.is_ok() {
+                    if let Some(i) = log_storage_data.storage_canisters.iter_mut().find(|i| i.canister_id == *sc) {
+                        i.module_hash = cc.module_hash().clone();
+                    } else {
+                        ic_cdk::print("check this");
+                    } 
+                }
+            }
+        } 
+    });
+    
+    return rs;
+    
+}
+
+
+
+
+
+
+
+
+
 
 
 

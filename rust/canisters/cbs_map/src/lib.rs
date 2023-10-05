@@ -11,15 +11,8 @@ use cts_lib::{
             call::{
                 reply,
                 arg_data,
-                call,
                 call_raw128
             },
-            stable::{
-                stable64_grow,
-                stable64_read,
-                stable64_size,
-                stable64_write,
-            }
         },
         update, 
         query, 
@@ -34,7 +27,9 @@ use cts_lib::{
                 with, 
                 with_mut,
             },
-        }
+        },
+        upgrade_canisters::*,
+        caller_is_controller_gaurd,
     },
     types::{
         Cycles,
@@ -45,20 +40,8 @@ use cts_lib::{
             PutNewUserError,
             UpdateUserError,
             CBSMUpgradeCBError,
-            CBSMUpgradeCBErrorKind
+            //CBSMUpgradeCBErrorKind
         },
-        cycles_bank,
-    },
-    management_canister::{
-        CanisterIdRecord,
-        ManagementCanisterInstallCodeQuest,
-        ManagementCanisterInstallCodeMode
-    },
-    consts::{
-        WASM_PAGE_SIZE_BYTES,
-        MANAGEMENT_CANISTER_ID,
-        MiB,
-        
     },
     global_allocator_counter::get_allocated_bytes_count
 };
@@ -67,10 +50,6 @@ use candid::{
     Principal,
     CandidType,
     Deserialize,
-    utils::{
-        encode_one,
-        decode_one
-    }
 };
 use serde::{Serialize};
       
@@ -98,8 +77,6 @@ impl CBSMData {
 }
 
 
-#[derive(Serialize, Deserialize)]
-struct Stub;
 
 
 const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
@@ -107,8 +84,7 @@ const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
 const MAX_USERS: usize = 20_000; 
 
-const CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE: usize = 500;
-const SEE_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
+const VIEW_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
 
 
 
@@ -141,7 +117,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, None::<fn(Stub) -> CBSMData>)
+    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, None::<fn(CBSMData) -> CBSMData>)
 }
 
 #[no_mangle]
@@ -310,6 +286,78 @@ pub fn cts_see_uc_code_module_hash() {
 
 
 
+
+#[update]
+pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
+    caller_is_controller_gaurd(&caller());
+    
+    let cc: CanisterCode = with_mut(&CBSM_DATA, |cbsm_data| {
+        if let Some(new_canister_code) = q.new_canister_code {
+            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
+                trap("new_canister_code module hash does not match module");
+            }
+            cbsm_data.cycles_bank_canister_code = new_canister_code; 
+        }
+        cbsm_data.cycles_bank_canister_code.clone()
+    });
+    
+    let users_cbs: Vec<(Principal, Principal)> = match q.specific_cs {
+        Some(specific_cs) => {
+            with(&CBSM_DATA, |cbsm_data| {
+                cbsm_data.users_map.iter()
+                .filter_map(|(user_id, d)| {
+                    if specific_cs.contains(&d.cycles_bank_canister_id) {
+                        Some((user_id.clone(), d.cycles_bank_canister_id.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()                
+            })
+        }
+        None => {
+            with(&CBSM_DATA, |cbsm_data| {
+                cbsm_data.users_map.iter()
+                .filter_map(|(user_id, d)| {
+                    if &d.cycles_bank_latest_known_module_hash != cc.module_hash() {
+                        Some((user_id.clone(), d.cycles_bank_canister_id.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .take(200)
+                .collect()
+            })
+        }
+    };
+    
+    let (users, cbs): (Vec<Principal>, Vec<Principal>) = users_cbs.into_iter().unzip();
+    
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(cbs, &cc, &q.post_upgrade_quest).await;
+    
+    with_mut(&CBSM_DATA, |cbsm_data| {
+        for (user_id, (_cb, uo)) in users.into_iter().zip(rs.iter()) {
+            if let Some(ref r) = uo.install_code_result {
+                if r.is_ok() {
+                    if let Some(d) = cbsm_data.users_map.get_mut(&user_id) {
+                        d.cycles_bank_latest_known_module_hash = cc.module_hash().clone();
+                    } else {
+                        ic_cdk::print("check this");
+                    } 
+                }
+            }
+        } 
+    });
+    
+    return rs;
+    
+}
+
+
+
+
+/*
+
 #[update(manual_reply = true)]
 pub async fn cts_upgrade_ucs_chunk() {
     if caller() != cts_id() {
@@ -457,7 +505,7 @@ pub async fn cts_upgrade_ucs_chunk() {
     
 }
 
-
+*/
 
 
 
@@ -472,7 +520,7 @@ pub fn cts_view_user_canister_upgrade_fails() {
     let (chunk_i,): (u64,) = arg_data::<(u64,)>();
     
     with(&CBSM_DATA, |cbsm_data| {
-        reply::<(Option<&[CBSMUpgradeCBError]>,)>((cbsm_data.cycles_bank_canister_upgrade_fails.chunks(SEE_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE).nth(chunk_i.try_into().unwrap()),));
+        reply::<(Option<&[CBSMUpgradeCBError]>,)>((cbsm_data.cycles_bank_canister_upgrade_fails.chunks(VIEW_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE).nth(chunk_i.try_into().unwrap()),));
     });
 }
 

@@ -87,7 +87,7 @@ pub mod canister_code {
         }
     }
 }
-
+pub use canister_code::CanisterCode;
 
 
 
@@ -232,7 +232,7 @@ pub mod cbs_map {
         UpgradeCodeCallCandidError{candid_error: String},
         StartCanisterCallError(u32, String)
     }
-    
+
 
 
 

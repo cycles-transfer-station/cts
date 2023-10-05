@@ -16,7 +16,6 @@ use cts_lib::{
             call::{
                 msg_cycles_available128,
                 msg_cycles_accept128,
-                reply_raw,
             },
             stable::{
                 WASM_PAGE_SIZE_IN_BYTES

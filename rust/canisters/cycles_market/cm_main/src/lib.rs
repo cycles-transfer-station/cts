@@ -6,6 +6,7 @@ use cts_lib::{
             caller,
             call::{
                 reply,
+                call
             },
         },
         init,
@@ -19,7 +20,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{cm_main::*, tc::CMIcrc1TokenTradeContractInit}
+        cycles_market::{LogStorageType, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
     },
     tools::{
         localkey::{
@@ -28,9 +29,11 @@ use cts_lib::{
                 with_mut,
             }
         },
+        upgrade_canisters::*,
         caller_is_controller_gaurd,
         sha256,
         time_nanos_u64,
+        call_error_as_u32_and_string,
     },
     icrc::Tokens,
 };
@@ -44,29 +47,26 @@ use candid::{
     Deserialize,
     utils::{encode_one}
 };
-        
+
+
+// ----------------------
 
 
 
-#[derive(CandidType, Serialize, Deserialize)]
-struct TradeContracts {
-    icrc1_token_trade_contracts: Vec<Icrc1TokenTradeContract>
+#[derive(CandidType, Serialize, Deserialize, Clone)]        
+struct TradeContractData {
+    tc_module_hash: [u8; 32],
+    latest_upgrade_timestamp_nanos: u64,
 }
-impl TradeContracts {
-    fn new() -> Self {
-        Self {
-            icrc1_token_trade_contracts: Vec::new(),
-        }
-    }
-}
+
 
 #[derive(Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
-    trade_contracts: TradeContracts,
-    icrc1token_trade_contract_canister_code: CanisterCode,
-    icrc1token_trades_storage_canister_code: CanisterCode,
-    icrc1token_positions_storage_canister_code: CanisterCode,
+    trade_contracts: Vec<(Icrc1TokenTradeContract, TradeContractData)>,
+    tc_canister_code: CanisterCode,
+    trades_storage_canister_code: CanisterCode,
+    positions_storage_canister_code: CanisterCode,
     controller_create_icrc1token_trade_contract_mid_call_data: Option<ControllerCreateIcrc1TokenTradeContractMidCallData>,
 }
 
@@ -74,25 +74,19 @@ impl CMMainData {
     fn new() -> Self {
         Self {
             cts_id: Principal::from_slice(&[]),
-            trade_contracts: TradeContracts::new(),
-            icrc1token_trade_contract_canister_code: CanisterCode::empty(),
-            icrc1token_trades_storage_canister_code: CanisterCode::empty(),
-            icrc1token_positions_storage_canister_code: CanisterCode::empty(),
+            trade_contracts: Vec::new(),
+            tc_canister_code: CanisterCode::empty(),
+            trades_storage_canister_code: CanisterCode::empty(),
+            positions_storage_canister_code: CanisterCode::empty(),
             controller_create_icrc1token_trade_contract_mid_call_data: None,
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct OldCMMainData {}
 
 
 
-
-
-
-const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 5_000_000_000_000;
-const NEW_ICRC1TOKEN_TRADE_CONTRACT_CM_CALLER_CYCLES: Cycles = 5_000_000_000_000;
+const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 30_000_000_000_000;
 
 const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
@@ -105,7 +99,6 @@ thread_local! {
 #[derive(CandidType, Deserialize)]
 struct CMMainInit {
     cts_id: Principal,
-    icrc1_token_trade_contracts: Option<Vec<Icrc1TokenTradeContract>>
 }
 
 #[init]
@@ -114,9 +107,6 @@ fn init(cm_main_init: CMMainInit) {
 
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         cm_main_data.cts_id = cm_main_init.cts_id;
-        if let Some(tcs) = cm_main_init.icrc1_token_trade_contracts {
-            cm_main_data.trade_contracts.icrc1_token_trade_contracts = tcs;
-        }
     });
 }
 
@@ -128,44 +118,34 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(OldCMMainData) -> CMMainData>);
-
+    canister_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(CMMainData) -> CMMainData>);
 }
 
 
 
 // ----------------- UPLOAD-CANISTER-CODE --------------------
 
-#[update]
-pub fn controller_upload_icrc1token_trade_contract_canister_code(canister_code: CanisterCode) {
-    caller_is_controller_gaurd(&caller());
-    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
-        trap("module hash is not as given");
-    } 
-    with_mut(&CM_MAIN_DATA, |data| {
-        data.icrc1token_trade_contract_canister_code = canister_code;
-    });
+
+#[derive(CandidType, Deserialize)]
+pub enum MarketCanisterType {
+    TradeContract,
+    PositionsStorage,
+    TradesStorage,
 }
 
 #[update]
-pub fn controller_upload_icrc1token_trade_log_storage_canister_code(canister_code: CanisterCode) {
+pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canister_type: MarketCanisterType) {
     caller_is_controller_gaurd(&caller());
     if *(canister_code.module_hash()) != sha256(canister_code.module()) {
         trap("module hash is not as given");
     } 
     with_mut(&CM_MAIN_DATA, |data| {
-        data.icrc1token_trades_storage_canister_code = canister_code;
-    });
-}
-
-#[update]
-pub fn controller_upload_icrc1token_positions_storage_canister_code(canister_code: CanisterCode) {
-    caller_is_controller_gaurd(&caller());
-    if *(canister_code.module_hash()) != sha256(canister_code.module()) {
-        trap("module hash is not as given");
-    } 
-    with_mut(&CM_MAIN_DATA, |data| {
-        data.icrc1token_positions_storage_canister_code = canister_code;
+        let cc: &mut CanisterCode = match market_canister_type {
+            MarketCanisterType::TradeContract =>    &mut data.tc_canister_code,
+            MarketCanisterType::PositionsStorage => &mut data.positions_storage_canister_code,
+            MarketCanisterType::TradesStorage =>    &mut data.trades_storage_canister_code,
+        };
+        *cc = canister_code;
     });
 }
 
@@ -196,7 +176,7 @@ pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
     controller_create_icrc1token_trade_contract_quest: ControllerCreateIcrc1TokenTradeContractQuest,
     // options are for the steps
     icrc1token_trade_contract_canister_id: Option<Principal>,
-    icrc1token_trade_contract_module_hash: Option<[u8; 32]>
+    icrc1token_trade_contract_data: Option<TradeContractData>
 }
 
 
@@ -220,16 +200,15 @@ pub enum ControllerCreateIcrc1TokenTradeContractError {
 
 #[derive(CandidType, Deserialize)]
 pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
+    TCInitCandidEncodeError(String),
     InstallCodeIcrc1TokenTradeContractCallError(CallError),
 }
 
 
 
-fn unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mut controller_create_icrc1token_trade_contract_mid_call_data: ControllerCreateIcrc1TokenTradeContractMidCallData) {
-    controller_create_icrc1token_trade_contract_mid_call_data.lock = false;
-    with_mut(&CM_MAIN_DATA, |data| {
-        data.controller_create_icrc1token_trade_contract_mid_call_data = Some(controller_create_icrc1token_trade_contract_mid_call_data);
-    });
+fn unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mut mid_call_data: ControllerCreateIcrc1TokenTradeContractMidCallData, cm_main_data: &mut CMMainData) {
+    mid_call_data.lock = false;
+    cm_main_data.controller_create_icrc1token_trade_contract_mid_call_data = Some(mid_call_data);
 }
 
 
@@ -255,7 +234,7 @@ pub async fn controller_create_icrc1token_trade_contract(q: ControllerCreateIcrc
                     lock: true,
                     controller_create_icrc1token_trade_contract_quest: q,
                     icrc1token_trade_contract_canister_id: None,
-                    icrc1token_trade_contract_module_hash: None,       
+                    icrc1token_trade_contract_data: None,       
                 };
                 data.controller_create_icrc1token_trade_contract_mid_call_data = Some(mid_call_data.clone());
                 Ok(mid_call_data)
@@ -299,36 +278,47 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
         }
     }
     
-    if mid_call_data.icrc1token_trade_contract_module_hash.is_none() {
+    if mid_call_data.icrc1token_trade_contract_data.is_none() {        
         
-        let icrc1token_trade_contract_canister_code: CanisterCode = with(&CM_MAIN_DATA, |data| { data.icrc1token_trade_contract_canister_code.clone() });
+        let tc_canister_code: CanisterCode = with(&CM_MAIN_DATA, |data| { 
+            data.tc_canister_code.clone() 
+        });
         
-        let module_hash: [u8; 32] = icrc1token_trade_contract_canister_code.module_hash().clone();
+        let tc_module_hash: [u8; 32] = tc_canister_code.module_hash().clone();
         
-        let cm_icrc1token_trade_contract_init: Vec<u8> = with(&CM_MAIN_DATA, |data| {
+        let cm_icrc1token_trade_contract_init: Vec<u8> = match with(&CM_MAIN_DATA, |data| {
             encode_one(CMIcrc1TokenTradeContractInit{
                 cts_id: data.cts_id,
                 cm_main_id: ic_cdk::api::id(),
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,
-                trades_storage_canister_code: data.icrc1token_trades_storage_canister_code.clone(),
-                positions_storage_canister_code: data.icrc1token_positions_storage_canister_code.clone(),
-            }).unwrap()
-        });
+                trades_storage_canister_code: data.trades_storage_canister_code.clone(),
+                positions_storage_canister_code: data.positions_storage_canister_code.clone(),
+            })
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                with_mut(&CM_MAIN_DATA, |cm_main_data| { unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mid_call_data, cm_main_data); });
+                return Err(ControllerCreateIcrc1TokenTradeContractError::MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError::TCInitCandidEncodeError(format!("{:?}", e))));
+            }  
+        };
         
         match install_code(
             ManagementCanisterInstallCodeQuest{
                 mode: ManagementCanisterInstallCodeMode::install,
                 canister_id: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
-                wasm_module: icrc1token_trade_contract_canister_code.module(),
+                wasm_module: tc_canister_code.module(),
                 arg: &cm_icrc1token_trade_contract_init
             }
         ).await {
             Ok(()) => {
-                mid_call_data.icrc1token_trade_contract_module_hash = Some(module_hash);
+                mid_call_data.icrc1token_trade_contract_data = Some(TradeContractData{
+                    tc_module_hash,
+                    latest_upgrade_timestamp_nanos: time_nanos_u64(),
+                });
             } 
             Err(call_error) => {
-                unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mid_call_data);
+                with_mut(&CM_MAIN_DATA, |cm_main_data| { unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mid_call_data, cm_main_data); });
                 return Err(ControllerCreateIcrc1TokenTradeContractError::MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError::InstallCodeIcrc1TokenTradeContractCallError(call_error)));
             }
         }
@@ -336,11 +326,14 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
     
     with_mut(&CM_MAIN_DATA, |data| {
         data.controller_create_icrc1token_trade_contract_mid_call_data = None;
-        data.trade_contracts.icrc1_token_trade_contracts.push(
-            Icrc1TokenTradeContract {
-                icrc1_ledger_canister_id: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
-                trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
-            }
+        data.trade_contracts.push(
+            (
+                Icrc1TokenTradeContract {
+                    icrc1_ledger_canister_id: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
+                    trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
+                },
+                mid_call_data.icrc1token_trade_contract_data.unwrap()
+            )
         );
     });
     
@@ -405,15 +398,88 @@ async fn continue_controller_create_icrc1token_trade_contract_()
 #[query(manual_reply = true)]
 pub fn view_icrc1_token_trade_contracts() {
     with(&CM_MAIN_DATA, |cm_main_data| {
-        reply::<(&Vec<Icrc1TokenTradeContract>,)>((&(cm_main_data.trade_contracts.icrc1_token_trade_contracts),));
+        reply::<(&Vec<(Icrc1TokenTradeContract, TradeContractData)>,)>((&(cm_main_data.trade_contracts),));
     });
+}
+
+// ----------------
+
+
+
+
+#[update]
+pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
+    caller_is_controller_gaurd(&caller());
+    
+    let tc_cc: CanisterCode = with_mut(&CM_MAIN_DATA, |cm_main_data| {
+        if let Some(new_canister_code) = q.new_canister_code {
+            if *(new_canister_code.module_hash()) != sha256(new_canister_code.module()) {
+                trap("new_canister_code module hash does not match module");
+            }
+            cm_main_data.tc_canister_code = new_canister_code; 
+        }
+        cm_main_data.tc_canister_code.clone()
+    });
+    
+    let tcs: Vec<Principal> = match q.specific_cs {
+        Some(tcs) => tcs.into_iter().collect(),
+        None => {
+            with(&CM_MAIN_DATA, |cm_main_data| {
+                cm_main_data.trade_contracts.iter()
+                .filter_map(|tc| {
+                    if &tc.1.tc_module_hash != tc_cc.module_hash() {
+                        Some(tc.0.trade_contract_canister_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .take(200)
+                .collect()
+            })
+        }
+    };
+    
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(tcs, &tc_cc, &q.post_upgrade_quest).await;
+    
+    // update successes in the main data.
+    with_mut(&CM_MAIN_DATA, |cm_main_data| {
+        for (tc, uo) in rs.iter() {
+            if let Some(ref r) = uo.install_code_result {
+                if r.is_ok() {
+                    if let Some(i) = cm_main_data.trade_contracts.iter_mut().find(|i| i.0.trade_contract_canister_id == *tc) {
+                        i.1.tc_module_hash = tc_cc.module_hash().clone();
+                        i.1.latest_upgrade_timestamp_nanos = time_nanos_u64();
+                    } else {
+                        ic_cdk::print("check this");
+                    } 
+                }
+            }
+        } 
+    });
+    
+    return rs;
+    
 }
 
 
 
 
+#[update]
+pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
+    caller_is_controller_gaurd(&caller());
+    
+    call::<(ControllerUpgradeCSQuest, LogStorageType), (Vec<(Principal, UpgradeOutcome)>,)>(
+        tc,
+        "controller_upgrade_log_storage_canisters",
+        (q, log_storage_type)        
+    )
+    .await
+    .map(|t| t.0) // unwrap the one-tuple sponse
+    .map_err(call_error_as_u32_and_string)
+}
 
 
-// ----------------
+
+
 
 

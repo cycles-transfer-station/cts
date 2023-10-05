@@ -28,6 +28,8 @@ pub struct ManagementCanisterInstallCodeQuest<'a> {
     pub arg : &'a [u8],
 }
 
+pub use ManagementCanisterInstallCodeQuest as InstallCodeQuest;
+
 #[allow(non_camel_case_types)]
 #[derive(CandidType, Deserialize)]
 pub enum ManagementCanisterInstallCodeMode {
@@ -35,6 +37,8 @@ pub enum ManagementCanisterInstallCodeMode {
     reinstall, 
     upgrade
 }
+
+pub use ManagementCanisterInstallCodeMode as InstallCodeMode;
 
 #[derive(CandidType, Deserialize)]
 pub struct ManagementCanisterCreateCanisterQuest {

@@ -549,6 +549,7 @@ version = "0.1.0"
 dependencies = [
  "candid 0.9.6",
  "canister_authorizations",
+ "futures",
  "ic-cdk 0.10.0",
  "ic-certified-map",
  "ic-ledger-types",

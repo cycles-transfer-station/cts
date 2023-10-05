@@ -361,7 +361,7 @@ pub enum PutNewUserIntoACBSMError {
 pub async fn put_new_user_into_a_cbsm(user_id: Principal, cbsm_user_data: CBSMUserData) -> Result<Principal, PutNewUserIntoACBSMError> {
     
     for i in (0..with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.len() })).rev() {
-        let cbsm_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.cbs_maps[i] });
+        let cbsm_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.cbs_maps[i].0 });
         match call::<(Principal, CBSMUserData), (Result<(), CBSMPutNewUserError>,)>(
             cbsm_id,
             "put_new_user",
@@ -453,6 +453,8 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
         return Err(CreateNewCBSMError::CBSMapCanisterCodeNotFound);
     }
     
+    let cbsm_module_hash: crate::ModuleHash = with(&CTS_DATA, |cts_data| { cts_data.cbs_map_canister_code.module_hash().clone() });
+    
     match call::<(ManagementCanisterInstallCodeQuest,), ()>(
         MANAGEMENT_CANISTER_ID,
         "install_code",
@@ -467,7 +469,7 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
     ).await {
         Ok(_) => {
             with_mut(&CTS_DATA, |cts_data| { 
-                cts_data.cbs_maps.push(c); 
+                cts_data.cbs_maps.push((c, cbsm_module_hash)); 
                 cts_data.create_new_cbs_map_lock = false; 
             });
             Ok(c)    
@@ -498,7 +500,7 @@ pub async fn find_user_in_the_cbs_maps(user_id: Principal) -> Result<Option<(CBS
     let call_results: Vec<CallResult<(Option<CBSMUserData>,)>> = futures::future::join_all(
         with(&CTS_DATA, |cts_data| { 
             cts_data.cbs_maps.iter().map(
-                |cbsm| { 
+                |(cbsm, _)| { 
                     call::<(Principal,), (Option<CBSMUserData>,)>(
                         cbsm.clone(), 
                         "find_user", 
@@ -512,7 +514,7 @@ pub async fn find_user_in_the_cbs_maps(user_id: Principal) -> Result<Option<(CBS
     let mut call_fails: Vec<(Principal, (u32, String))> = Vec::new();
     
     for (i,call_result) in call_results.into_iter().enumerate() {
-        let cbsm_id: Principal = with(&CTS_DATA, |cts_data| cts_data.cbs_maps[i]);
+        let cbsm_id: Principal = with(&CTS_DATA, |cts_data| cts_data.cbs_maps[i].0);
         match call_result {
             Ok((optional_cbsm_user_data,)) => match optional_cbsm_user_data {
                 Some(cbsm_user_data) => return Ok(Some((cbsm_user_data, cbsm_id))),

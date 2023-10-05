@@ -211,7 +211,6 @@ async fn _do_payouts() {
             vcp.cycles_payout_lock = false;
             handle_do_cycles_payout_result(&mut vcp.cycles_payout_data, do_cycles_payout_result);
             if vcp.can_remove() {
-                std::mem::drop(vcp);
                 cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
             }
         }
@@ -226,7 +225,6 @@ async fn _do_payouts() {
             vip.token_payout_lock = false;
             handle_do_token_payout_sponse(&mut vip.token_payout_data, do_token_payout_sponse);
             if vip.can_remove() {
-                std::mem::drop(vip);
                 cm_data.void_token_positions.remove(vip_void_token_positions_i);
             }
         }
@@ -247,7 +245,6 @@ async fn _do_payouts() {
                 vp.update_storage_position_data().lock = false;
                 vp.update_storage_position_data().status = do_update_storage_position_result.is_ok();
                 if vp.can_remove() {
-                    std::mem::drop(vp);
                     void_positions.remove(vp_void_positions_i);
                 }
             }

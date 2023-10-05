@@ -273,4 +273,65 @@ pub fn stable_read_into_vec<M: Memory>(memory: &M, start: u64, len: usize) -> Ve
 }
 
 
+pub mod upgrade_canisters {
+    
+    use std::collections::HashSet;
+    use crate::types::{CallError, CanisterCode};
+    use candid::{CandidType, Deserialize, Principal};
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct ControllerUpgradeCSQuest {
+        pub specific_cs: Option<HashSet<Principal>>, 
+        pub new_canister_code: Option<CanisterCode>, 
+        pub post_upgrade_quest: Vec<u8>
+    }
+    
+    // options are for the steps, none means didn't call.
+    #[derive(CandidType, Deserialize, Default)]
+    pub struct UpgradeOutcome {
+        pub stop_canister_result: Option<Result<(), CallError>>,
+        pub install_code_result: Option<Result<(), CallError>>,    
+        pub start_canister_result: Option<Result<(), CallError>>,
+    }
+    
+    pub async fn upgrade_canisters_(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> Vec<(Principal, UpgradeOutcome)> {    
+        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest))).await // // use async fn upgrade_canister_, (not async block)
+    }
+    
+    async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
+        use ic_cdk::api::management_canister::main::{start_canister,stop_canister, CanisterIdRecord};
+        use crate::management_canister::{InstallCodeQuest, InstallCodeMode, install_code};    
+        use crate::tools::call_error_as_u32_and_string;
+        
+        
+        let mut upgrade_outcome = UpgradeOutcome::default();
+                
+        // stop canister
+        upgrade_outcome.stop_canister_result = Some(stop_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
+        if let Err(_) = upgrade_outcome.stop_canister_result.as_ref().unwrap() {
+            return (c, upgrade_outcome);
+        } 
+                
+        // install-code
+        let a = InstallCodeQuest {
+            mode: InstallCodeMode::upgrade,
+            canister_id: c,
+            wasm_module: canister_code.module(),
+            arg: &post_upgrade_quest,
+        };
+        upgrade_outcome.install_code_result = Some(install_code(a).await);
+                
+        // start canister
+        upgrade_outcome.start_canister_result = Some(start_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
+                
+        return (c, upgrade_outcome);
+    }
+    
+}
+
+
+
+
+
+
 
