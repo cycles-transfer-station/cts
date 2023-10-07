@@ -1,6 +1,6 @@
 use std::{
     cell::{RefCell,Cell},
-    collections::{HashMap, HashSet}
+    collections::{HashMap}
 };
 use cts_lib::{
     self,
@@ -21,13 +21,8 @@ use cts_lib::{
                 arg_data,
                 arg_data_raw_size,
                 call,
-                call_with_payment128,
                 call_raw128
             },
-            stable::{
-                stable64_read,
-                stable64_write
-            }
         },
         update, 
         query, 
@@ -35,7 +30,6 @@ use cts_lib::{
         pre_upgrade, 
         post_upgrade
     },
-    management_canister,
     ic_ledger_types::{
         MAINNET_LEDGER_CANISTER_ID
     },
@@ -45,10 +39,8 @@ use cts_lib::{
         CyclesTransfer,
         CyclesTransferMemo,
         CallError,
-        cycles_transferrer,
         cycles_bank::{
             CyclesBankInit,
-            LengthenLifetimeQuest
         },
         cycles_market::{
             tc as cm_icrc1token_trade_contract,
@@ -67,7 +59,7 @@ use cts_lib::{
         SECONDS_IN_A_DAY,
         WASM_PAGE_SIZE_BYTES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
-        MANAGEMENT_CANISTER_ID,
+        TRILLION,
     },
     tools::{
         time_nanos,
@@ -82,7 +74,7 @@ use cts_lib::{
         tokens_transform_cycles,
         call_error_as_u32_and_string,
     },
-    icrc::{Tokens,IcrcId, BlockId},
+    icrc::{BlockId},
     global_allocator_counter::get_allocated_bytes_count,
 };
 use canister_tools::{self, MemoryId};
@@ -90,7 +82,6 @@ use candid::{
     Principal,
     CandidType,
     Deserialize,
-    Nat,
     utils::{
         encode_one,
         decode_one,
@@ -201,6 +192,11 @@ impl CMTradeContractLogs {
         }
     }
 }
+impl Default for CMTradeContractLogs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct UserData {
@@ -252,22 +248,12 @@ impl CBData {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct Stub;
 
 const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 10_000_000_000;
 const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 
 
-
-
-const MINIMUM_LENGTHEN_LIFETIME_SECONDS: u128 = SECONDS_IN_A_DAY * 30;
-
-const MINIMUM_CYCLES_FOR_THE_CTSFUEL: Cycles = 10_000_000_000;
-
-#[allow(non_upper_case_globals)]
-const MAXIMUM_STORAGE_SIZE_MiB: u128 = 1024;
 
 const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY * 45;
 
@@ -327,7 +313,7 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES);
     
-    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(Stub) -> CBData>);
+    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
 }
 
 // ---------------------------
@@ -842,7 +828,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(put_call_cycles);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
+        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -921,7 +907,7 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
     }
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
+        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -947,375 +933,6 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
 
 
 
-
-/*
-
-#[derive(CandidType)]
-pub enum UserCMCreateCyclesPositionError {
-    CTSFuelTooLow,
-    MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
-    CyclesMarketCreateCyclesPositionCallError((u32, String)),
-    CyclesMarketCreateCyclesPositionCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-    CyclesMarketCreateCyclesPositionError(cm_icrc1token_trade_contract::CreateCyclesPositionError)
-}
-
-
-#[update]
-pub async fn cm_create_cycles_position(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_icrc1token_trade_contract::CreateCyclesPositionQuest) -> Result<cm_icrc1token_trade_contract::CreateCyclesPositionSuccess, UserCMCreateCyclesPositionError> {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
-        return Err(UserCMCreateCyclesPositionError::CTSFuelTooLow);
-    }
-    
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMCyclesPosition>() as u128 {
-        return Err(UserCMCreateCyclesPositionError::MemoryIsFull);
-    }
-   
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
-    }
-
-    let mut call_future = call_raw128(   // <(&cycles_market::CreateCyclesPositionQuest,), (cycles_market::CreateCyclesPositionResult,)>
-        icrc1token_trade_contract.trade_contract_canister_id,
-        "create_cycles_position",
-        &encode_one(&q).unwrap(),
-        q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE
-    );
-    
-    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionCallError((call_error.0 as u32, "call_perform error".to_string())));
-    }
-    
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(q.cycles + CYCLES_MARKET_CREATE_POSITION_FEE);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
-    });
-    
-    let call_result: CallResult<Vec<u8>> = call_future.await;
-
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
-    });
-    
-    match call_result {
-        Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::CreateCyclesPositionResult>(&sponse_bytes) {
-            Ok(cm_create_cycles_position_result) => match cm_create_cycles_position_result {
-                Ok(cm_create_cycles_position_success) => {
-                    with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions.push(
-                            CMCyclesPosition{
-                                id: cm_create_cycles_position_success.position_id,
-                                create_cycles_position_quest: q,
-                                create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
-                                timestamp_nanos: time_nanos(),
-                            }
-                        );
-                    });
-                    Ok(cm_create_cycles_position_success)
-                },
-                Err(cm_create_cycles_position_error) => {
-                    return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionError(cm_create_cycles_position_error));
-                }
-            },
-            Err(candid_decode_error) => {
-                return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
-            }
-        },
-        Err(call_error) => {
-            return Err(UserCMCreateCyclesPositionError::CyclesMarketCreateCyclesPositionCallError((call_error.0 as u32, call_error.1)));
-        }
-    }
-
-}
-
-
-
-// ------------
-
-
-#[derive(CandidType)]
-pub enum UserCMCreateTokenPositionError {
-    CTSFuelTooLow,
-    MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_create_position_fee: Cycles },
-    CyclesMarketCreateTokenPositionCallError((u32, String)),
-    CyclesMarketCreateTokenPositionCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-    CyclesMarketCreateTokenPositionError(cm_icrc1token_trade_contract::CreateTokenPositionError)
-}
-
-
-#[update]
-pub async fn cm_create_token_position(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_icrc1token_trade_contract::CreateTokenPositionQuest) -> Result<cm_icrc1token_trade_contract::CreateTokenPositionSuccess, UserCMCreateTokenPositionError> {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
-        return Err(UserCMCreateTokenPositionError::CTSFuelTooLow);
-    }
-    
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMTokenPosition>() as u128 {
-        return Err(UserCMCreateTokenPositionError::MemoryIsFull);
-    }
-   
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_CREATE_POSITION_FEE {
-        return Err(UserCMCreateTokenPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE });
-    }
-    
-    let mut call_future = call_raw128(
-        icrc1token_trade_contract.trade_contract_canister_id,
-        "create_token_position",
-        &encode_one(&q).unwrap(),
-        CYCLES_MARKET_CREATE_POSITION_FEE
-    );
-    
-    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(UserCMCreateTokenPositionError::CyclesMarketCreateTokenPositionCallError((call_error.0 as u32, "call_perform error".to_string())));
-    }
-    
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(CYCLES_MARKET_CREATE_POSITION_FEE);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
-    });
-    
-    let call_result: CallResult<Vec<u8>> = call_future.await;
-
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
-    });
-
-    match call_result {
-        Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::CreateTokenPositionResult>(&sponse_bytes) {
-            Ok(cm_create_token_position_result) => match cm_create_token_position_result {
-                Ok(cm_create_token_position_success) => {
-                    with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions.push(
-                            CMTokenPosition{
-                                id: cm_create_token_position_success.position_id,   
-                                create_token_position_quest: q,
-                                create_position_fee: CYCLES_MARKET_CREATE_POSITION_FEE as u64,
-                                timestamp_nanos: time_nanos(),
-                            }
-                        );
-                    });
-                    Ok(cm_create_token_position_success)
-                },
-                Err(cm_create_token_position_error) => {
-                    return Err(UserCMCreateTokenPositionError::CyclesMarketCreateTokenPositionError(cm_create_token_position_error));
-                }
-            },
-            Err(candid_decode_error) => {
-                return Err(UserCMCreateTokenPositionError::CyclesMarketCreateTokenPositionCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
-            }
-        },
-        Err(call_error) => {
-            return Err(UserCMCreateTokenPositionError::CyclesMarketCreateTokenPositionCallError((call_error.0 as u32, call_error.1)));
-        }
-    }
-
-}
-
-
-
-// --------------
-
-#[derive(CandidType, Deserialize)]
-pub struct UserCMPurchaseCyclesPositionQuest {
-    cycles_market_purchase_cycles_position_quest: cm_icrc1token_trade_contract::PurchaseCyclesPositionQuest,
-    cycles_position_cycles_per_token_rate: cm_icrc1token_trade_contract::CyclesPerToken, // for the user_canister-log
-    cycles_position_positor: Principal,
-}
-
-#[derive(CandidType)]
-pub enum UserCMPurchaseCyclesPositionError {
-    CTSFuelTooLow,
-    MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
-    CyclesMarketPurchaseCyclesPositionCallError((u32, String)),
-    CyclesMarketPurchaseCyclesPositionCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8>},
-    CyclesMarketPurchaseCyclesPositionError(cm_icrc1token_trade_contract::PurchaseCyclesPositionError)
-}
-
-
-#[update]
-pub async fn cm_purchase_cycles_position(icrc1token_trade_contract: Icrc1TokenTradeContract, q: UserCMPurchaseCyclesPositionQuest) -> Result<cm_icrc1token_trade_contract::PurchaseCyclesPositionSuccess, UserCMPurchaseCyclesPositionError> {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
-        return Err(UserCMPurchaseCyclesPositionError::CTSFuelTooLow);
-    }
-    
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMCyclesPositionPurchase>() as u128 {
-        return Err(UserCMPurchaseCyclesPositionError::MemoryIsFull);
-    }
-    
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_PURCHASE_POSITION_FEE {
-        return Err(UserCMPurchaseCyclesPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
-    }
-    
-    let mut call_future = call_raw128(  // <(&cycles_market::PurchaseCyclesPositionQuest,), (cycles_market::PurchaseCyclesPositionResult,)>
-        icrc1token_trade_contract.trade_contract_canister_id,
-        "purchase_cycles_position",
-        &encode_one(&q.cycles_market_purchase_cycles_position_quest).unwrap(), // unwrap is safe here bc before the first await
-        CYCLES_MARKET_PURCHASE_POSITION_FEE
-    );
-    
-    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionCallError((call_error.0 as u32, "call_perform error".to_string())));
-    }
-    
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(CYCLES_MARKET_PURCHASE_POSITION_FEE);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
-    });
-    
-    let call_result: CallResult<Vec<u8>> = call_future.await;
-
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
-    });
-
-    match call_result {
-        Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::PurchaseCyclesPositionResult>(&sponse_bytes) {
-            Ok(cm_purchase_cycles_position_result) => match cm_purchase_cycles_position_result {
-                Ok(cm_purchase_cycles_position_success) => {
-                    with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_cycles_positions_purchases.push(
-                            CMCyclesPositionPurchase{
-                                cycles_position_id: q.cycles_market_purchase_cycles_position_quest.cycles_position_id,
-                                cycles_position_cycles_per_token_rate: q.cycles_position_cycles_per_token_rate,
-                                cycles_position_positor: q.cycles_position_positor,
-                                id: cm_purchase_cycles_position_success.purchase_id,
-                                cycles: q.cycles_market_purchase_cycles_position_quest.cycles,
-                                purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
-                                timestamp_nanos: time_nanos(),
-                            }
-                        );
-                    });
-                    Ok(cm_purchase_cycles_position_success)
-                },
-                Err(cm_purchase_cycles_position_error) => {
-                    return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionError(cm_purchase_cycles_position_error));
-                }
-            },
-            Err(candid_decode_error) => {
-                return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
-            }
-        },
-        Err(call_error) => {
-            return Err(UserCMPurchaseCyclesPositionError::CyclesMarketPurchaseCyclesPositionCallError((call_error.0 as u32, call_error.1)));
-        }
-    }
-
-}
-
-
-// ---------------
-
-#[derive(CandidType, Deserialize)]
-pub struct UserCMPurchaseTokenPositionQuest {
-    cycles_market_purchase_token_position_quest: cm_icrc1token_trade_contract::PurchaseTokenPositionQuest,
-    token_position_cycles_per_token_rate: cm_icrc1token_trade_contract::CyclesPerToken, // for the user_canister-log
-    token_position_positor: Principal,
-}
-
-#[derive(CandidType)]
-pub enum UserCMPurchaseTokenPositionError {
-    CTSFuelTooLow,
-    MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles, cycles_market_purchase_position_fee: Cycles },
-    CyclesMarketPurchaseTokenPositionCallError((u32, String)),
-    CyclesMarketPurchaseTokenPositionCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8>},    
-    CyclesMarketPurchaseTokenPositionError(cm_icrc1token_trade_contract::PurchaseTokenPositionError)
-}
-
-
-#[update]
-pub async fn cm_purchase_token_position(icrc1token_trade_contract: Icrc1TokenTradeContract, q: UserCMPurchaseTokenPositionQuest) -> Result<cm_icrc1token_trade_contract::PurchaseTokenPositionSuccess, UserCMPurchaseTokenPositionError> {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 30_000_000_000 {
-        return Err(UserCMPurchaseTokenPositionError::CTSFuelTooLow);
-    }
-    
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CMTokenPositionPurchase>() as u128 {
-        return Err(UserCMPurchaseTokenPositionError::MemoryIsFull);
-    }
-    
-    let purchase_token_position_cycles_payment: Cycles = tokens_transform_cycles(q.cycles_market_purchase_token_position_quest.tokens, q.token_position_cycles_per_token_rate);
-    
-    if with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }) < CYCLES_MARKET_PURCHASE_POSITION_FEE + purchase_token_position_cycles_payment {
-        return Err(UserCMPurchaseTokenPositionError::CyclesBalanceTooLow{ cycles_balance: with(&CB_DATA, |cb_data| { cb_data.user_data.cycles_balance }), cycles_market_purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE });
-    }
-    
-    let mut call_future = call_raw128(
-        icrc1token_trade_contract.trade_contract_canister_id,
-        "purchase_token_position",
-        &encode_one(&q.cycles_market_purchase_token_position_quest).unwrap(),
-        CYCLES_MARKET_PURCHASE_POSITION_FEE + purchase_token_position_cycles_payment       
-    );
-    
-    if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-        let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(UserCMPurchaseTokenPositionError::CyclesMarketPurchaseTokenPositionCallError((call_error.0 as u32, "call_perform error".to_string())));
-    }
-    
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(CYCLES_MARKET_PURCHASE_POSITION_FEE + purchase_token_position_cycles_payment);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
-    });
-    
-    let call_result: CallResult<Vec<u8>> = call_future.await;
-
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(msg_cycles_refunded128());
-    });
-
-    match call_result {
-        Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::PurchaseTokenPositionResult>(&sponse_bytes) {
-            Ok(cm_purchase_token_position_result) => match cm_purchase_token_position_result {
-                Ok(cm_purchase_token_position_success) => {
-                    with_mut(&CB_DATA, |cb_data| {
-                        cb_data.user_data.cm_trade_contracts.get_mut(&icrc1token_trade_contract).unwrap().cm_calls_out.cm_token_positions_purchases.push(
-                            CMTokenPositionPurchase{
-                                token_position_id: q.cycles_market_purchase_token_position_quest.token_position_id,
-                                token_position_cycles_per_token_rate: q.token_position_cycles_per_token_rate,
-                                token_position_positor: q.token_position_positor,
-                                id: cm_purchase_token_position_success.purchase_id,
-                                tokens: q.cycles_market_purchase_token_position_quest.tokens,
-                                purchase_position_fee: CYCLES_MARKET_PURCHASE_POSITION_FEE as u64,
-                                timestamp_nanos: time_nanos(),
-                            }
-                        );
-                    });
-                    Ok(cm_purchase_token_position_success)
-                },
-                Err(cm_purchase_token_position_error) => {
-                    return Err(UserCMPurchaseTokenPositionError::CyclesMarketPurchaseTokenPositionError(cm_purchase_token_position_error));
-                }
-            },
-            Err(candid_decode_error) => {
-                return Err(UserCMPurchaseTokenPositionError::CyclesMarketPurchaseTokenPositionCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
-            }
-        },
-        Err(call_error) => {
-            return Err(UserCMPurchaseTokenPositionError::CyclesMarketPurchaseTokenPositionCallError((call_error.0 as u32, call_error.1)));
-        }
-    }
-
-}
-*/
 
 // ---------------------
 
@@ -1392,7 +1009,7 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: Icrc1TokenTrad
     }
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_insert(CMTradeContractLogs::new());
+        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -1424,10 +1041,11 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: Icrc1TokenTrad
 // -------------------------------
 
 fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData) -> &mut CMTradeContractLogs {
+    let caller: Principal = caller();
     cb_data.user_data.cm_trade_contracts
         .iter_mut()
         .find(|(k,_v): &(&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
-            k.trade_contract_canister_id == caller()
+            k.trade_contract_canister_id == caller
         })
         .map(|(_k,v): (&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
             v
@@ -1453,10 +1071,18 @@ pub fn cm_message_cycles_position_purchase_positor(q: cm_icrc1token_trade_contra
 pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest) {
     
     let cycles_purchase: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    // log a CyclesTransferIn
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_purchase); 
+        cb_data.user_data.cycles_transfers_in.push(
+            CyclesTransferIn{
+                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
+                by_the_canister: caller(),
+                cycles: cycles_purchase,
+                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-sell-{}-{}", q.cycles_position_id, q.purchase_id)),
+                timestamp_nanos: time_nanos()
+            }
+        );
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.push(
             CMMessageCyclesPositionPurchasePurchaserLog{
                 timestamp_nanos: time_nanos(),
@@ -1472,10 +1098,18 @@ pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_cont
 pub fn cm_message_token_position_purchase_positor(q: cm_icrc1token_trade_contract::CMTokenPositionPurchasePositorMessageQuest) {
     
     let cycles_payment: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    // log a CyclesTransferIn
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_payment); 
+        cb_data.user_data.cycles_transfers_in.push(
+            CyclesTransferIn{
+                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
+                by_the_canister: caller(),
+                cycles: cycles_payment,
+                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-sell-{}-{}", q.token_position_id, q.purchase_id)),
+                timestamp_nanos: time_nanos()
+            }
+        );
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_token_position_purchase_positor_logs.push(
             CMMessageTokenPositionPurchasePositorLog{
                 timestamp_nanos: time_nanos(),
@@ -1505,11 +1139,18 @@ pub fn cm_message_token_position_purchase_purchaser(q: cm_icrc1token_trade_contr
 pub fn cm_message_void_cycles_position_positor(q: cm_icrc1token_trade_contract::CMVoidCyclesPositionPositorMessageQuest) {
     
     let void_cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    // log a CyclesTransferIn
-    
+        
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(void_cycles); 
+        cb_data.user_data.cycles_transfers_in.push(
+            CyclesTransferIn{
+                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
+                by_the_canister: caller(),
+                cycles: void_cycles,
+                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-buy-void-{}", q.position_id)),
+                timestamp_nanos: time_nanos()
+            }
+        );
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_void_cycles_position_positor_logs.push(
             CMMessageVoidCyclesPositionPositorLog{
                 timestamp_nanos: time_nanos(),
@@ -1540,127 +1181,6 @@ pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::C
 
 
 
-// -------------------------------
-// download cm data
-
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_cycles_position_purchase_positor_logs).unwrap_or(&vec![])),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_cycles_position_purchase_purchaser_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs).unwrap_or(&vec![])),));
-    });
-}
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_token_position_purchase_positor_logs).unwrap_or(&vec![])),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_token_position_purchase_purchaser_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_token_position_purchase_purchaser_logs).unwrap_or(&vec![])),));
-    });
-}
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_void_cycles_position_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_void_cycles_position_positor_logs).unwrap_or(&vec![])),));
-    });
-}
-
-
-
-#[query(manual_reply = true)]
-pub fn download_cm_message_void_token_position_positor_logs(icrc1token_trade_contract: Icrc1TokenTradeContract, q: DownloadCBLogsQuest) {
-    if caller() != user_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
-    if with(&CB_DATA, |cb_data| { ctsfuel_balance(cb_data) }) < 10_000_000_000 {
-        reject(CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE);
-        return;
-    }
-    
-    maintenance_check();
-    
-    with(&CB_DATA, |cb_data| {
-        reply((download_logs(q, cb_data.user_data.cm_trade_contracts.get(&icrc1token_trade_contract).map(|tc| &tc.cm_message_logs.cm_message_void_token_position_positor_logs).unwrap_or(&vec![])),));
-    });
-}
-
-
 
 // ----------------------------------------------------------
 
@@ -1680,38 +1200,11 @@ pub struct UserUCMetrics<'a> {
     cycles_transfers_id_counter: u128,
     cycles_transfers_in_len: u128,
     cycles_transfers_out_len: u128,
-    cm_trade_contracts_logs_lengths: HashMap<&'a Icrc1TokenTradeContract, CMTradeContractLogsLengths>,   
+    cm_trade_contracts: Vec<&'a Icrc1TokenTradeContract>,   
     cts_cb_authorization: bool, 
 }
 
 
-#[derive(CandidType)]
-pub struct CMTradeContractLogsLengths {
-    cm_message_logs_lengths: CMMessageLogsLengths,
-}
-
-#[derive(CandidType)]
-pub struct CMMessageLogsLengths{
-    cm_message_cycles_position_purchase_positor_logs_length: u64,
-    cm_message_cycles_position_purchase_purchaser_logs_length: u64,
-    cm_message_token_position_purchase_positor_logs_length: u64,
-    cm_message_token_position_purchase_purchaser_logs_length: u64,
-    cm_message_void_cycles_position_positor_logs_length: u64,
-    cm_message_void_token_position_positor_logs_length: u64,    
-}
-
-fn cm_trade_contract_logs_lengths(cm_trade_contract_logs: &CMTradeContractLogs) -> CMTradeContractLogsLengths {
-    CMTradeContractLogsLengths{
-        cm_message_logs_lengths: CMMessageLogsLengths{
-            cm_message_cycles_position_purchase_positor_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() as u64,
-            cm_message_cycles_position_purchase_purchaser_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() as u64,
-            cm_message_token_position_purchase_positor_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_token_position_purchase_positor_logs.len() as u64,
-            cm_message_token_position_purchase_purchaser_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_token_position_purchase_purchaser_logs.len() as u64,
-            cm_message_void_cycles_position_positor_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() as u64,
-            cm_message_void_token_position_positor_logs_length: cm_trade_contract_logs.cm_message_logs.cm_message_void_token_position_positor_logs.len() as u64,  
-        },
-    }
-}
 
 
 #[query(manual_reply = true)]
@@ -1733,7 +1226,7 @@ pub fn metrics() { //-> UserUCMetrics {
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
-            cm_trade_contracts_logs_lengths: cb_data.user_data.cm_trade_contracts.iter().map(|(k,v)| { (k, cm_trade_contract_logs_lengths(v)) }).collect(),
+            cm_trade_contracts: cb_data.user_data.cm_trade_contracts.keys().collect(),
             cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0
         },));
     });
@@ -1745,7 +1238,6 @@ pub fn metrics() { //-> UserUCMetrics {
 
 // --------------------------------------------------------
 
-const TRILLION: u128 = 1_000_000_000_000;
 
 
 #[update]
