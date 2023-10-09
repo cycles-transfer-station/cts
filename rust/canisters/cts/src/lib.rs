@@ -41,6 +41,7 @@ use cts_lib::{
         ChangeCanisterSettingsRecord,
     },
     consts::{
+        TRILLION,
         MiB,
         MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
@@ -222,14 +223,14 @@ type ModuleHash = [u8; 32];
  
  
 
-pub const MEMBERSHIP_COST_CYCLES: Cycles = 15_000_000_000_000;
-pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = 1*60*60*24*365; // 1-year
-pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 5_000_000_000_000;
+pub const MEMBERSHIP_COST_CYCLES: Cycles = 15 * TRILLION;
+pub const NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS: u128 = SECONDS_IN_A_DAY * 365; // 1-year
+pub const NEW_CYCLES_BANK_CTSFUEL: CTSFuel = 5 * TRILLION;
 #[allow(non_upper_case_globals)]
-pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 400;
+pub const NEW_CYCLES_BANK_STORAGE_SIZE_MiB: u128 = 100;
 #[allow(non_upper_case_globals)]
 pub const NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB: u128 = cts_lib::consts::cb_storage_size_mib_as_cb_network_memory_allocation_mib(NEW_CYCLES_BANK_STORAGE_SIZE_MiB);
-pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 1_000_000_000_000;
+pub const NEW_CYCLES_BANK_BACKUP_CYCLES: Cycles = 2 * TRILLION;
 pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
     NETWORK_CANISTER_CREATION_FEE_CYCLES
     + (
@@ -735,128 +736,80 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         
     }
     
-    // if local env 
-    /*
-    if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) {
-        
-        if purchase_cycles_bank_data.cycles_bank_canister.is_none() {
-        
-            let block_height: u64 = match ledger_topup_cycles_cmc_icp_transfer(
-                cycles_to_icptokens(NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()),
-                Some(principal_icp_subaccount(&user_id)), 
-                id()
-            ).await {
+    if purchase_cycles_bank_data.create_cycles_bank_canister_block_height.is_none() {
+        let create_cycles_bank_canister_block_height: IcpBlockHeight = match icp_transfer(
+            MAINNET_LEDGER_CANISTER_ID,
+            IcpTransferArgs {
+                memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
+                amount: cycles_to_icptokens(NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()),
+                fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+                from_subaccount: Some(principal_icp_subaccount(&user_id)),
+                to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
+                created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
+            }
+        ).await {
+            Ok(transfer_result) => match transfer_result {
                 Ok(block_height) => block_height,
-                Err(_ledger_topup_cycles_cmc_icp_transfer_error) => {
-                    trap("local fail"); // ok to trap it is local env
-                }
-            };
-            
-            let topup_cycles: Cycles = match ledger_topup_cycles_cmc_notify(block_height, id()).await {
-                Ok(topup_cycles) => topup_cycles,
-                Err(_ledger_topup_cycles_cmc_notify_error) => {
-                    trap("local fail"); // ok to trap it is local env
-                }
-            };
-            
-            let cycles_bank_canister: Principal = match cts_lib::management_canister::create_canister(
-                cts_lib::management_canister::ManagementCanisterCreateCanisterQuest{
-                    settings: None // settings are set later
-                },
-                topup_cycles
-            ).await {
-                Ok(canister_id) => canister_id,
-                Err(_) => {
-                    trap("local fail"); // ok to trap it is local env
-                } 
-            };
-            
-            purchase_cycles_bank_data.cycles_bank_canister = Some(cycles_bank_canister);
-            with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
-            purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
-            
-        }
-    
-        
-        
-    } else { 
-    */
-        // mainnet
-    
-        if purchase_cycles_bank_data.create_cycles_bank_canister_block_height.is_none() {
-            let create_cycles_bank_canister_block_height: IcpBlockHeight = match icp_transfer(
-                MAINNET_LEDGER_CANISTER_ID,
-                IcpTransferArgs {
-                    memo: ICP_LEDGER_CREATE_CANISTER_MEMO,
-                    amount: cycles_to_icptokens(NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()),
-                    fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-                    from_subaccount: Some(principal_icp_subaccount(&user_id)),
-                    to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&id())),
-                    created_at_time: Some(IcpTimestamp { timestamp_nanos: time() })
-                }
-            ).await {
-                Ok(transfer_result) => match transfer_result {
-                    Ok(block_height) => block_height,
-                    Err(transfer_error) => {
-                        purchase_cycles_bank_data.lock = false;
-                        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferError(transfer_error)));                    
-                    }
-                },
-                Err(transfer_call_error) => {
+                Err(transfer_error) => {
                     purchase_cycles_bank_data.lock = false;
                     write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1))));
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferError(transfer_error)));                    
                 }
-            };
-        
-            purchase_cycles_bank_data.create_cycles_bank_canister_block_height = Some(create_cycles_bank_canister_block_height);
-        }
+            },
+            Err(transfer_call_error) => {
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterIcpTransferCallError((transfer_call_error.0 as u32, transfer_call_error.1))));
+            }
+        };
     
+        purchase_cycles_bank_data.create_cycles_bank_canister_block_height = Some(create_cycles_bank_canister_block_height);
+    }
+
+
+    if purchase_cycles_bank_data.cycles_bank_canister.is_none() {
     
-        if purchase_cycles_bank_data.cycles_bank_canister.is_none() {
+        let cycles_bank_canister: Principal = match call::<(CmcNotifyCreateCanisterQuest,), (Result<Principal, CmcNotifyError>,)>(
+            MAINNET_CYCLES_MINTING_CANISTER_ID,
+            "notify_create_canister",
+            (CmcNotifyCreateCanisterQuest {
+                controller: id(),
+                block_index: purchase_cycles_bank_data.create_cycles_bank_canister_block_height.unwrap(),
+                subnet_type: if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) { None } else { Some("fiduciary") }
+            },)
+        ).await {
+            Ok((notify_result,)) => match notify_result {
+                Ok(new_canister_id) => new_canister_id,
+                Err(cmc_notify_error) => {
+                    // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
+                    match cmc_notify_error {
+                        CmcNotifyError::TransactionTooOld(_) | CmcNotifyError::Refunded{ .. } => {
+                            with_mut(&CTS_DATA, |cts_data| { cts_data.users_purchase_cycles_bank.remove(&user_id); });
+                            return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error));
+                        },
+                        CmcNotifyError::InvalidTransaction(_) // 
+                        | CmcNotifyError::Other{ .. }
+                        | CmcNotifyError::Processing
+                        => {
+                            purchase_cycles_bank_data.lock = false;
+                            write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                            return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error)));   
+                        },
+                    }                    
+                }
+            },
+            Err(cmc_notify_call_error) => {
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyCallError((cmc_notify_call_error.0 as u32, cmc_notify_call_error.1))));
+            }      
+        };
         
-            let cycles_bank_canister: Principal = match call::<(CmcNotifyCreateCanisterQuest,), (Result<Principal, CmcNotifyError>,)>(
-                MAINNET_CYCLES_MINTING_CANISTER_ID,
-                "notify_create_canister",
-                (CmcNotifyCreateCanisterQuest {
-                    controller: id(),
-                    block_index: purchase_cycles_bank_data.create_cycles_bank_canister_block_height.unwrap(),
-                    subnet_type: if ic_cdk::api::id() == Principal::from_slice(CTS_LOCAL_ID) { None } else { Some("fiduciary") }
-                },)
-            ).await {
-                Ok((notify_result,)) => match notify_result {
-                    Ok(new_canister_id) => new_canister_id,
-                    Err(cmc_notify_error) => {
-                        // match on the cmc_notify_error, if it failed bc of the cmc icp transfer block height expired, remove the user from the NEW_USERS map.     
-                        match cmc_notify_error {
-                            CmcNotifyError::TransactionTooOld(_) | CmcNotifyError::Refunded{ .. } => {
-                                with_mut(&CTS_DATA, |cts_data| { cts_data.users_purchase_cycles_bank.remove(&user_id); });
-                                return Err(PurchaseCyclesBankError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error));
-                            },
-                            CmcNotifyError::InvalidTransaction(_) // 
-                            | CmcNotifyError::Other{ .. }
-                            | CmcNotifyError::Processing
-                            => {
-                                purchase_cycles_bank_data.lock = false;
-                                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyError(cmc_notify_error)));   
-                            },
-                        }                    
-                    }
-                },
-                Err(cmc_notify_call_error) => {
-                    purchase_cycles_bank_data.lock = false;
-                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CreateCyclesBankCanisterCmcNotifyCallError((cmc_notify_call_error.0 as u32, cmc_notify_call_error.1))));
-                }      
-            };
-            
-            purchase_cycles_bank_data.cycles_bank_canister = Some(cycles_bank_canister);
-            with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
-            purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
-        }
-    //}
+        purchase_cycles_bank_data.cycles_bank_canister = Some(cycles_bank_canister);
+        with_mut(&CTS_DATA, |cts_data| { cts_data.cb_cache.put(user_id, Some(cycles_bank_canister)); });
+        purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = true; // because a fresh cmc canister is empty 
+    }
+  
     
     if purchase_cycles_bank_data.cbs_map.is_none() {
         
@@ -866,7 +819,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                 cycles_bank_canister_id: purchase_cycles_bank_data.cycles_bank_canister.as_ref().unwrap().clone(),
                 first_membership_creation_timestamp_nanos: purchase_cycles_bank_data.start_time_nanos,
                 cycles_bank_latest_known_module_hash: [0u8; 32],
-                cycles_bank_lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
+                cycles_bank_lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
                 membership_termination_cb_uninstall_data: None,
             }
         ).await {
@@ -921,7 +874,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                         cbsm_id: purchase_cycles_bank_data.cbs_map.unwrap(),
                         user_id: user_id,
                         storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
-                        lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/1_000_000_000 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
+                        lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
                         start_with_user_cycles_balance: 0
                     }).unwrap()
                 }).unwrap(),

@@ -41,7 +41,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{LogStorageType, tc::{*, trade_log}},
+        cycles_market::{*, tc::{*, trade_log}},
         cts::UserAndCB,
     },
     management_canister,
@@ -282,8 +282,7 @@ pub fn minimum_tokens_match() -> Tokens {
 mod memory_location {
     use crate::*;
     
-    pub const CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: usize = 500; // multiple of 10
-    pub const CANISTER_DATA_STORAGE_SIZE_MiB: usize = CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 2 - 20/*memory-size at the start [re]placement*/; 
+    pub const CANISTER_DATA_STORAGE_SIZE_MiB: usize = TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 3 - 20/*memory-size at the start [re]placement*/; 
 
     pub const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
     pub const MAX_CYCLES_POSITIONS: usize = CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>();
@@ -1480,7 +1479,7 @@ pub fn controller_view_stop_calls_flag() -> bool {
 // --------------- PAYOUTS-ERRORS -------------------
 
 #[query(manual_reply = true)]
-pub fn controller_see_payouts_errors(chunk_i: u32) {
+pub fn controller_view_payouts_errors(chunk_i: u32) {
     caller_is_controller_gaurd(&caller());
     
     with(&CM_DATA, |cm_data| {

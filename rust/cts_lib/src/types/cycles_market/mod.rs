@@ -12,4 +12,6 @@ pub enum LogStorageType {
 }
 
 
-
+#[allow(non_upper_case_globals)]
+pub const TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB: usize = 500; // multiple of 10
+    

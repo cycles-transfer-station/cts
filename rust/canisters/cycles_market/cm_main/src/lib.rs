@@ -6,7 +6,8 @@ use cts_lib::{
             caller,
             call::{
                 reply,
-                call
+                call,
+                call_raw,
             },
         },
         init,
@@ -20,7 +21,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{LogStorageType, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
+        cycles_market::{*, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
     },
     tools::{
         localkey::{
@@ -35,6 +36,7 @@ use cts_lib::{
         time_nanos_u64,
         call_error_as_u32_and_string,
     },
+    consts::MiB,
     icrc::Tokens,
 };
 use canister_tools::{self, MemoryId};
@@ -260,7 +262,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                         with(&CM_MAIN_DATA, |data| data.cts_id)
                     ]),
                     compute_allocation : None,
-                    memory_allocation : None,
+                    memory_allocation : Some(TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128),
                     freezing_threshold : None,
                 })
             },
@@ -487,6 +489,21 @@ pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: Contr
     .map_err(call_error_as_u32_and_string)
 }
 
+
+#[update]
+pub async fn controller_view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> Result<Vec<u8>, CallError> { 
+    caller_is_controller_gaurd(&caller());
+    
+    call_raw(
+        tc,
+        "controller_view_payouts_errors",
+        encode_one(chunk_i).unwrap(),        
+        0
+    )
+    .await
+    .map_err(call_error_as_u32_and_string)
+    
+}
 
 
 

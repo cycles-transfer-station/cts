@@ -195,7 +195,7 @@ where
     K: PartialEq + Eq + Hash,
 {
     match map.get(k) {
-        None => return,
+        None => {},
         Some(vec) => {
             let vec_till_start_before_id = &vec[
                 0

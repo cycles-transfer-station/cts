@@ -40,7 +40,7 @@ pub enum FlushLogsStorageError {
 }
 
 
-const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
+const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = /*5*/2 * MiB;
 
 const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
 

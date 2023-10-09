@@ -2,7 +2,7 @@ use cts_lib::{
     ic_cdk::{
         self,
         update,
-        query,
+        //query,
         api::{
             is_controller,
             caller,
