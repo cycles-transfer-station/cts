@@ -1271,6 +1271,7 @@ pub enum BurnIcpMintCyclesError {
     CyclesBankNotFound,
     CTSIsBusy,
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
+    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
     MidCallError(BurnIcpMintCyclesMidCallError)
 }
 
@@ -1404,14 +1405,19 @@ async fn burn_icp_mint_cycles_(user_id: Principal, mut burn_icp_mint_cycles_data
         match ledger_topup_cycles_cmc_notify(burn_icp_mint_cycles_data.cmc_icp_transfer_block_height.unwrap(), id()).await {
             Ok(cmc_cycles) => { burn_icp_mint_cycles_data.cmc_cycles = Some(cmc_cycles); },
             Err(ledger_topup_cycles_cmc_notify_error) => {
-                burn_icp_mint_cycles_data.lock = false;
-                with_mut(&CTS_DATA, |cts_data| {
-                    match cts_data.users_burn_icp_mint_cycles.get_mut(&user_id) {
-                        Some(data) => { *data = burn_icp_mint_cycles_data; },
-                        None => {}
-                    }
-                });
-                return Err(BurnIcpMintCyclesError::MidCallError(BurnIcpMintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                if let LedgerTopupCyclesCmcNotifyError::CmcNotifyError(CmcNotifyError::Refunded{ block_index: Some(b), reason: r }) = ledger_topup_cycles_cmc_notify_error {
+                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_burn_icp_mint_cycles.remove(&user_id); });
+                    return Err(BurnIcpMintCyclesError::LedgerTopupCyclesCmcNotifyRefund{ block_index: b, reason: r});
+                } else {
+                    burn_icp_mint_cycles_data.lock = false;
+                    with_mut(&CTS_DATA, |cts_data| {
+                        match cts_data.users_burn_icp_mint_cycles.get_mut(&user_id) {
+                            Some(data) => { *data = burn_icp_mint_cycles_data; },
+                            None => {}
+                        }
+                    });
+                    return Err(BurnIcpMintCyclesError::MidCallError(BurnIcpMintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                }
             }
         }
     }
