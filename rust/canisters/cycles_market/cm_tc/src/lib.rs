@@ -473,9 +473,9 @@ async fn token_transfer(q: TokenTransferArg) -> Result<Result<BlockId, TokenTran
     let r = icrc1_transfer(localkey::cell::get(&TOKEN_LEDGER_ID), q).await;
     if let Ok(ref tr) = r {
         if let Err(TokenTransferError::BadFee { ref expected_fee }) = tr {
-            localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, expected_fee.0.clone().try_into().unwrap_or(Tokens::MAX));
+            localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, expected_fee.0.clone().try_into().unwrap_or(0));
             with_mut(&CM_DATA, |cm_data| {
-                cm_data.icrc1_token_ledger_transfer_fee = expected_fee.0.clone().try_into().unwrap_or(Tokens::MAX);
+                cm_data.icrc1_token_ledger_transfer_fee = expected_fee.0.clone().try_into().unwrap_or(0);
             });
         }
     } 
