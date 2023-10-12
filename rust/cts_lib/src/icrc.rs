@@ -15,7 +15,7 @@ pub use icrc_ledger_types::{
             DEFAULT_SUBACCOUNT as ICRC_DEFAULT_SUBACCOUNT,    
         },
         transfer::{
-            BlockIndex as BlockId,
+            //BlockIndex as BlockId, // don't use Nat for serialization. bincode does not support Nat for deserialization, since Nat Deserialize uses deserialize_any.
             Memo as IcrcMemo,
             TransferArg as TokenTransferArg,
             TransferError as TokenTransferError,
@@ -23,30 +23,18 @@ pub use icrc_ledger_types::{
     }
 };
 
-
+pub use u128 as BlockId;
 pub use u128 as Tokens;
-//pub struct Tokens(pub u128);
-/*
-pub use ic_icrc1::{
-    Account as Icrc1Id,
-    Subaccount as Icrc1Sub,
-    DEFAULT_SUBACCOUNT as ICRC1_DEFAULT_SUBACCOUNT,
-    Memo as Icrc1Memo,
-    endpoints::{
-        NumTokens as Tokens,
-        TransferArg as TokenTransferArg,
-        TransferError as TokenTransferError,
-        BlockIndex as BlockId,
-    }
-};
-*/
+
 
 pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, CallError> {
     call(
         icrc1_ledger_id,
         "icrc1_transfer",
         (q,),
-    ).await.map_err(|e| call_error_as_u32_and_string(e)).map(|(s,)| s)
+    ).await
+    .map_err(call_error_as_u32_and_string)
+    .map(|(ir,): (Result<candid::Nat, TokenTransferError>,)| ir.map(|nat| nat.0.try_into().unwrap_or(0)))
 }
 
 pub async fn icrc1_balance_of(icrc1_ledger_id: Principal, count_id: IcrcId) -> Result<Tokens, (u32, String)> {
