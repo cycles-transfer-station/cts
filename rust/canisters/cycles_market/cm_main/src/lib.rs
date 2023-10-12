@@ -190,7 +190,7 @@ pub struct ControllerCreateIcrc1TokenTradeContractQuest {
 
 #[derive(CandidType, Deserialize)]
 pub struct ControllerCreateIcrc1TokenTradeContractSuccess {
-    icrc1token_trade_contract_canister_id: Principal,
+    trade_contract_canister_id: Principal,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -340,7 +340,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
     });
     
     Ok(ControllerCreateIcrc1TokenTradeContractSuccess {
-        icrc1token_trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.unwrap(),
+        trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.unwrap(),
     })
 
 }
