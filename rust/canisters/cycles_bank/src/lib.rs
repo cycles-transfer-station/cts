@@ -31,7 +31,10 @@ use cts_lib::{
         post_upgrade
     },
     ic_ledger_types::{
-        MAINNET_LEDGER_CANISTER_ID
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpBlockHeight,
+        IcpTokens,
+        MAINNET_CYCLES_MINTING_CANISTER_ID
     },
     types::{
         Cycles,
@@ -63,6 +66,7 @@ use cts_lib::{
     },
     tools::{
         time_nanos,
+        time_nanos_u64,
         time_seconds,
         localkey::{
             self,
@@ -230,6 +234,7 @@ struct CBData {
     user_data: UserData,
     cycles_transfers_id_counter: u128,
     cts_cb_authorization: Vec<u8>,
+    burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
 }
 
 impl CBData {
@@ -243,13 +248,13 @@ impl CBData {
             lifetime_termination_timestamp_seconds: 0,
             user_data: UserData::new(),
             cycles_transfers_id_counter: 0,  
-            cts_cb_authorization: Vec::new()      
+            cts_cb_authorization: Vec::new(),
+            burn_icp_mint_cycles_mid_call_data: None,
         }
     }
 }
 
-
-const USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE: usize = 32;
+const CYCLES_TRANSFER_MEMO_MAX_SIZE: usize = 32;
 const MINIMUM_USER_TRANSFER_CYCLES: Cycles = 10_000_000_000;
 const CYCLES_TRANSFER_IN_MINIMUM_CYCLES: Cycles = 10_000_000_000;
 
@@ -259,10 +264,11 @@ const DELETE_LOG_MINIMUM_WAIT_NANOS: u128 = NANOS_IN_A_SECOND * SECONDS_IN_A_DAY
 
 const STABLE_MEMORY_ID_CB_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 
-const USER_CANISTER_BACKUP_CYCLES: Cycles = 1_000_000_000_000;
+const USER_CANISTER_BACKUP_CYCLES: Cycles = 2 * TRILLION;
 
 const CTSFUEL_BALANCE_TOO_LOW_REJECT_MESSAGE: &'static str = "ctsfuel_balance is too low";
 
+const CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH: usize = 40;
 
 thread_local! {
    
@@ -356,12 +362,12 @@ fn new_cycles_transfer_id(id_counter: &mut u128) -> u128 {
     
 // compute the size of a CyclesTransferIn and of a CyclesTransferOut, check the length of both vectors, and compute the current storage usage. 
 fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
-    (
+    let mut count: u128 = (
         localkey::cell::get(&MEMORY_SIZE_AT_THE_START) 
         + 
-        cb_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<CyclesTransferIn>() + 32/*for the cycles-transfer-memo-heap-size*/ )
+        cb_data.user_data.cycles_transfers_in.len() * ( std::mem::size_of::<CyclesTransferIn>() + CYCLES_TRANSFER_MEMO_MAX_SIZE/*for the cycles-transfer-memo-heap-size*/ )
         + 
-        cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + 32/*for the cycles-transfer-memo-heap-size*/ + 20/*for the possible-call-error-string-heap-size*/ )
+        cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + CYCLES_TRANSFER_MEMO_MAX_SIZE/*for the cycles-transfer-memo-heap-size*/ + CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH/*for the possible-call-error-string-heap-size*/ )
         +
         cb_data.user_data.cm_trade_contracts.len() * std::mem::size_of::<Icrc1TokenTradeContract>()
         +
@@ -381,9 +387,12 @@ fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
                 cm_trade_contract_logs.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidCyclesPositionPositorLog>()
                 +
                 cm_trade_contract_logs.cm_message_logs.cm_message_void_token_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidTokenPositionPositorLog>()
-            })
-                        
-    ) as u128
+            })          
+    ) as u128;
+    if cb_data.burn_icp_mint_cycles_mid_call_data.is_some() {
+        count += (std::mem::size_of::<CyclesTransferIn>() + CYCLES_TRANSFER_MEMO_MAX_SIZE) as u128;
+    }
+    count
 }
 
 fn calculate_free_storage(cb_data: &CBData) -> u128 {
@@ -413,11 +422,11 @@ fn truncate_cycles_transfer_memo(mut cycles_transfer_memo: CyclesTransferMemo) -
         CyclesTransferMemo::Nat(_n) => {},
         CyclesTransferMemo::Int(_int) => {},
         CyclesTransferMemo::Blob(ref mut b) => {
-            b.truncate(32);
+            b.truncate(CYCLES_TRANSFER_MEMO_MAX_SIZE);
             b.shrink_to_fit();
         },
          CyclesTransferMemo::Text(ref mut s) => {
-            s.truncate(32);
+            s.truncate(CYCLES_TRANSFER_MEMO_MAX_SIZE);
             s.shrink_to_fit();
         }
     }
@@ -600,7 +609,7 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest, (user_of_the_cb, ct
         trap("For the now, must transfer cycles with the CTS cycles-banks.");
     }
     
-    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < std::mem::size_of::<CyclesTransferOut>() as u128 + 32 + 40 {
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < (std::mem::size_of::<CyclesTransferOut>() + CYCLES_TRANSFER_MEMO_MAX_SIZE + CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH) as u128 {
         return Err(UserTransferCyclesError::MemoryIsFull);
     }
     
@@ -615,15 +624,15 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest, (user_of_the_cb, ct
     // check memo size
     match q.cycles_transfer_memo {
         CyclesTransferMemo::Blob(ref mut b) => {
-            if b.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
-                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u128}); 
+            if b.len() > CYCLES_TRANSFER_MEMO_MAX_SIZE {
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: CYCLES_TRANSFER_MEMO_MAX_SIZE as u128}); 
             }
             b.shrink_to_fit();
             if b.capacity() > b.len() { trap("check this out"); }
         },
         CyclesTransferMemo::Text(ref mut s) => {
-            if s.len() > USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE {
-                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: USER_TRANSFER_CYCLES_MEMO_BYTES_MAXIMUM_SIZE as u128}); 
+            if s.len() > CYCLES_TRANSFER_MEMO_MAX_SIZE {
+                return Err(UserTransferCyclesError::InvalidCyclesTransferMemoSize{max_size_bytes: CYCLES_TRANSFER_MEMO_MAX_SIZE as u128}); 
             }
             s.shrink_to_fit();
             if s.capacity() > s.len() { trap("check this out"); }
@@ -673,7 +682,7 @@ pub async fn transfer_cycles(mut q: UserTransferCyclesQuest, (user_of_the_cb, ct
         if let Ok(i) = cb_data.user_data.cycles_transfers_out.binary_search_by_key(&cycles_transfer_id, |ct_out| ct_out.id) {
             let ct_out: &mut CyclesTransferOut = &mut cb_data.user_data.cycles_transfers_out[i];
             ct_out.cycles_refunded = Some(cycles_refund);
-            ct_out.opt_cycles_transfer_call_error = opt_cycles_transfer_call_error.clone();
+            ct_out.opt_cycles_transfer_call_error = opt_cycles_transfer_call_error.clone().map(|(ec, mut es)| { es.truncate(CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH); (ec, es) });
         };
     });    
     
@@ -775,7 +784,181 @@ pub async fn transfer_icp(transfer_arg_raw: Vec<u8>) {
 
 }
 
+// ----------------------------------
+// user is in the middle of a different call
+ 
+#[derive(CandidType, Deserialize)]
+pub enum UserIsInTheMiddleOfADifferentCall {
+    BurnIcpMintCyclesCall{ must_call_complete: bool },
+}
 
+
+fn check_if_user_is_in_the_middle_of_a_different_call(cb_data: &CBData) -> Result<(), UserIsInTheMiddleOfADifferentCall> {
+    if let Some(ref burn_icp_mint_cycles_data) = cb_data.burn_icp_mint_cycles_mid_call_data {
+        return Err(UserIsInTheMiddleOfADifferentCall::BurnIcpMintCyclesCall{ must_call_complete: !burn_icp_mint_cycles_data.lock });
+    }
+    Ok(())           
+}
+
+
+
+// ---------------------------------------
+// burn-icp-mint-cycles
+
+use cts_lib::cmc::*;
+
+
+// options are for the memberance of the steps
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BurnIcpMintCyclesData {
+    start_time_nanos: u64,
+    lock: bool,
+    burn_icp_mint_cycles_quest: BurnIcpMintCyclesQuest, 
+    cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
+    cmc_cycles: Option<Cycles>,
+}
+
+
+#[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct BurnIcpMintCyclesQuest {
+    burn_icp: IcpTokens,    
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum BurnIcpMintCyclesError {
+    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
+    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
+    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
+    MidCallError(BurnIcpMintCyclesMidCallError)
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub enum BurnIcpMintCyclesMidCallError {
+    LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+}
+
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+pub struct BurnIcpMintCyclesSuccess {
+    mint_cycles: Cycles
+}
+
+
+
+#[update]
+pub async fn burn_icp_mint_cycles(q: BurnIcpMintCyclesQuest) -> Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError> {
+    if caller() != user_id() { trap("Caller must be the user"); }
+
+    if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < (std::mem::size_of::<CyclesTransferIn>() + CYCLES_TRANSFER_MEMO_MAX_SIZE) as u128 {
+        trap("Bank memory is full.");
+    }
+
+    let mid_call_data: BurnIcpMintCyclesData = with_mut(&CB_DATA, |cb_data| {
+        check_if_user_is_in_the_middle_of_a_different_call(cb_data).map_err(|e| BurnIcpMintCyclesError::UserIsInTheMiddleOfADifferentCall(e))?;
+        let mid_call_data: BurnIcpMintCyclesData = BurnIcpMintCyclesData{
+            start_time_nanos: time_nanos_u64(),
+            lock: true,
+            burn_icp_mint_cycles_quest: q, 
+            cmc_icp_transfer_block_height: None,
+            cmc_cycles: None,
+        };
+        cb_data.burn_icp_mint_cycles_mid_call_data = Some(mid_call_data.clone());
+        Ok(mid_call_data)
+    })?;
+
+    burn_icp_mint_cycles_(mid_call_data).await
+}
+
+async fn burn_icp_mint_cycles_(mut burn_icp_mint_cycles_data: BurnIcpMintCyclesData) -> Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError> {   
+    
+    if burn_icp_mint_cycles_data.cmc_icp_transfer_block_height.is_none() {
+        match ledger_topup_cycles_cmc_icp_transfer(burn_icp_mint_cycles_data.burn_icp_mint_cycles_quest.burn_icp, None, ic_cdk::api::id()).await {
+            Ok(block_height) => { burn_icp_mint_cycles_data.cmc_icp_transfer_block_height = Some(block_height); },
+            Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
+                with_mut(&CB_DATA, |cb_data| { cb_data.burn_icp_mint_cycles_mid_call_data = None; });
+                return Err(BurnIcpMintCyclesError::LedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error));
+            }
+        }
+    }
+    
+    if burn_icp_mint_cycles_data.cmc_cycles.is_none() {
+        match ledger_topup_cycles_cmc_notify(burn_icp_mint_cycles_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
+            Ok(cmc_cycles) => { 
+                burn_icp_mint_cycles_data.cmc_cycles = Some(cmc_cycles); 
+            },
+            Err(ledger_topup_cycles_cmc_notify_error) => {
+                if let LedgerTopupCyclesCmcNotifyError::CmcNotifyError(CmcNotifyError::Refunded{ block_index: Some(b), reason: r }) = ledger_topup_cycles_cmc_notify_error {
+                    with_mut(&CB_DATA, |cb_data| { cb_data.burn_icp_mint_cycles_mid_call_data = None; });
+                    return Err(BurnIcpMintCyclesError::LedgerTopupCyclesCmcNotifyRefund{ block_index: b, reason: r});
+                } else {
+                    burn_icp_mint_cycles_data.lock = false;
+                    with_mut(&CB_DATA, |cb_data| {
+                        cb_data.burn_icp_mint_cycles_mid_call_data = Some(burn_icp_mint_cycles_data); 
+                    });
+                    return Err(BurnIcpMintCyclesError::MidCallError(BurnIcpMintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                }
+            }
+        }
+    }
+    let cmc_cycles: Cycles = burn_icp_mint_cycles_data.cmc_cycles.unwrap();
+    
+    with_mut(&CB_DATA, |cb_data| { 
+        cb_data.burn_icp_mint_cycles_mid_call_data = None;
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cmc_cycles); 
+        cb_data.user_data.cycles_transfers_in.push(
+            CyclesTransferIn{
+                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
+                by_the_canister: MAINNET_CYCLES_MINTING_CANISTER_ID,
+                cycles: cmc_cycles,
+                cycles_transfer_memo: CyclesTransferMemo::Blob([*b"CMC-MINT", burn_icp_mint_cycles_data.cmc_icp_transfer_block_height.unwrap().to_be_bytes()].concat()),
+                timestamp_nanos: time_nanos()
+            }
+        );
+    });
+    Ok(BurnIcpMintCyclesSuccess{
+        mint_cycles: burn_icp_mint_cycles_data.cmc_cycles.unwrap(),
+    })
+    
+}
+
+
+
+#[derive(CandidType, Deserialize)]
+pub enum CompleteBurnIcpMintCyclesError{
+    UserIsNotInTheMiddleOfABurnIcpMintCyclesCall,
+    BurnIcpMintCyclesError(BurnIcpMintCyclesError)
+}
+
+#[update]
+pub async fn complete_burn_icp_mint_cycles() -> Result<BurnIcpMintCyclesSuccess, CompleteBurnIcpMintCyclesError> {
+    if caller() != user_id() { trap("Caller must be the user"); }
+
+    complete_burn_icp_mint_cycles_().await
+}
+
+
+async fn complete_burn_icp_mint_cycles_() -> Result<BurnIcpMintCyclesSuccess, CompleteBurnIcpMintCyclesError> {
+    
+    let burn_icp_mint_cycles_data: BurnIcpMintCyclesData = with_mut(&CB_DATA, |cb_data| {
+        match cb_data.burn_icp_mint_cycles_mid_call_data {
+            Some(ref mut burn_icp_mint_cycles_data) => {
+                if burn_icp_mint_cycles_data.lock == true {
+                    return Err(CompleteBurnIcpMintCyclesError::BurnIcpMintCyclesError(BurnIcpMintCyclesError::UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall::BurnIcpMintCyclesCall{ must_call_complete: false })));
+                }
+                burn_icp_mint_cycles_data.lock = true;
+                Ok(burn_icp_mint_cycles_data.clone())
+            },
+            None => {
+                return Err(CompleteBurnIcpMintCyclesError::UserIsNotInTheMiddleOfABurnIcpMintCyclesCall);
+            }
+        }
+    })?;
+
+    burn_icp_mint_cycles_(burn_icp_mint_cycles_data).await
+        .map_err(|burn_icp_mint_cycles_error| { 
+            CompleteBurnIcpMintCyclesError::BurnIcpMintCyclesError(burn_icp_mint_cycles_error) 
+        })
+}
 
 
 // ---------------------------------------------------
