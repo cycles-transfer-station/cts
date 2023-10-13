@@ -1507,7 +1507,7 @@ pub fn user_upload_cts_cb_authorization(auth: Vec<u8>) {
 #[query(manual_reply = true)]
 pub fn get_cts_cb_auth() { //-> (Principal/*UserId*/, Vec<u8>/*auth*/) {
     with(&CB_DATA, |cb_data| {
-       reply((cb_data.user_id, &cb_data.cts_cb_authorization)); 
+       reply(((cb_data.user_id, &cb_data.cts_cb_authorization),)); 
     });
 }
 
