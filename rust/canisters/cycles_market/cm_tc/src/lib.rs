@@ -111,16 +111,7 @@ use flush_logs::FlushLogsStorageError;
 
 // ---------------
 
-// round robin on multiple cm_callers if the load gets heavy. scalable payouts!
 
-
-
-
-
-
-
-#[derive(Serialize, Deserialize)]
-struct OldCMData {}
 
 #[derive(Serialize, Deserialize)]
 struct CMData {
@@ -426,7 +417,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(OldCMData) -> CMData>);
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
