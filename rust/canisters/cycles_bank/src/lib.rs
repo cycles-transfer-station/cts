@@ -75,7 +75,6 @@ use cts_lib::{
                 with_mut,
             }
         },
-        tokens_transform_cycles,
         call_error_as_u32_and_string,
     },
     icrc::{BlockId},
@@ -968,29 +967,29 @@ async fn complete_burn_icp_mint_cycles_() -> Result<BurnIcpMintCyclesSuccess, Co
 use cts_lib::types::cycles_market::tc as cm_tc;
 
 #[derive(CandidType)]
-pub enum CBBuyTokensError {
+pub enum CBTradeCyclesError {
     MemoryIsFull,
     CyclesBalanceTooLow{ cycles_balance: Cycles },
-    CMBuyTokensCallError((u32, String)),
-    CMBuyTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+    CMTradeCyclesCallError((u32, String)),
+    CMTradeCyclesCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
 }
 
-type CBBuyTokensResult = Result<cm_tc::BuyTokensResult, CBBuyTokensError>;
+type CBTradeCyclesResult = Result<cm_tc::BuyTokensResult, CBTradeCyclesError>;
 
 #[update]
-pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::BuyTokensQuest) -> CBBuyTokensResult {
+pub async fn cm_trade_cycles(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::BuyTokensQuest) -> CBTradeCyclesResult {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
     
-    let put_call_cycles: Cycles = tokens_transform_cycles(q.tokens, q.cycles_per_token_rate);
+    let put_call_cycles: Cycles = q.cycles;
     
     with(&CB_DATA, |cb_data| { 
         if calculate_free_storage(cb_data) < 200 {
-            return Err(CBBuyTokensError::MemoryIsFull);
+            return Err(CBTradeCyclesError::MemoryIsFull);
         }
         if cb_data.user_data.cycles_balance < put_call_cycles {
-            return Err(CBBuyTokensError::CyclesBalanceTooLow{ cycles_balance: cb_data.user_data.cycles_balance });
+            return Err(CBTradeCyclesError::CyclesBalanceTooLow{ cycles_balance: cb_data.user_data.cycles_balance });
         }
         Ok(())
     })?;
@@ -998,7 +997,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
     let mut call_future = with(&CB_DATA, |cb_data| { 
         call_raw128(
             icrc1token_trade_contract.trade_contract_canister_id,
-            "buy_tokens",
+            "trade_cycles",
             encode_args((&q, (cb_data.user_id, &cb_data.cts_cb_authorization))).unwrap(),
             put_call_cycles
         )
@@ -1006,7 +1005,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
     
     if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
         let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(CBBuyTokensError::CMBuyTokensCallError((call_error.0 as u32, "call_perform error".to_string())));
+        return Err(CBTradeCyclesError::CMTradeCyclesCallError((call_error.0 as u32, "call_perform error".to_string())));
     }
     
     with_mut(&CB_DATA, |cb_data| {
@@ -1031,7 +1030,7 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
                                 for_the_canister: icrc1token_trade_contract.trade_contract_canister_id,
                                 cycles_sent: put_call_cycles,
                                 cycles_refunded: Some(msg_cycles_refunded128()),   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
-                                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-buy-tokens: {}", cm_buy_tokens_ok.position_id)),
+                                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-cycles-position-id: {}", cm_buy_tokens_ok.position_id)),
                                 timestamp_nanos: time_nanos(),
                                 opt_cycles_transfer_call_error: None,
                             }
@@ -1041,11 +1040,11 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
                 Ok(cm_buy_tokens_result)
             },
             Err(candid_decode_error) => {
-                return Err(CBBuyTokensError::CMBuyTokensCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
+                return Err(CBTradeCyclesError::CMTradeCyclesCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
             }
         },
         Err(call_error) => {
-            return Err(CBBuyTokensError::CMBuyTokensCallError(call_error_as_u32_and_string(call_error)));
+            return Err(CBTradeCyclesError::CMTradeCyclesCallError(call_error_as_u32_and_string(call_error)));
         }
     }
     
@@ -1054,23 +1053,23 @@ pub async fn cm_buy_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q
 
 
 #[derive(CandidType)]
-pub enum CBSellTokensError {
+pub enum CBTradeTokensError {
     MemoryIsFull,
-    CMSellTokensCallError(CallError),
-    CMSellTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+    CMTradeTokensCallError(CallError),
+    CMTradeTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
 }
 
-type CBSellTokensResult = Result<cm_tc::SellTokensResult, CBSellTokensError>;
+type CBTradeTokensResult = Result<cm_tc::SellTokensResult, CBTradeTokensError>;
 
 #[update]
-pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::SellTokensQuest) -> CBSellTokensResult {
+pub async fn cm_trade_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::SellTokensQuest) -> CBTradeTokensResult {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
         
     with(&CB_DATA, |cb_data| { 
         if calculate_free_storage(cb_data) < 200 {
-            return Err(CBSellTokensError::MemoryIsFull);
+            return Err(CBTradeTokensError::MemoryIsFull);
         }
         Ok(())
     })?;    
@@ -1078,7 +1077,7 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
     let mut call_future = with(&CB_DATA, |cb_data| {
         call_raw128(
             icrc1token_trade_contract.trade_contract_canister_id,
-            "sell_tokens",
+            "trade_tokens",
             encode_args((&q, (cb_data.user_id, &cb_data.cts_cb_authorization))).unwrap(),
             0
         )
@@ -1086,7 +1085,7 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
     
     if let futures::task::Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
         let call_error: (RejectionCode, String) = call_result_with_an_error.unwrap_err();
-        return Err(CBSellTokensError::CMSellTokensCallError((call_error.0 as u32, "call_perform error".to_string())));
+        return Err(CBTradeTokensError::CMTradeTokensCallError((call_error.0 as u32, "call_perform error".to_string())));
     }
     
     with_mut(&CB_DATA, |cb_data| {
@@ -1101,11 +1100,11 @@ pub async fn cm_sell_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, 
                 Ok(cm_sell_tokens_result)
             },
             Err(candid_decode_error) => {
-                return Err(CBSellTokensError::CMSellTokensCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
+                return Err(CBTradeTokensError::CMTradeTokensCallSponseCandidDecodeError{candid_error: format!("{:?}", candid_decode_error), sponse_bytes: sponse_bytes });
             }
         },
         Err(call_error) => {
-            return Err(CBSellTokensError::CMSellTokensCallError(call_error_as_u32_and_string(call_error)));
+            return Err(CBTradeTokensError::CMTradeTokensCallError(call_error_as_u32_and_string(call_error)));
         }
     }
     

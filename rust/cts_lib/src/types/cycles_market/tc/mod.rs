@@ -21,19 +21,24 @@ pub struct CMIcrc1TokenTradeContractInit {
 // ----
 
 
+
 #[derive(CandidType, Serialize, Deserialize, Clone)]
-pub struct MatchTokensQuest {
+pub struct BuyTokensQuest {
+    pub cycles: Cycles,
+    pub cycles_per_token_rate: CyclesPerToken,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct SellTokensQuest {
     pub tokens: Tokens,
-    pub cycles_per_token_rate: CyclesPerToken
+    pub cycles_per_token_rate: CyclesPerToken,
 }
 
 
 
-pub type BuyTokensQuest = MatchTokensQuest;
-
 #[derive(CandidType, Deserialize)]
 pub enum BuyTokensError {
-    BuyTokensMinimum(Tokens),
+    BuyTokensMinimumTokens(Tokens),
     RateCannotBeZero,
     MsgCyclesTooLow,
     CyclesMarketIsBusy,
@@ -49,9 +54,6 @@ pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
 
 
 
-
-
-pub type SellTokensQuest = MatchTokensQuest;
 
 #[derive(CandidType, Deserialize)]
 pub enum SellTokensError {

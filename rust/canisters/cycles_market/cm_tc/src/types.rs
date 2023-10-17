@@ -26,7 +26,7 @@ pub trait StorageLogTrait {
 pub struct PositionLog {
     pub id: PositionId,
     pub positor: Principal,
-    pub match_tokens_quest: MatchTokensQuest,
+    pub quest: CreatePositionQuestLog,
     pub position_kind: PositionKind,
     pub mainder_position_quantity: u128, // if cycles position this is: Cycles, if Token position this is: Tokens.
     pub fill_quantity: u128, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
@@ -46,8 +46,8 @@ impl StorageLogTrait for PositionLog {
         s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());        
         s[2..18].copy_from_slice(&self.id.to_be_bytes());
         s[18..48].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
-        s[48..64].copy_from_slice(&self.match_tokens_quest.tokens.to_be_bytes());
-        s[64..80].copy_from_slice(&self.match_tokens_quest.cycles_per_token_rate.to_be_bytes());
+        s[48..64].copy_from_slice(&self.quest.quantity.to_be_bytes());
+        s[64..80].copy_from_slice(&self.quest.cycles_per_token_rate.to_be_bytes());
         s[80] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
         s[81..97].copy_from_slice(&self.mainder_position_quantity.to_be_bytes());
         s[97..113].copy_from_slice(&self.fill_quantity.to_be_bytes());
@@ -70,6 +70,27 @@ impl StorageLogTrait for PositionLog {
     }
 }
 
+pub struct CreatePositionQuestLog {
+    pub quantity: u128,
+    pub cycles_per_token_rate: CyclesPerToken
+}
+
+impl From<BuyTokensQuest> for CreatePositionQuestLog {
+    fn from(q: BuyTokensQuest) -> Self {
+        Self {
+            quantity: q.cycles,
+            cycles_per_token_rate: q.cycles_per_token_rate 
+        }
+    }
+}
+impl From<SellTokensQuest> for CreatePositionQuestLog {
+    fn from(q: SellTokensQuest) -> Self {
+        Self {
+            quantity: q.tokens,
+            cycles_per_token_rate: q.cycles_per_token_rate 
+        }
+    }
+}
 
 pub struct PositionTerminationData {
     pub timestamp_nanos: u128,
@@ -109,6 +130,8 @@ pub trait CurrentPositionTrait {
     type VoidPositionType: VoidPositionTrait;
     fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType;
     
+    fn current_position_quantity(&self) -> u128;
+    
     fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens;
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles;
     
@@ -128,7 +151,7 @@ pub trait CurrentPositionTrait {
 pub struct CyclesPosition {
     pub id: PositionId,   
     pub positor: Principal,
-    pub match_tokens_quest: MatchTokensQuest,
+    pub quest: BuyTokensQuest,
     pub current_position_cycles: Cycles,
     pub purchases_rates_times_cycles_quantities_sum: u128,
     pub fill_quantity_tokens: Tokens,
@@ -141,7 +164,7 @@ impl CurrentPositionTrait for CyclesPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
     fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
-        self.match_tokens_quest.cycles_per_token_rate
+        self.quest.cycles_per_token_rate
         /*
         let total_position_cycles: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate);
         find_current_position_available_rate(
@@ -167,7 +190,9 @@ impl CurrentPositionTrait for CyclesPosition {
             update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
         }
     }
-    
+    fn current_position_quantity(&self) -> u128 {
+        self.current_position_cycles
+    }
     fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens {
         if rate == 0 { return 0; }
         self.current_position_cycles / rate
@@ -177,10 +202,9 @@ impl CurrentPositionTrait for CyclesPosition {
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
         self.fill_quantity_tokens = self.fill_quantity_tokens.saturating_add(sub_tokens);
         let sub_cycles: Cycles = tokens_transform_cycles(sub_tokens, rate);
+        let fee_cycles: Cycles = calculate_trade_fee(self.quest.cycles - self.current_position_cycles, sub_cycles); // calculate trade fee before subtracting from the current_cycles_position in the next line.          
         self.current_position_cycles = self.current_position_cycles.saturating_sub(sub_cycles);
         self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);        
-        let total_position_cycles: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate);
-        let fee_cycles: Cycles = calculate_trade_fee(total_position_cycles - self.current_position_cycles, sub_cycles);
         self.tokens_payouts_fees_sum = self.tokens_payouts_fees_sum.saturating_add(cycles_transform_tokens(fee_cycles, rate));
         fee_cycles
     }
@@ -196,10 +220,10 @@ impl CurrentPositionTrait for CyclesPosition {
     const POSITION_KIND: PositionKind = PositionKind::Cycles;
     
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
-        let cycles_sold: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate) - self.current_position_cycles;
+        let cycles_sold: Cycles = self.quest.cycles - self.current_position_cycles;
         let fill_average_rate = {
             if cycles_sold == 0 {
-                self.match_tokens_quest.cycles_per_token_rate
+                self.quest.cycles_per_token_rate
             } else {
                 self.purchases_rates_times_cycles_quantities_sum / cycles_sold
             }
@@ -207,7 +231,7 @@ impl CurrentPositionTrait for CyclesPosition {
         PositionLog {
             id: self.id,
             positor: self.positor,
-            match_tokens_quest: self.match_tokens_quest.clone(),
+            quest: self.quest.clone().into(),
             position_kind: PositionKind::Cycles,
             mainder_position_quantity: self.current_position_cycles, // if cycles position this is: Cycles, if Token position this is: Tokens.
             fill_quantity: self.fill_quantity_tokens, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
@@ -233,7 +257,7 @@ impl CurrentPositionTrait for CyclesPosition {
 pub struct TokenPosition {
     pub id: PositionId,   
     pub positor: Principal,
-    pub match_tokens_quest: MatchTokensQuest,
+    pub quest: SellTokensQuest,
     pub current_position_tokens: Tokens,
     pub purchases_rates_times_token_quantities_sum: u128,
     pub cycles_payouts_fees_sum: Cycles,
@@ -251,7 +275,7 @@ impl CurrentPositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
     fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
-        self.match_tokens_quest.cycles_per_token_rate
+        self.quest.cycles_per_token_rate
         /*
         let mut rate = find_current_position_available_rate(
             self.purchases_rates_times_token_quantities_sum,
@@ -294,7 +318,9 @@ impl CurrentPositionTrait for TokenPosition {
             update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
         }
     }
-    
+    fn current_position_quantity(&self) -> u128 {
+        self.current_position_tokens
+    }
     fn current_position_tokens(&self, _rate: CyclesPerToken) -> Tokens {
         self.current_position_tokens
         //self.cycles_left_for_the_buy() / rate
@@ -317,10 +343,10 @@ impl CurrentPositionTrait for TokenPosition {
     const POSITION_KIND: PositionKind = PositionKind::Token;
     
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
-        let tokens_sold: Cycles = self.match_tokens_quest.tokens - self.current_position_tokens;
+        let tokens_sold: Cycles = self.quest.tokens - self.current_position_tokens;
         let fill_average_rate = {
             if tokens_sold == 0 {
-                self.match_tokens_quest.cycles_per_token_rate
+                self.quest.cycles_per_token_rate
             } else {
                 self.purchases_rates_times_token_quantities_sum / tokens_sold
             }
@@ -328,7 +354,7 @@ impl CurrentPositionTrait for TokenPosition {
         PositionLog {
             id: self.id,
             positor: self.positor,
-            match_tokens_quest: self.match_tokens_quest.clone(),
+            quest: self.quest.clone().into(),
             position_kind: PositionKind::Token,
             mainder_position_quantity: self.current_position_tokens, // if cycles position this is: Cycles, if Token position this is: Tokens.
             fill_quantity: self.purchases_rates_times_token_quantities_sum, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.

@@ -537,7 +537,7 @@ fn minus_one_ongoing_buy_call(cm_data: &mut CMData) {
 
 
 #[update(manual_reply = true)]
-pub fn buy_tokens(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> BuyTokensResult
+pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> BuyTokensResult
     
     let caller: Principal = caller();
     
@@ -568,20 +568,19 @@ pub fn buy_tokens(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Pr
 
 fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
     
-    if q.tokens < minimum_tokens_match() {
-        return Err(BuyTokensError::BuyTokensMinimum(minimum_tokens_match()));
+    if q.cycles / q.cycles_per_token_rate < minimum_tokens_match() {
+        return Err(BuyTokensError::BuyTokensMinimumTokens(minimum_tokens_match()));
     }    
     
     if q.cycles_per_token_rate == 0 {
         return Err(BuyTokensError::RateCannotBeZero);
     }
     
-    let minimum_msg_cycles: Cycles = tokens_transform_cycles(q.tokens, q.cycles_per_token_rate);
-    if msg_cycles_available128() < minimum_msg_cycles {
+    if msg_cycles_available128() < q.cycles {
         return Err(BuyTokensError::MsgCyclesTooLow);
     }    
     
-    if canister_balance128().checked_add(minimum_msg_cycles).is_none() {
+    if canister_balance128().checked_add(q.cycles).is_none() {
         return Err(BuyTokensError::CyclesMarketIsBusy);
     }
     
@@ -601,15 +600,15 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
         let cycles_position: CyclesPosition = CyclesPosition{
             id: cycles_position_id,
             positor: caller,
-            match_tokens_quest: q.clone(),
-            current_position_cycles: minimum_msg_cycles,
+            quest: q.clone(),
+            current_position_cycles: q.cycles,
             purchases_rates_times_cycles_quantities_sum: 0,
             fill_quantity_tokens: 0,
             tokens_payouts_fees_sum: 0,
             timestamp_nanos: time_nanos(),
         };
           
-        msg_cycles_accept128(minimum_msg_cycles);
+        msg_cycles_accept128(q.cycles);
           
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
             positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log(None).stable_memory_serialize());  
@@ -646,7 +645,7 @@ fn minus_one_ongoing_sell_call(cm_data: &mut CMData) {
 }
 
 #[update(manual_reply = true)]
-pub async fn sell_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> SellTokensResult
+pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> SellTokensResult
  
     let caller: Principal = caller();
     
@@ -736,7 +735,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
         let token_position: TokenPosition = TokenPosition{
             id: token_position_id,
             positor: caller,
-            match_tokens_quest: q.clone(),
+            quest: q.clone(),
             current_position_tokens: q.tokens,
             purchases_rates_times_token_quantities_sum: 0,
             cycles_payouts_fees_sum: 0,
@@ -1091,22 +1090,22 @@ pub struct ViewPositionBookQuest {
 }
 #[derive(CandidType, Deserialize)]
 pub struct ViewPositionBookSponse {
-    positions_quantities: Vec<(CyclesPerToken, Tokens)>, 
+    positions_quantities: Vec<(CyclesPerToken, u128)>, 
     is_last_chunk: bool,
 }
 
-const MAX_POSITIONS_QUANTITIES: usize = 512*KiB*3 / std::mem::size_of::<(CyclesPerToken, Tokens)>();
+const MAX_POSITIONS_QUANTITIES: usize = 512*KiB*3 / std::mem::size_of::<(CyclesPerToken, u128)>();
 
 
 #[query]
-pub fn view_buy_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
+pub fn view_cycles_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
     with(&CM_DATA, |cm_data| {
         view_position_book_(q, &cm_data.cycles_positions)  
     })
 }
 
 #[query]
-pub fn view_sell_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
+pub fn view_tokens_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSponse {
     with(&CM_DATA, |cm_data| {
         view_position_book_(q, &cm_data.token_positions)  
     })    
@@ -1114,14 +1113,14 @@ pub fn view_sell_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSpon
 
 
 fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, current_positions: &Vec<T>) -> ViewPositionBookSponse {
-    let mut positions_quantities: Vec<(CyclesPerToken, Tokens)> = vec![]; 
+    let mut positions_quantities: Vec<(CyclesPerToken, u128)> = vec![]; 
     let mut is_last_chunk: bool = true;
     
-    let mut cps_as_rate_and_quantity: Vec<(CyclesPerToken, Tokens)> = current_positions
+    let mut cps_as_rate_and_quantity: Vec<(CyclesPerToken, u128)> = current_positions
         .iter()
         .map(|p| {
             let rate = p.current_position_available_cycles_per_token_rate(); 
-            (rate, p.current_position_tokens(rate))
+            (rate, p.current_position_quantity())
         })
         .collect();
     cps_as_rate_and_quantity.sort_by_key(|d| d.0);
