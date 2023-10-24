@@ -475,12 +475,12 @@ pub struct TradeLog {
     pub position_id_matcher: PositionId,
     pub position_id_matchee: PositionId,
     pub id: PurchaseId,
-    pub positor: Principal, //maker
-    pub purchaser: Principal, //taker
+    pub matchee_position_positor: Principal,
+    pub matcher_position_positor: Principal,
     pub tokens: Tokens,
     pub cycles: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
-    pub position_kind: PositionKind,
+    pub matchee_position_kind: PositionKind,
     pub timestamp_nanos: u128,
     pub tokens_payout_fee: Tokens,
     pub cycles_payout_fee: Cycles,
@@ -508,12 +508,12 @@ impl StorageLogTrait for TradeLog {
         s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());
         s[2..18].copy_from_slice(&self.position_id_matchee.to_be_bytes());
         s[18..34].copy_from_slice(&self.id.to_be_bytes());
-        s[34..64].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
-        s[64..94].copy_from_slice(&principal_as_thirty_bytes(&self.purchaser));
+        s[34..64].copy_from_slice(&principal_as_thirty_bytes(&self.matchee_position_positor));
+        s[64..94].copy_from_slice(&principal_as_thirty_bytes(&self.matcher_position_positor));
         s[94..110].copy_from_slice(&self.tokens.to_be_bytes());
         s[110..126].copy_from_slice(&self.cycles.to_be_bytes());
         s[126..142].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
-        s[142] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
+        s[142] = if let PositionKind::Cycles = self.matchee_position_kind { 0 } else { 1 };
         s[143..159].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
         s[159..175].copy_from_slice(&self.tokens_payout_fee.to_be_bytes());
         s[175..191].copy_from_slice(&self.cycles_payout_fee.to_be_bytes());
@@ -533,24 +533,24 @@ impl CyclesPayoutDataTrait for TradeLog {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
     fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
     fn cycles_payout_payee(&self) -> Principal { 
-        match self.position_kind { 
-            PositionKind::Cycles => self.purchaser,
-            PositionKind::Token => self.positor,
+        match self.matchee_position_kind { 
+            PositionKind::Cycles => self.matcher_position_positor,
+            PositionKind::Token => self.matchee_position_positor,
         }
     }
     fn cycles_payout_payee_method(&self) -> &'static str { 
-        match self.position_kind { 
+        match self.matchee_position_kind { 
             PositionKind::Cycles => CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_PURCHASER,
             PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_POSITOR,
         } 
     }
     fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        match self.position_kind { 
+        match self.matchee_position_kind { 
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePurchaserMessageQuest {
                         cycles_position_id: self.position_id_matchee,
-                        cycles_position_positor: self.positor,
+                        cycles_position_positor: self.matchee_position_positor,
                         cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
                         purchase_timestamp_nanos: self.timestamp_nanos,
@@ -564,7 +564,7 @@ impl CyclesPayoutDataTrait for TradeLog {
                         token_position_id: self.position_id_matchee,
                         token_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,
-                        purchaser: self.purchaser,
+                        purchaser: self.matcher_position_positor,
                         token_purchase: self.tokens,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                     }
@@ -579,31 +579,31 @@ impl TokenPayoutDataTrait for TradeLog {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { 
-        match self.position_kind { 
-            PositionKind::Cycles => self.positor,
-            PositionKind::Token => self.purchaser,
+        match self.matchee_position_kind { 
+            PositionKind::Cycles => self.matchee_position_positor,
+            PositionKind::Token => self.matcher_position_positor,
         }
     }
     fn token_payout_payor(&self) -> Principal { 
-        match self.position_kind { 
-            PositionKind::Cycles => self.purchaser,
-            PositionKind::Token => self.positor,
+        match self.matchee_position_kind { 
+            PositionKind::Cycles => self.matcher_position_positor,
+            PositionKind::Token => self.matchee_position_positor,
         }
     }
     fn token_payout_payee_method(&self) -> &'static str { 
-        match self.position_kind { 
+        match self.matchee_position_kind { 
             PositionKind::Cycles => CM_MESSAGE_METHOD_CYCLES_POSITION_PURCHASE_POSITOR,
             PositionKind::Token => CM_MESSAGE_METHOD_TOKEN_POSITION_PURCHASE_PURCHASER,
         }
     }
     fn token_payout_payee_method_quest_bytes(&self, token_payout_data_token_transfer: TokenTransferData) -> Result<Vec<u8>, CandidError> {
-        match self.position_kind { 
+        match self.matchee_position_kind { 
             PositionKind::Cycles => {
                 encode_one(
                     CMCyclesPositionPurchasePositorMessageQuest {
                         cycles_position_id: self.position_id_matchee,
                         purchase_id: self.id,
-                        purchaser: self.purchaser,
+                        purchaser: self.matcher_position_positor,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         cycles_purchase: self.cycles,
                         cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
@@ -618,7 +618,7 @@ impl TokenPayoutDataTrait for TradeLog {
                     CMTokenPositionPurchasePurchaserMessageQuest {
                         token_position_id: self.position_id_matchee,
                         purchase_id: self.id, 
-                        positor: self.positor,
+                        positor: self.matchee_position_positor,
                         purchase_timestamp_nanos: self.timestamp_nanos,
                         token_purchase: self.tokens,
                         token_position_cycles_per_token_rate: self.cycles_per_token_rate,
@@ -632,10 +632,10 @@ impl TokenPayoutDataTrait for TradeLog {
     } 
     fn tokens(&self) -> Tokens { self.tokens }
     fn token_transfer_memo(&self) -> Option<IcrcMemo> { 
-        Some(IcrcMemo(ByteBuf::from(position_purchase_token_transfer_memo(self.position_kind, self.id))))
+        Some(IcrcMemo(ByteBuf::from(position_purchase_token_transfer_memo(self.matchee_position_kind, self.id))))
     }
     fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> {
-        Some(IcrcMemo(ByteBuf::from(position_purchase_token_fee_collection_transfer_memo(self.position_kind, self.id))))
+        Some(IcrcMemo(ByteBuf::from(position_purchase_token_fee_collection_transfer_memo(self.matchee_position_kind, self.id))))
     }
     fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
     fn tokens_payout_fee(&self) -> Tokens { self.tokens_payout_fee }

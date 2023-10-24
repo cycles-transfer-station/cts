@@ -840,12 +840,12 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         position_id_matcher: matcher_position.id(),
                         position_id_matchee: matchee_position.id(),
                         id: trade_log_id,
-                        positor: matchee_position.positor(),
-                        purchaser: matcher_position.positor(),
+                        matchee_position_positor: matchee_position.positor(),
+                        matcher_position_positor: matcher_position.positor(),
                         tokens: purchase_tokens,
                         cycles: payment_cycles,
                         cycles_per_token_rate: trade_rate,
-                        position_kind: MatcheePositionType::POSITION_KIND,
+                        matchee_position_kind: MatcheePositionType::POSITION_KIND,
                         timestamp_nanos: time_nanos(),
                         tokens_payout_fee,
                         cycles_payout_fee,
@@ -1172,7 +1172,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
                     tl.tokens,
                     tl.cycles_per_token_rate,
                     tl.timestamp_nanos as u64,
-                    tl.position_kind,
+                    tl.matchee_position_kind,
                 )
             }).collect();
         }
