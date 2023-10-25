@@ -29,7 +29,7 @@ pub enum DoCyclesPayoutSponse {
 
 pub type DoCyclesPayoutResult = Result<DoCyclesPayoutSponse, DoCyclesPayoutError>;
 
-pub async fn do_cycles_payout<T: CyclesPayoutDataTrait>(q: T) -> DoCyclesPayoutResult {
+pub async fn do_cycles_payout<T: CyclesPayoutTrait>(q: T) -> DoCyclesPayoutResult {
     
     // try cycles-payouts a couple of times before using the management canister's deposit cycles method.
     // cycles-bank can be in the stop mode for an upgrade.  

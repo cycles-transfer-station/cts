@@ -186,8 +186,12 @@ impl CurrentPositionTrait for CyclesPosition {
             cycles_payout_lock: false,
             cycles_payout_data: CyclesPayoutData::new(),
             timestamp_nanos: time_nanos(),
-            update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
+            update_storage_position_data: VPUpdateStoragePositionData{
+                lock: false,
+                status: false,
+                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()    
+            },
+            
         }
     }
     fn current_position_quantity(&self) -> u128 {
@@ -314,8 +318,11 @@ impl CurrentPositionTrait for TokenPosition {
                 }),
                 cm_message_call: None,
             },
-            update_storage_position_data: VPUpdateStoragePositionData::new(),
-            update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
+            update_storage_position_data: VPUpdateStoragePositionData{
+                status: false,
+                lock: false,
+                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
+            }
         }
     }
     fn current_position_quantity(&self) -> u128 {
@@ -396,6 +403,10 @@ fn find_current_position_available_rate(
 // ----------------------------
 
 
+pub trait PayoutDataTrait {
+    fn is_complete(&self) -> bool;
+}
+
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {
@@ -407,13 +418,15 @@ impl CyclesPayoutData {
             cycles_payout: false,
         }
     }
-    pub fn is_complete(&self) -> bool {
+}
+impl PayoutDataTrait for CyclesPayoutData {
+    fn is_complete(&self) -> bool {
         self.cycles_payout 
     }
 }
 
 
-pub trait CyclesPayoutDataTrait {
+pub trait CyclesPayoutTrait {
     fn cycles_payout_data(&self) -> CyclesPayoutData;
     fn cycles_payout_lock(&self) -> bool;
     fn cycles_payout_payee(&self) -> Principal;
@@ -446,12 +459,14 @@ impl TokenPayoutData {
             cm_message_call: None,
         }
     }
-    pub fn is_complete(&self) -> bool {
+}
+impl PayoutDataTrait for TokenPayoutData {
+    fn is_complete(&self) -> bool {
         self.cm_message_call.is_some()
-    }
+    }    
 }
 
-pub trait TokenPayoutDataTrait {
+pub trait TokenPayoutTrait {
     fn token_payout_data(&self) -> TokenPayoutData;
     fn token_payout_lock(&self) -> bool;
     fn token_payout_payee(&self) -> Principal;
@@ -529,7 +544,7 @@ impl StorageLogTrait for TradeLog {
     }
 }
 
-impl CyclesPayoutDataTrait for TradeLog {
+impl CyclesPayoutTrait for TradeLog {
     fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
     fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
     fn cycles_payout_payee(&self) -> Principal { 
@@ -575,7 +590,7 @@ impl CyclesPayoutDataTrait for TradeLog {
     fn cycles(&self) -> Cycles { self.cycles }
     fn cycles_payout_fee(&self) -> Cycles { self.cycles_payout_fee }
 }
-impl TokenPayoutDataTrait for TradeLog {
+impl TokenPayoutTrait for TradeLog {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { 
@@ -645,8 +660,11 @@ impl TokenPayoutDataTrait for TradeLog {
 // --------
 
 
-pub trait VoidPositionTrait {
+pub trait VoidPositionTrait: Clone {
     fn position_id(&self) -> PositionId;
+    type PayoutData: PayoutDataTrait;
+    fn payout_data(&mut self) -> &mut Self::PayoutData;
+    fn payout_lock(&mut self) -> &mut bool;
     fn can_remove(&self) -> bool;
     fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData;
 }
@@ -655,14 +673,7 @@ pub trait VoidPositionTrait {
 pub struct VPUpdateStoragePositionData {
     pub lock: bool,
     pub status: bool,
-}
-impl VPUpdateStoragePositionData {
-    fn new() -> Self {
-        Self {
-            lock: false,
-            status: false
-        }
-    }
+    pub update_storage_position_log_serialization_b: Vec<u8>// const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -674,13 +685,19 @@ pub struct VoidCyclesPosition {
     pub cycles_payout_data: CyclesPayoutData,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,
-    pub update_storage_position_log_serialization_b: Vec<u8>// const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidCyclesPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    type PayoutData = CyclesPayoutData;
+    fn payout_data(&mut self) -> &mut Self::PayoutData {
+        &mut self.cycles_payout_data
+    }
+    fn payout_lock(&mut self) -> &mut bool {
+        &mut self.cycles_payout_lock
+    }
     fn can_remove(&self) -> bool {
         self.cycles_payout_data.is_complete() && self.update_storage_position_data.status == true
     }
@@ -690,7 +707,7 @@ impl VoidPositionTrait for VoidCyclesPosition {
 }
 
 
-impl CyclesPayoutDataTrait for VoidCyclesPosition {
+impl CyclesPayoutTrait for VoidCyclesPosition {
     fn cycles_payout_data(&self) -> CyclesPayoutData {
         self.cycles_payout_data.clone()
     }
@@ -732,13 +749,19 @@ pub struct VoidTokenPosition {
     pub token_payout_data: TokenPayoutData,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,    
-    pub update_storage_position_log_serialization_b: Vec<u8> // const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
 }
 
 impl VoidPositionTrait for VoidTokenPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    type PayoutData = TokenPayoutData;
+    fn payout_data(&mut self) -> &mut Self::PayoutData {
+        &mut self.token_payout_data
+    }
+    fn payout_lock(&mut self) -> &mut bool {
+        &mut self.token_payout_lock
+    }
     fn can_remove(&self) -> bool {
         self.token_payout_data.is_complete() && self.update_storage_position_data.status == true
     }
@@ -747,7 +770,7 @@ impl VoidPositionTrait for VoidTokenPosition {
     }
 }
 
-impl TokenPayoutDataTrait for VoidTokenPosition {
+impl TokenPayoutTrait for VoidTokenPosition {
     fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
     fn token_payout_lock(&self) -> bool { self.token_payout_lock }
     fn token_payout_payee(&self) -> Principal { self.positor }

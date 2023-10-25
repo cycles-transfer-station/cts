@@ -27,7 +27,7 @@ pub enum DoTokenPayoutSponse {
 */
 pub type DoTokenPayoutSponse = TokenPayoutData;
 
-pub async fn do_token_payout<T: TokenPayoutDataTrait>(q: T) -> TokenPayoutData {
+pub async fn do_token_payout<T: TokenPayoutTrait>(q: T) -> TokenPayoutData {
     
     let mut token_payout_data: TokenPayoutData = q.token_payout_data();
     

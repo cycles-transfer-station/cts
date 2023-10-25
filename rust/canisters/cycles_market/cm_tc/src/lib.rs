@@ -263,7 +263,7 @@ fn calculate_trade_fee(current_position_trade_volume_cycles: Cycles, trade_cycle
 
 
 pub fn minimum_tokens_match() -> Tokens {
-    10_000/*for the fee ten-thousandths*/ + get(&TOKEN_LEDGER_TRANSFER_FEE) * 100
+    10_000/*for the fee ten-thousandths*/ + get(&TOKEN_LEDGER_TRANSFER_FEE) * 1000
 }
 
 
@@ -293,10 +293,8 @@ mod memory_location {
 use memory_location::*;
 
 
-const DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 5;
-const DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 5;
-const DO_VOID_CYCLES_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE: usize = 5;
-const DO_VOID_TOKEN_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE: usize = 5;
+const DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE: usize = 5;
+const DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE: usize = 5;
 const DO_TRADE_LOGS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 10;
 const DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 10;
 

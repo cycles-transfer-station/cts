@@ -11,6 +11,8 @@ use update_storage_positions::*;
 
 use flush_logs::flush_logs;
 
+use std::future::Future;
+use std::collections::BTreeMap;
 
 
 
@@ -79,64 +81,55 @@ async fn _do_payouts() {
     let mut trade_logs_token_payouts_chunk: Vec<(PurchaseId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
     
     with_mut(&CM_DATA, |cm_data| {
-        let positions_storage_flush_lock: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { positions_storage_data.storage_flush_lock });
-        let mut i: usize = 0;
-        while i < cm_data.void_cycles_positions.len() && void_cycles_positions_cycles_payouts_chunk.len() < DO_VOID_CYCLES_POSITIONS_CYCLES_PAYOUTS_CHUNK_SIZE {
-            let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[i];
-            if vcp.cycles_payout_data.is_complete() == false
-            && vcp.cycles_payout_lock == false {
-                vcp.cycles_payout_lock = true;
-                void_cycles_positions_cycles_payouts_chunk.push(
-                    (
-                        vcp.position_id,
-                        do_cycles_payout(vcp.clone())
-                    )
-                );
+        fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture, F: Fn(VoidPosition)->DoPayoutFuture>(
+            void_positions: &mut Vec<VoidPosition>, 
+            do_payout: F
+        ) 
+        -> 
+        (
+            Vec<(PositionId, DoPayoutFuture)>/*payouts_chunk*/, 
+            Vec<(PositionId, impl Future<Output=DoUpdateStoragePositionResult>)>/*update_storage_positions_chunk*/
+        ) 
+        {
+            let mut payouts_chunk: Vec<(PositionId, _)> = Vec::new();
+            let mut update_storage_positions_chunk: Vec<(PositionId, _)> = Vec::new();
+            
+            let positions_storage_flush_lock: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { positions_storage_data.storage_flush_lock });
+            
+            let mut i: usize = 0;
+            while i < void_positions.len() 
+            && (payouts_chunk.len() < DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE || update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE) {
+                let vp: &mut VoidPosition = &mut void_positions[i];
+                
+                if payouts_chunk.len() < DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE
+                && vp.payout_data().is_complete() == false
+                && *vp.payout_lock() == false {
+                    *vp.payout_lock() = true;
+                    payouts_chunk.push((
+                        vp.position_id(),
+                        do_payout(vp.clone())
+                    ));
+                }
+                
+                if positions_storage_flush_lock == false
+                && update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE
+                && vp.update_storage_position_data().status == false 
+                && vp.update_storage_position_data().lock == false {
+                    vp.update_storage_position_data().lock = true;
+                    update_storage_positions_chunk.push((
+                        vp.position_id(),
+                        do_update_storage_position(vp.position_id(), vp.update_storage_position_data().update_storage_position_log_serialization_b.clone())
+                    ));
+                }
+                i += 1;
             }
-            if positions_storage_flush_lock == false
-            && void_cycles_positions_update_storage_positions_chunk.len() < DO_VOID_CYCLES_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE
-            && vcp.update_storage_position_data.status == false 
-            && vcp.update_storage_position_data.lock == false {
-                vcp.update_storage_position_data.lock = true;
-                void_cycles_positions_update_storage_positions_chunk.push(
-                    (
-                        vcp.position_id,
-                        do_update_storage_position(vcp.position_id, vcp.update_storage_position_log_serialization_b.clone())
-                    )
-                );
-            }
-            i += 1;
+            
+            (payouts_chunk, update_storage_positions_chunk)
         }
         
-        let mut i: usize = 0;
-        while i < cm_data.void_token_positions.len() && void_token_positions_token_payouts_chunk.len() < DO_VOID_TOKEN_POSITIONS_TOKEN_PAYOUTS_CHUNK_SIZE {
-            let vtp: &mut VoidTokenPosition = &mut cm_data.void_token_positions[i];
-            if vtp.token_payout_data.is_complete() == false 
-            && vtp.token_payout_lock == false {
-                vtp.token_payout_lock = true;
-                void_token_positions_token_payouts_chunk.push(
-                    (
-                        vtp.position_id,
-                        do_token_payout(vtp.clone())
-                    )
-                );
-            }
-            if positions_storage_flush_lock == false
-            && void_token_positions_update_storage_positions_chunk.len() < DO_VOID_TOKEN_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE            
-            && vtp.update_storage_position_data.status == false 
-            && vtp.update_storage_position_data.lock == false {
-                vtp.update_storage_position_data.lock = true;
-                void_token_positions_update_storage_positions_chunk.push(
-                    (
-                        vtp.position_id,
-                        do_update_storage_position(vtp.position_id, vtp.update_storage_position_log_serialization_b.clone())
-                    )
-                );
-            }
-            i += 1;
-        }
-
-
+        (void_cycles_positions_cycles_payouts_chunk, void_cycles_positions_update_storage_positions_chunk) = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout);
+        (void_token_positions_token_payouts_chunk, void_token_positions_update_storage_positions_chunk) = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout);
+        
         let mut i: usize = 0;
         while i < cm_data.trade_logs.len() {
             let tl: &mut TradeLog = &mut cm_data.trade_logs[i];                    
@@ -200,34 +193,37 @@ async fn _do_payouts() {
     );
 
     with_mut(&CM_DATA, |cm_data| {
-        for (vcp_id, do_cycles_payout_result) in vcps_ids_cycles_payouts.into_iter().zip(vcps_do_cycles_payouts_rs.into_iter()) {      
-            let vcp_void_cycles_positions_i: usize = {
-                match cm_data.void_cycles_positions.binary_search_by_key(&vcp_id, |vcp| { vcp.position_id }) {
+        fn handle_vps_payouts<VoidPosition: VoidPositionTrait, DoPayoutOutput, F: Fn(&mut VoidPosition::PayoutData, DoPayoutOutput)->()>(
+            vps_ids_payouts: Vec<PositionId>,
+            vps_do_payouts_rs: Vec<DoPayoutOutput>,
+            void_positions: &mut Vec<VoidPosition>, 
+            handle_payout_output: F
+        ) {
+            for (vp_id, do_payout_output) in vps_ids_payouts.into_iter().zip(vps_do_payouts_rs.into_iter()) {      
+                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
                     Ok(i) => i,
                     Err(_) => { continue; }
-                }  
-            };
-            let vcp: &mut VoidCyclesPosition = &mut cm_data.void_cycles_positions[vcp_void_cycles_positions_i];
-            vcp.cycles_payout_lock = false;
-            handle_do_cycles_payout_result(&mut vcp.cycles_payout_data, do_cycles_payout_result);
-            if vcp.can_remove() {
-                cm_data.void_cycles_positions.remove(vcp_void_cycles_positions_i);
+                };
+                let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
+                *vp.payout_lock() = false;
+                handle_payout_output(vp.payout_data(), do_payout_output);
+                if vp.can_remove() {
+                    void_positions.remove(vp_void_positions_i);
+                }
             }
         }
-        for (vip_id, do_token_payout_sponse) in vips_ids_token_payouts.into_iter().zip(vips_do_token_payouts_rs.into_iter()) {      
-            let vip_void_token_positions_i: usize = {
-                match cm_data.void_token_positions.binary_search_by_key(&vip_id, |vip| { vip.position_id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }  
-            };
-            let vip: &mut VoidTokenPosition = &mut cm_data.void_token_positions[vip_void_token_positions_i];
-            vip.token_payout_lock = false;
-            handle_do_token_payout_sponse(&mut vip.token_payout_data, do_token_payout_sponse);
-            if vip.can_remove() {
-                cm_data.void_token_positions.remove(vip_void_token_positions_i);
-            }
-        }
+        handle_vps_payouts(
+            vcps_ids_cycles_payouts,
+            vcps_do_cycles_payouts_rs,
+            &mut cm_data.void_cycles_positions,
+            handle_do_cycles_payout_result
+        );
+        handle_vps_payouts(
+            vips_ids_token_payouts,
+            vips_do_token_payouts_rs,
+            &mut cm_data.void_token_positions,
+            handle_do_token_payout_sponse
+        );
         
         fn handle_vps_update_storage_positions<VoidPosition: VoidPositionTrait>(
             vps_ids_update_storage_positions: Vec<PositionId>,
@@ -235,11 +231,9 @@ async fn _do_payouts() {
             void_positions: &mut Vec<VoidPosition>, 
         ) {
             for (vp_id, do_update_storage_position_result) in vps_ids_update_storage_positions.into_iter().zip(vps_do_update_storage_positions_rs.into_iter()) {      
-                let vp_void_positions_i: usize = {
-                    match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
-                        Ok(i) => i,
-                        Err(_) => { continue; }
-                    }  
+                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
+                    Ok(i) => i,
+                    Err(_) => { continue; }
                 };
                 let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
                 vp.update_storage_position_data().lock = false;
@@ -259,28 +253,33 @@ async fn _do_payouts() {
             vips_do_update_storage_positions_rs,
             &mut cm_data.void_token_positions,
         );
+        
+        let mut tl_payouts: BTreeMap<PurchaseId, (Option<DoCyclesPayoutResult>, Option<DoTokenPayoutSponse>)> = BTreeMap::new();
         for (tl_id, do_cycles_payout_result) in tls_cycles_payouts_ids.into_iter().zip(tls_do_cycles_payouts_rs.into_iter()) {
-            let tl_trade_logs_i: usize = {
-                match cm_data.trade_logs.binary_search_by_key(&tl_id, |tl| { tl.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
-            };
-            let tl: &mut TradeLog = &mut cm_data.trade_logs[tl_trade_logs_i];
-            tl.cycles_payout_lock = false;
-            handle_do_cycles_payout_result(&mut tl.cycles_payout_data, do_cycles_payout_result);
-        }
+            tl_payouts.entry(tl_id)
+            .or_default()
+            .0 = Some(do_cycles_payout_result);
+        } 
         for (tl_id, do_token_payout_sponse) in tls_token_payouts_ids.into_iter().zip(tls_do_token_payouts_rs.into_iter()) {
-            let tl_trade_logs_i: usize = {
-                match cm_data.trade_logs.binary_search_by_key(&tl_id, |tl| { tl.id }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                }
+            tl_payouts.entry(tl_id)
+            .or_default()
+            .1 = Some(do_token_payout_sponse);
+        }
+        for (tl_id, (opt_cycles_payout_output, opt_token_payout_output)) in tl_payouts.into_iter() {
+            let tl_trade_logs_i: usize = match cm_data.trade_logs.binary_search_by_key(&tl_id, |tl| { tl.id }) {
+                Ok(i) => i,
+                Err(_) => { continue; }    
             };
             let tl: &mut TradeLog = &mut cm_data.trade_logs[tl_trade_logs_i];
-            tl.token_payout_lock = false;
-            handle_do_token_payout_sponse(&mut tl.token_payout_data, do_token_payout_sponse);
-        }        
+            if let Some(cycles_payout_output) = opt_cycles_payout_output {
+                tl.cycles_payout_lock = false;
+                handle_do_cycles_payout_result(&mut tl.cycles_payout_data, cycles_payout_output);    
+            } 
+            if let Some(token_payout_output) = opt_token_payout_output {
+                tl.token_payout_lock = false;
+                handle_do_token_payout_sponse(&mut tl.token_payout_data, token_payout_output);    
+            }
+        }
     });
     
 }
