@@ -189,7 +189,7 @@ impl CurrentPositionTrait for CyclesPosition {
             update_storage_position_data: VPUpdateStoragePositionData{
                 lock: false,
                 status: false,
-                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()    
+                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
             },
             
         }
@@ -533,6 +533,9 @@ impl StorageLogTrait for TradeLog {
         s[159..175].copy_from_slice(&self.tokens_payout_fee.to_be_bytes());
         s[175..191].copy_from_slice(&self.cycles_payout_fee.to_be_bytes());
         s[191..207].copy_from_slice(&self.position_id_matcher.to_be_bytes());
+        if let Some(ref token_transfer) = self.token_payout_data.token_transfer {
+            s[207..223].copy_from_slice(&token_transfer.ledger_transfer_fee.to_be_bytes())    
+        }
         Vec::from(s)
     }
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
@@ -673,7 +676,7 @@ pub trait VoidPositionTrait: Clone {
 pub struct VPUpdateStoragePositionData {
     pub lock: bool,
     pub status: bool,
-    pub update_storage_position_log_serialization_b: Vec<u8>// const generics [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE],
+    pub update_storage_position_log_serialization_b: Vec<u8>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -786,7 +789,7 @@ impl TokenPayoutTrait for VoidTokenPosition {
         )
     }
     fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(Vec::from(*b"vtp").into()) }
+    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(create_void_token_position_transfer_memo(self.position_id)))) }
     fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { None }
     fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
     fn tokens_payout_fee(&self) -> Tokens { 0 } 

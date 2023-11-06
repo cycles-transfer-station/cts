@@ -1,3 +1,6 @@
+// do not borrow or borrow_mut the CM_DATA.
+
+
 use crate::{
     POSITIONS_STORAGE_DATA,
 };

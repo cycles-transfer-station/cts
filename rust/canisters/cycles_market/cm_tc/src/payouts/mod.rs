@@ -81,9 +81,11 @@ async fn _do_payouts() {
     let mut trade_logs_token_payouts_chunk: Vec<(PurchaseId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
     
     with_mut(&CM_DATA, |cm_data| {
+        
         fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture, F: Fn(VoidPosition)->DoPayoutFuture>(
             void_positions: &mut Vec<VoidPosition>, 
-            do_payout: F
+            do_payout: F,
+            update_storage_positions_yes_or_no: bool,
         ) 
         -> 
         (
@@ -93,8 +95,6 @@ async fn _do_payouts() {
         {
             let mut payouts_chunk: Vec<(PositionId, _)> = Vec::new();
             let mut update_storage_positions_chunk: Vec<(PositionId, _)> = Vec::new();
-            
-            let positions_storage_flush_lock: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { positions_storage_data.storage_flush_lock });
             
             let mut i: usize = 0;
             while i < void_positions.len() 
@@ -111,7 +111,7 @@ async fn _do_payouts() {
                     ));
                 }
                 
-                if positions_storage_flush_lock == false
+                if update_storage_positions_yes_or_no == true
                 && update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE
                 && vp.update_storage_position_data().status == false 
                 && vp.update_storage_position_data().lock == false {
@@ -121,14 +121,27 @@ async fn _do_payouts() {
                         do_update_storage_position(vp.position_id(), vp.update_storage_position_data().update_storage_position_log_serialization_b.clone())
                     ));
                 }
+                
                 i += 1;
             }
             
             (payouts_chunk, update_storage_positions_chunk)
         }
         
-        (void_cycles_positions_cycles_payouts_chunk, void_cycles_positions_update_storage_positions_chunk) = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout);
-        (void_token_positions_token_payouts_chunk, void_token_positions_update_storage_positions_chunk) = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout);
+        let update_storage_positions_yes_or_no: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { !positions_storage_data.storage_flush_lock }); 
+        
+        (void_cycles_positions_cycles_payouts_chunk, void_cycles_positions_update_storage_positions_chunk) 
+            = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout, update_storage_positions_yes_or_no);
+        
+        (void_token_positions_token_payouts_chunk, void_token_positions_update_storage_positions_chunk) 
+            = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no);
+                        
+        if void_cycles_positions_update_storage_positions_chunk.len() > 0 
+        || void_token_positions_update_storage_positions_chunk.len()  > 0 {
+            with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| { 
+                positions_storage_data.storage_flush_lock = true; 
+            });
+        }
         
         let mut i: usize = 0;
         while i < cm_data.trade_logs.len() {
@@ -191,6 +204,13 @@ async fn _do_payouts() {
         futures::future::join_all(tls_do_cycles_payouts_futures),
         futures::future::join_all(tls_do_token_payouts_futures),
     );
+
+    if vcps_ids_update_storage_positions.len() > 0 
+    || vips_ids_update_storage_positions.len() > 0 {
+        with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| { 
+            positions_storage_data.storage_flush_lock = false; 
+        });
+    }
 
     with_mut(&CM_DATA, |cm_data| {
         fn handle_vps_payouts<VoidPosition: VoidPositionTrait, DoPayoutOutput, F: Fn(&mut VoidPosition::PayoutData, DoPayoutOutput)->()>(

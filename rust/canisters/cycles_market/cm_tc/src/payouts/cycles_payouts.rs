@@ -1,4 +1,4 @@
-
+// do not borrow or borrow_mut the CM_DATA.
 
 use futures::task::Poll;
 use crate::*;

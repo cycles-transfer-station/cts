@@ -34,7 +34,7 @@ use cts_lib::{
         KiB,
         MiB,
         NANOS_IN_A_SECOND,
-        SECONDS_IN_AN_HOUR,
+        SECONDS_IN_A_HOUR,
         TRILLION,
     },
     types::{
@@ -109,6 +109,9 @@ use payouts::do_payouts;
 mod flush_logs;
 use flush_logs::FlushLogsStorageError;
 
+mod candle_counter;
+use candle_counter::CandleCounter;
+
 // ---------------
 
 
@@ -130,6 +133,7 @@ struct CMData {
     do_payouts_errors: Vec<CallError>,
     ongoing_buy_calls: u32,
     ongoing_sell_calls: u32,
+    candle_counter: CandleCounter,
 }
 
 impl CMData {
@@ -150,6 +154,7 @@ impl CMData {
             do_payouts_errors: Vec::new(),
             ongoing_buy_calls: 0,
             ongoing_sell_calls: 0,
+            candle_counter: CandleCounter::default(),
         }
     }
 }
@@ -193,10 +198,18 @@ pub struct StorageCanisterData {
 
 
 
+
+
+
+
+
+
+
+
+
 const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
 const TRADES_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
 const POSITIONS_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(2);
-
 
 
 
@@ -315,8 +328,11 @@ mod token_transfer_memo_mod {
     const TOKEN_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-TPPF";
     const CYCLES_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-CPPF";
     
+    const VOID_TOKEN_POSITION_MEMO_START: &[u8; 8] = b"CTS-VTP-";
+    
+    
     pub fn position_purchase_token_transfer_memo(position_kind: PositionKind, purchase_id: PurchaseId) -> [u8; 24] {
-        create_position_purchase_token_transfer_memo(
+        create_token_transfer_memo_(
             match position_kind {
                 PositionKind::Cycles => CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START,
                 PositionKind::Token => TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START,
@@ -325,7 +341,7 @@ mod token_transfer_memo_mod {
         )    
     }
     pub fn position_purchase_token_fee_collection_transfer_memo(position_kind: PositionKind, purchase_id: PurchaseId) -> [u8; 24] {
-        create_position_purchase_token_transfer_memo(
+        create_token_transfer_memo_(
             match position_kind {
                 PositionKind::Cycles => CYCLES_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START,
                 PositionKind::Token => TOKEN_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START,
@@ -334,11 +350,14 @@ mod token_transfer_memo_mod {
         )
         
     }
-    fn create_position_purchase_token_transfer_memo(memo_start: &[u8; 8], purchase_id: PurchaseId) -> [u8; 24] {
+    fn create_token_transfer_memo_(memo_start: &[u8; 8], id: u128) -> [u8; 24] {
         let mut b: [u8; 24] = [0u8; 24];
         b[..8].copy_from_slice(memo_start);
-        b[8..24].copy_from_slice(&purchase_id.to_be_bytes());
+        b[8..24].copy_from_slice(&id.to_be_bytes());
         return b;
+    }
+    pub fn create_void_token_position_transfer_memo(position_id: u128) -> [u8; 24] {
+        create_token_transfer_memo_(VOID_TOKEN_POSITION_MEMO_START, position_id)
     }
 }
 use token_transfer_memo_mod::*;
@@ -350,7 +369,7 @@ const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 
 
-pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_AN_HOUR * 1;
+pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_HOUR * 1;
 
 
 
@@ -621,7 +640,8 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
             &mut cm_data.void_cycles_positions,
             &mut cm_data.void_token_positions,
             &mut cm_data.trade_logs,
-            &mut cm_data.trade_logs_id_counter
+            &mut cm_data.trade_logs_id_counter,
+            &mut cm_data.candle_counter,
         );
         
         Ok(BuyTokensSuccess{
@@ -753,7 +773,8 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
             &mut cm_data.void_token_positions,
             &mut cm_data.void_cycles_positions,
             &mut cm_data.trade_logs,
-            &mut cm_data.trade_logs_id_counter
+            &mut cm_data.trade_logs_id_counter,
+            &mut cm_data.candle_counter,
         );
         
         Ok(SellTokensSuccess{
@@ -777,6 +798,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     matchee_void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
     trade_logs: &mut VecDeque<TradeLog>, 
     trade_logs_id_counter: &mut PurchaseId,
+    candle_counter: &mut CandleCounter,
 ) {       
     
     if MatcherPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
@@ -811,19 +833,16 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
                 let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
                                                 
-                let payment_cycles: Cycles = tokens_transform_cycles(purchase_tokens, trade_rate); 
-                
-                
-                let tokens_payout_fee: Tokens = cycles_transform_tokens(
-                    {
+                let tokens_payout_fee: Tokens = {
+                    cycles_transform_tokens(
                         if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
                             matcher_position_payout_fee_cycles
                         } else {
                             matchee_position_payout_fee_cycles
-                        }
-                    },
-                    trade_rate
-                );
+                        },
+                        trade_rate
+                    )
+                };
                 let cycles_payout_fee: Cycles = {
                     if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
                         matcher_position_payout_fee_cycles
@@ -841,7 +860,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         matchee_position_positor: matchee_position.positor(),
                         matcher_position_positor: matcher_position.positor(),
                         tokens: purchase_tokens,
-                        cycles: payment_cycles,
+                        cycles: tokens_transform_cycles(purchase_tokens, trade_rate),
                         cycles_per_token_rate: trade_rate,
                         matchee_position_kind: MatcheePositionType::POSITION_KIND,
                         timestamp_nanos: time_nanos(),
@@ -853,6 +872,8 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         token_payout_data: TokenPayoutData::new_for_a_trade_log()
                     }
                 );
+                
+                candle_counter.count_trade(trade_logs.back().unwrap());
                 
                 let mut matcher_position_is_void: bool = false;
                 if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() { 
@@ -885,6 +906,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         matcher_void_positions,
                         trade_logs, 
                         trade_logs_id_counter,
+                        candle_counter,
                     );
                     matcher_position_i = match matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
                         Ok(matcher_position_i) => matcher_position_i,
