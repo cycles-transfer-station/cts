@@ -809,21 +809,16 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         
     let matcher_position_id: PositionId = matcher_positions[matcher_position_i].id();
     let mut match_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
-        
-    ic_cdk::println!("match_trades start. matcher_position_id: {matcher_position_id}");      
           
     'outer: loop {
-        ic_cdk::println!("outer-loop. match_rate: {match_rate}");
         let mut i: usize = 0;
         while i < matchee_positions.len() {
-            ic_cdk::println!("inner-loop. i: {i}");
             if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
                 if trade_logs.len() >= MAX_TRADE_LOGS {
                     break 'outer; // log that this matcher-position still needs matching.
                 }
-                //ic_cdk::println!("found match, trade-rate: {:?}", trade_rate);
+                
                 let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
-                ic_cdk::println!("found match. matchee_position.id: {}", matchee_position.id());
                 
                 let matchee_position_vailable_rate_before_trade: CyclesPerToken = matchee_position.current_position_available_cycles_per_token_rate();
                 
@@ -1277,7 +1272,12 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
                 .collect::<Vec<&TradeLog>>()
                 .iter()
                 .rev()
-                .map(|tl| tl.stable_memory_serialize())
+                .map(|tl| {
+                    let mut v = Vec::new();
+                    v.extend(tl.stable_memory_serialize());
+                    v.extend_from_slice(&[tl.cycles_payout_data.is_complete() as u8, tl.token_payout_data.is_complete() as u8]);
+                    v
+                })
                 .collect()
         };        
         reply_raw(&logs_b.concat());
