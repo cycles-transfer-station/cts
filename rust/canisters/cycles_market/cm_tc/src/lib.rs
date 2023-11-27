@@ -1260,7 +1260,7 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
             }
             iter
                 .rev()
-                .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE + 2)
                 .collect::<Vec<&TradeLog>>()
                 .into_iter()
                 .rev()
@@ -1350,7 +1350,7 @@ pub fn view_void_positions_pending(q: ViewStorageLogsQuest<<PositionLog as Stora
     with(&CM_DATA, |cm_data| {
         let mut v: Vec<(&PositionLog, bool)> = d(q.clone(), &cm_data.void_cycles_positions).chain(d(q, &cm_data.void_token_positions)).collect();
         v.sort_by_key(|(pl, _)| pl.id);
-        v.drain(..v.len().saturating_sub((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE));
+        v.drain(..v.len().saturating_sub((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE + 1));
         let logs_b: Vec<Vec<u8>> = {
             v.into_iter()
             .map(|(pl, is_payout_complete)| { 
