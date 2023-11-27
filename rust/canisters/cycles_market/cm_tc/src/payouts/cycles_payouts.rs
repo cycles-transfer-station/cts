@@ -8,80 +8,69 @@ use cts_lib::{
 };
 
 
-
-
-pub enum DoCyclesPayoutError {
-    CandidError(CandidError),
-    CyclesPayoutCallPerformError(u32),
-    CyclesPayoutCallError(CallError),
-    //ManagementCanisterPositCyclesCallError(CallError),
-}
-impl From<CandidError> for DoCyclesPayoutError {
-    fn from(ce: CandidError) -> DoCyclesPayoutError {
-        DoCyclesPayoutError::CandidError(ce)  
-    }
-}
-
-pub enum DoCyclesPayoutSponse {
-    CyclesPayoutSuccess,
-    NothingToDo
-}
-
-pub type DoCyclesPayoutResult = Result<DoCyclesPayoutSponse, DoCyclesPayoutError>;
-
-pub async fn do_cycles_payout<T: CyclesPayoutTrait>(q: T) -> DoCyclesPayoutResult {
+pub async fn do_cycles_payout<T: CyclesPayoutTrait>(q: T) -> CyclesPayoutData {
     
     // try cycles-payouts a couple of times before using the management canister's deposit cycles method.
     // cycles-bank can be in the stop mode for an upgrade.  
     
-    if q.cycles_payout_data().cycles_payout == false {
+    let mut cycles_payout_data: CyclesPayoutData = q.cycles_payout_data(); 
+    
+    if cycles_payout_data.cycles_payout.is_none() {
         
-        let mut call_future = call_raw128(
-            q.cycles_payout_payee(),
-            q.cycles_payout_payee_method(),
-            q.cycles_payout_payee_method_quest_bytes()?,
-            q.cycles().saturating_sub(q.cycles_payout_fee())
-        );
-                
-        if let Poll::Ready(call_result_with_an_error) = futures::poll!(&mut call_future) {
-            return Err(DoCyclesPayoutError::CyclesPayoutCallPerformError(call_result_with_an_error.unwrap_err().0 as u32));
-        } 
-        let call_result: CallResult<Vec<u8>> = call_future.await;
-        
-        let _cycles_refund: Cycles = msg_cycles_refunded128();
-        
-        match call_result {
-            Ok(_sponse_bytes) => {
-                return Ok(DoCyclesPayoutSponse::CyclesPayoutSuccess);
-            },
-            Err(call_error) => {
-                // what error does it give when the canister is stopped, and what error does it give when the canister is empty?
-                // if the canister is empty, call the management canister posit cycles
-                /*
-                if canister-module-is-empty  {
-                    match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
-                        MANAGEMENT_CANISTER_ID,
-                        "deposit_cycles",
-                        (management_canister::CanisterIdRecord{
-                            canister_id: q.cycles_payout_payee()
-                        },),
-                        q.cycles().saturating_sub(q.cycles_payout_fee())
-                    ).await {
-                        Ok(_) => {
-                            return Ok(DoCyclesPayoutSponse::CyclesPayoutSuccess);
-                        },
-                        Err(call_error) => {
-                            return Err(ManagementCanisterPositCyclesCallError(call_error_as_u32_and_string(call_error)));
+        if q.cycles() >= CYCLES_DUST_COLLECTION_THRESHOLD {
+            
+            let mut call_future = call_raw128(
+                q.cycles_payout_payee(),
+                q.cycles_payout_payee_method(),
+                match q.cycles_payout_payee_method_quest_bytes() {
+                    Ok(b) => b,
+                    Err(_e) => return cycles_payout_data,
+                },
+                q.cycles().saturating_sub(q.cycles_payout_fee())
+            );
+                    
+            if let Poll::Ready(_call_result_with_an_error) = futures::poll!(&mut call_future) {
+                //return Err(DoCyclesPayoutError::CyclesPayoutCallPerformError(call_result_with_an_error.unwrap_err().0 as u32));
+                return cycles_payout_data;
+            } 
+            
+            let call_result: CallResult<Vec<u8>> = call_future.await;
+            
+            match call_result {
+                Ok(_sponse_bytes) => {
+                    cycles_payout_data.cycles_payout = Some(true);
+                },
+                Err(_call_error) => {
+                    // what error does it give when the canister is stopped, and what error does it give when the canister is empty?
+                    // if the canister is empty, call the management canister posit cycles
+                    /*
+                    if canister-module-is-empty  {
+                        match call_with_payment128::<(management_canister::CanisterIdRecord,),()>(
+                            MANAGEMENT_CANISTER_ID,
+                            "deposit_cycles",
+                            (management_canister::CanisterIdRecord{
+                                canister_id: q.cycles_payout_payee()
+                            },),
+                            q.cycles().saturating_sub(q.cycles_payout_fee())
+                        ).await {
+                            Ok(_) => {
+                                return Ok(DoCyclesPayoutSponse::CyclesPayoutSuccess);
+                            },
+                            Err(call_error) => {
+                                return Err(ManagementCanisterPositCyclesCallError(call_error_as_u32_and_string(call_error)));
+                            }
                         }
                     }
+                    */
+                    //return Err(DoCyclesPayoutError::CyclesPayoutCallError(call_error_as_u32_and_string(call_error)));
                 }
-                */
-                return Err(DoCyclesPayoutError::CyclesPayoutCallError(call_error_as_u32_and_string(call_error)));
-            }
+            } 
+        } else {
+            cycles_payout_data.cycles_payout = Some(false);
         }
     }
     
-    return Ok(DoCyclesPayoutSponse::NothingToDo);
+    return cycles_payout_data;
 }
 
 

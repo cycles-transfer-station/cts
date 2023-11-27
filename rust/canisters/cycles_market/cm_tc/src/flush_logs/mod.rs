@@ -1,14 +1,13 @@
 use crate::{
     LogStorageData,
     StorageCanisterData,
+    FLUSH_STORAGE_BUFFER_AT_SIZE,
+    FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO,
+    CREATE_STORAGE_CANISTER_CYCLES,
 };
 use cm_storage_lib::{FlushQuestForward, FlushResult, FlushError};
 use cts_lib::{
-    types::{
-        CallError,
-        Cycles,
-    },
-    consts::{MiB, KiB},
+    types::CallError,
     tools::{
         localkey::refcell::{with,with_mut},
         time_nanos_u64,
@@ -38,15 +37,6 @@ pub enum FlushLogsStorageError {
     StorageCanisterCallError(CallError),
     NewStorageCanisterIsFull, // when a *new* trade-log-storage-canister returns StorageIsFull on the first flush call. 
 }
-
-
-const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = /*5*/2 * MiB;
-
-const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
-
-const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 10_000_000_000_000;
-
-
 
        
 

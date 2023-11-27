@@ -2,6 +2,8 @@ use crate::{
     CTS_DATA,
     LATEST_KNOWN_CMC_RATE,
     MAX_CBS_MAPS,
+    CREATE_CBS_MAP_CANISTER_CYCLES,
+    CREATE_CBS_MAP_CANISTER_NETWORK_MEMORY_ALLOCATION,
 };
 //use candid::{CandidType,Deserialize};
 pub use cts_lib::cmc::*;
@@ -22,10 +24,8 @@ use cts_lib::{
         CanisterIdRecord,
     },
     consts::{
-        MiB,
         MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
-        TRILLION,
     },
     tools::{
         localkey::{
@@ -295,10 +295,10 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
             Some(ManagementCanisterOptionalCanisterSettings{
                 controllers : None,
                 compute_allocation : None,
-                memory_allocation : Some(100 * MiB as u128),
+                memory_allocation : Some(CREATE_CBS_MAP_CANISTER_NETWORK_MEMORY_ALLOCATION),
                 freezing_threshold : None,
             }),
-            10 * TRILLION
+            CREATE_CBS_MAP_CANISTER_CYCLES
         ).await {
             Ok(canister_id) => Some(canister_id),
             Err(get_new_canister_error) => {

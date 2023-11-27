@@ -86,6 +86,7 @@ async fn _do_payouts() {
             void_positions: &mut Vec<VoidPosition>, 
             do_payout: F,
             update_storage_positions_yes_or_no: bool,
+            trade_logs: &VecDeque<TradeLog>,
         ) 
         -> 
         (
@@ -113,12 +114,16 @@ async fn _do_payouts() {
                 
                 if update_storage_positions_yes_or_no == true
                 && update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE
+                && trade_logs.iter().any(|tl| { 
+                    [&tl.position_id_matcher, &tl.position_id_matchee].contains(&&vp.position_id()) == true 
+                    && tl.can_move_into_the_stable_memory_for_the_long_term_storage() == false
+                }) == false
                 && vp.update_storage_position_data().status == false 
                 && vp.update_storage_position_data().lock == false {
-                    vp.update_storage_position_data().lock = true;
+                    vp.update_storage_position_data_mut().lock = true;
                     update_storage_positions_chunk.push((
                         vp.position_id(),
-                        do_update_storage_position(vp.position_id(), vp.update_storage_position_data().update_storage_position_log_serialization_b.clone())
+                        do_update_storage_position(vp.position_id(), vp.update_storage_position_data().update_storage_position_log.stable_memory_serialize())
                     ));
                 }
                 
@@ -131,10 +136,10 @@ async fn _do_payouts() {
         let update_storage_positions_yes_or_no: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { !positions_storage_data.storage_flush_lock }); 
         
         (void_cycles_positions_cycles_payouts_chunk, void_cycles_positions_update_storage_positions_chunk) 
-            = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout, update_storage_positions_yes_or_no);
+            = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout, update_storage_positions_yes_or_no, &cm_data.trade_logs);
         
         (void_token_positions_token_payouts_chunk, void_token_positions_update_storage_positions_chunk) 
-            = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no);
+            = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no, &cm_data.trade_logs);
                         
         if void_cycles_positions_update_storage_positions_chunk.len() > 0 
         || void_token_positions_update_storage_positions_chunk.len()  > 0 {
@@ -190,12 +195,12 @@ async fn _do_payouts() {
         tls_do_cycles_payouts_rs,
         tls_do_token_payouts_rs,
     ): (
-        Vec<DoCyclesPayoutResult>,
-        Vec<DoTokenPayoutSponse>,
+        Vec<CyclesPayoutData>,
+        Vec<TokenPayoutData>,
         Vec<DoUpdateStoragePositionResult>,
         Vec<DoUpdateStoragePositionResult>,
-        Vec<DoCyclesPayoutResult>,
-        Vec<DoTokenPayoutSponse>,
+        Vec<CyclesPayoutData>,
+        Vec<TokenPayoutData>,
     ) = futures::join!(
         futures::future::join_all(vcps_do_cycles_payouts_futures),
         futures::future::join_all(vips_do_token_payouts_futures),
@@ -213,55 +218,67 @@ async fn _do_payouts() {
     }
 
     with_mut(&CM_DATA, |cm_data| {
+        fn handle_vps<VoidPosition: VoidPositionTrait, DoOutput, F: Fn(&mut VoidPosition, DoOutput)->()>(
+            vps_ids: Vec<PositionId>,
+            vps_do_rs: Vec<DoOutput>,
+            void_positions: &mut Vec<VoidPosition>, 
+            handle_output: F
+        ) {
+            for (vp_id, do_output) in vps_ids.into_iter().zip(vps_do_rs.into_iter()) {      
+                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
+                    Ok(i) => i,
+                    Err(_) => { continue; }
+                };
+                let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
+                handle_output(vp, do_output);
+                if vp.can_remove() {
+                    void_positions.remove(vp_void_positions_i);
+                }
+            }
+        }
         fn handle_vps_payouts<VoidPosition: VoidPositionTrait, DoPayoutOutput, F: Fn(&mut VoidPosition::PayoutData, DoPayoutOutput)->()>(
             vps_ids_payouts: Vec<PositionId>,
             vps_do_payouts_rs: Vec<DoPayoutOutput>,
             void_positions: &mut Vec<VoidPosition>, 
             handle_payout_output: F
         ) {
-            for (vp_id, do_payout_output) in vps_ids_payouts.into_iter().zip(vps_do_payouts_rs.into_iter()) {      
-                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                };
-                let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
-                *vp.payout_lock() = false;
-                handle_payout_output(vp.payout_data(), do_payout_output);
-                if vp.can_remove() {
-                    void_positions.remove(vp_void_positions_i);
+            handle_vps(
+                vps_ids_payouts,
+                vps_do_payouts_rs,
+                void_positions,
+                |vp, do_payout_output| {
+                    *vp.payout_lock() = false;
+                    handle_payout_output(vp.payout_data_mut(), do_payout_output);
+                    vp.update_storage_position_data_mut().update_storage_position_log.void_position_payout_dust_collection = vp.payout_data().dust_collection();     
                 }
-            }
+            );
         }
         handle_vps_payouts(
             vcps_ids_cycles_payouts,
             vcps_do_cycles_payouts_rs,
             &mut cm_data.void_cycles_positions,
-            handle_do_cycles_payout_result
+            handle_do_cycles_payout_output
         );
         handle_vps_payouts(
             vips_ids_token_payouts,
             vips_do_token_payouts_rs,
             &mut cm_data.void_token_positions,
-            handle_do_token_payout_sponse
+            handle_do_token_payout_output
         );
-        
         fn handle_vps_update_storage_positions<VoidPosition: VoidPositionTrait>(
             vps_ids_update_storage_positions: Vec<PositionId>,
             vps_do_update_storage_positions_rs: Vec<DoUpdateStoragePositionResult>,
             void_positions: &mut Vec<VoidPosition>, 
         ) {
-            for (vp_id, do_update_storage_position_result) in vps_ids_update_storage_positions.into_iter().zip(vps_do_update_storage_positions_rs.into_iter()) {      
-                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
-                };
-                let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
-                vp.update_storage_position_data().lock = false;
-                vp.update_storage_position_data().status = do_update_storage_position_result.is_ok();
-                if vp.can_remove() {
-                    void_positions.remove(vp_void_positions_i);
+            handle_vps(
+                vps_ids_update_storage_positions,
+                vps_do_update_storage_positions_rs,
+                void_positions,
+                |vp, do_update_storage_position_output| {
+                    vp.update_storage_position_data_mut().lock = false;
+                    vp.update_storage_position_data_mut().status = do_update_storage_position_output.is_ok();
                 }
-            }
+            );
         }
         handle_vps_update_storage_positions(
             vcps_ids_update_storage_positions,
@@ -274,7 +291,7 @@ async fn _do_payouts() {
             &mut cm_data.void_token_positions,
         );
         
-        let mut tl_payouts: BTreeMap<PurchaseId, (Option<DoCyclesPayoutResult>, Option<DoTokenPayoutSponse>)> = BTreeMap::new();
+        let mut tl_payouts: BTreeMap<PurchaseId, (Option<CyclesPayoutData>, Option<TokenPayoutData>)> = BTreeMap::new();
         for (tl_id, do_cycles_payout_result) in tls_cycles_payouts_ids.into_iter().zip(tls_do_cycles_payouts_rs.into_iter()) {
             tl_payouts.entry(tl_id)
             .or_default()
@@ -293,11 +310,11 @@ async fn _do_payouts() {
             let tl: &mut TradeLog = &mut cm_data.trade_logs[tl_trade_logs_i];
             if let Some(cycles_payout_output) = opt_cycles_payout_output {
                 tl.cycles_payout_lock = false;
-                handle_do_cycles_payout_result(&mut tl.cycles_payout_data, cycles_payout_output);    
+                handle_do_cycles_payout_output(&mut tl.cycles_payout_data, cycles_payout_output);    
             } 
             if let Some(token_payout_output) = opt_token_payout_output {
                 tl.token_payout_lock = false;
-                handle_do_token_payout_sponse(&mut tl.token_payout_data, token_payout_output);    
+                handle_do_token_payout_output(&mut tl.token_payout_data, token_payout_output);    
             }
         }
     });
@@ -306,19 +323,10 @@ async fn _do_payouts() {
 
 
 
-fn handle_do_cycles_payout_result(cpd: &mut CyclesPayoutData, do_cycles_payout_result: DoCyclesPayoutResult) {
-    if let Ok(do_cycles_payout_sponse) = do_cycles_payout_result {  
-        match do_cycles_payout_sponse {
-            DoCyclesPayoutSponse::CyclesPayoutSuccess => {
-                cpd.cycles_payout = true;                            
-            },
-            DoCyclesPayoutSponse::NothingToDo => {}
-        }
-    }
+fn handle_do_cycles_payout_output(cpd: &mut CyclesPayoutData, do_cycles_payout_output: CyclesPayoutData) {
+    cpd.cycles_payout = do_cycles_payout_output.cycles_payout;
 }
 
-fn handle_do_token_payout_sponse(tpd: &mut TokenPayoutData, sponse: TokenPayoutData) {
+fn handle_do_token_payout_output(tpd: &mut TokenPayoutData, sponse: TokenPayoutData) {
     tpd.token_transfer = sponse.token_transfer;
-    tpd.token_fee_collection = sponse.token_fee_collection;
-    tpd.cm_message_call = sponse.cm_message_call;
 }

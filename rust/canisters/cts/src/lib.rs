@@ -237,7 +237,11 @@ pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
 };
 
 pub const MAX_USERS_PURCHASE_CYCLES_BANK: usize = 170; // the max number of entries in the hashmap at the same-time
+
 pub const MAX_CBS_MAPS: usize = 4; // can be 30-million at 1-gb, or 3-million at 0.1-gb,
+
+pub const CREATE_CBS_MAP_CANISTER_CYCLES: Cycles = 20 * TRILLION;
+pub const CREATE_CBS_MAP_CANISTER_NETWORK_MEMORY_ALLOCATION: u128 = 100 * MiB as u128;
 
 pub const MAX_USERS_TRANSFER_ICP: usize = 170;
 pub const CTS_TRANSFER_ICP_FEE: Cycles = 30_000_000_000; // taken as the icptokens by the conversion-rate

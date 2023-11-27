@@ -23,6 +23,7 @@ pub trait StorageLogTrait {
 
 
 // this one goes into the PositionLog storage but gets updated for the position-termination.
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PositionLog {
     pub id: PositionId,
     pub positor: Principal,
@@ -34,6 +35,7 @@ pub struct PositionLog {
     pub payouts_fees_sum: u128, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
     pub creation_timestamp_nanos: u128,
     pub position_termination: Option<PositionTerminationData>,
+    pub void_position_payout_dust_collection: bool,
 }
 
 
@@ -59,6 +61,7 @@ impl StorageLogTrait for PositionLog {
             s[154..162].copy_from_slice(&(data.timestamp_nanos as u64).to_be_bytes());
             s[162] = data.cause.ser();
         }        
+        s[163] = self.void_position_payout_dust_collection as u8;
         s.to_vec()
     }  
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
@@ -70,6 +73,7 @@ impl StorageLogTrait for PositionLog {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CreatePositionQuestLog {
     pub quantity: u128,
     pub cycles_per_token_rate: CyclesPerToken
@@ -92,11 +96,13 @@ impl From<SellTokensQuest> for CreatePositionQuestLog {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PositionTerminationData {
     pub timestamp_nanos: u128,
     pub cause: PositionTerminationCause
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub enum PositionTerminationCause {
     Fill, // the position is fill[ed]. position.amount < minimum_token_match()
     Bump, // the position got bumped
@@ -128,7 +134,7 @@ pub trait CurrentPositionTrait {
     fn timestamp_nanos(&self) -> u128;
     
     type VoidPositionType: VoidPositionTrait;
-    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType;
+    fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType;
     
     fn current_position_quantity(&self) -> u128;
     
@@ -178,7 +184,7 @@ impl CurrentPositionTrait for CyclesPosition {
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidCyclesPosition;
-    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType {
+    fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType {
         VoidCyclesPosition{
             position_id: self.id,
             positor: self.positor,                                
@@ -189,7 +195,7 @@ impl CurrentPositionTrait for CyclesPosition {
             update_storage_position_data: VPUpdateStoragePositionData{
                 lock: false,
                 status: false,
-                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
+                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))
             },
             
         }
@@ -248,6 +254,7 @@ impl CurrentPositionTrait for CyclesPosition {
                     cause: c
                 }
             }),
+            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.
         }
     }
 
@@ -296,32 +303,19 @@ impl CurrentPositionTrait for TokenPosition {
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
     type VoidPositionType = VoidTokenPosition;
-    fn into_void_position_type(self, position_termination_cause: Option<PositionTerminationCause>) -> Self::VoidPositionType {
+    fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType {
         VoidTokenPosition{
             position_id: self.id,
             positor: self.positor,
             tokens: self.current_position_tokens,
             timestamp_nanos: time_nanos(),
             token_payout_lock: false,
-            token_payout_data: TokenPayoutData{
-                token_transfer: if self.current_position_tokens < localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) {
-                    Some(TokenTransferData{
-                        block_height: None,
-                        timestamp_nanos: time_nanos(),
-                        ledger_transfer_fee: 0,
-                    })                
-                } else { None },
-                token_fee_collection: Some(TokenTransferData{
-                    block_height: None,
-                    timestamp_nanos: time_nanos(),
-                    ledger_transfer_fee: 0,
-                }),
-                cm_message_call: None,
-            },
+            token_payout_data: TokenPayoutData::new(),
             update_storage_position_data: VPUpdateStoragePositionData{
                 status: false,
                 lock: false,
-                update_storage_position_log_serialization_b: self.as_stable_memory_position_log(position_termination_cause).stable_memory_serialize()
+                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))
+                
             }
         }
     }
@@ -374,6 +368,7 @@ impl CurrentPositionTrait for TokenPosition {
                     cause: c
                 }
             }),
+            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.            
         }
     }
 
@@ -405,23 +400,31 @@ fn find_current_position_available_rate(
 
 pub trait PayoutDataTrait {
     fn is_complete(&self) -> bool;
+    fn dust_collection(&self) -> bool;
 }
-
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CyclesPayoutData {
-    pub cycles_payout: bool,
+    pub cycles_payout: Option<bool>, // false means dust-collection.
 }
 impl CyclesPayoutData {
     pub fn new() -> Self {
         Self {
-            cycles_payout: false,
+            cycles_payout: None,
         }
     }
 }
 impl PayoutDataTrait for CyclesPayoutData {
     fn is_complete(&self) -> bool {
-        self.cycles_payout 
+        self.cycles_payout.is_some() 
+    }
+    fn dust_collection(&self) -> bool {
+        if let Some(did_payout) = self.cycles_payout {
+            if did_payout == false {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -440,30 +443,32 @@ pub trait CyclesPayoutTrait {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TokenTransferData {
-    pub block_height: Option<BlockId>, // if None that means there was no transfer in this token-payout. it is an unlock of the funds within the same-token-id.
-    pub timestamp_nanos: u128,
+    pub block_height: Option<BlockId>, // if None that means it is dust-collection.
     pub ledger_transfer_fee: Tokens,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TokenPayoutData {
     pub token_transfer: Option<TokenTransferData>,
-    pub token_fee_collection: Option<TokenTransferData>,
-    pub cm_message_call: Option<Option<(u32, String)>>, // first option for the callback-completion, second option for the possible-message-call-error
 }
 impl TokenPayoutData {
-    // separate new fns because a void_token_position.token_payout_data must start with the token_transfer = Some(TokenTransferData)
-    pub fn new_for_a_trade_log() -> Self {
+    pub fn new() -> Self {
         Self{
             token_transfer: None,
-            token_fee_collection: None,
-            cm_message_call: None,
         }
     }
 }
 impl PayoutDataTrait for TokenPayoutData {
     fn is_complete(&self) -> bool {
-        self.cm_message_call.is_some()
+        self.token_transfer.is_some()
     }    
+    fn dust_collection(&self) -> bool {
+        if let Some(ref token_transfer_data) = self.token_transfer {
+            if let None = token_transfer_data.block_height {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub trait TokenPayoutTrait {
@@ -536,6 +541,8 @@ impl StorageLogTrait for TradeLog {
         if let Some(ref token_transfer) = self.token_payout_data.token_transfer {
             s[207..223].copy_from_slice(&token_transfer.ledger_transfer_fee.to_be_bytes())    
         }
+        s[223] = self.cycles_payout_data.dust_collection() as u8;
+        s[224] = self.token_payout_data.dust_collection() as u8;
         Vec::from(s)
     }
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
@@ -626,8 +633,8 @@ impl TokenPayoutTrait for TradeLog {
                         cycles_purchase: self.cycles,
                         cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         token_payment: self.tokens,
-                        token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(), 
-                        token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
+                        token_transfer_block_height: token_payout_data_token_transfer.block_height, 
+                        token_ledger_transfer_fee: token_payout_data_token_transfer.ledger_transfer_fee,
                     }    
                 )
             }
@@ -641,8 +648,8 @@ impl TokenPayoutTrait for TradeLog {
                         token_purchase: self.tokens,
                         token_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         cycles_payment: self.cycles,
-                        token_transfer_block_height: token_payout_data_token_transfer.block_height.unwrap(),
-                        token_transfer_timestamp_nanos: token_payout_data_token_transfer.timestamp_nanos,
+                        token_transfer_block_height: token_payout_data_token_transfer.block_height,
+                        token_ledger_transfer_fee: token_payout_data_token_transfer.ledger_transfer_fee,
                     }
                 )
             }
@@ -665,18 +672,21 @@ impl TokenPayoutTrait for TradeLog {
 
 pub trait VoidPositionTrait: Clone {
     fn position_id(&self) -> PositionId;
+    fn positor(&self) -> Principal;    
     type PayoutData: PayoutDataTrait;
-    fn payout_data(&mut self) -> &mut Self::PayoutData;
+    fn payout_data(&self) -> &Self::PayoutData;
+    fn payout_data_mut(&mut self) -> &mut Self::PayoutData;
     fn payout_lock(&mut self) -> &mut bool;
     fn can_remove(&self) -> bool;
-    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData;
+    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData;
+    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct VPUpdateStoragePositionData {
     pub lock: bool,
     pub status: bool,
-    pub update_storage_position_log_serialization_b: Vec<u8>,
+    pub update_storage_position_log: PositionLog,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -694,8 +704,14 @@ impl VoidPositionTrait for VoidCyclesPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    fn positor(&self) -> Principal {
+        self.positor
+    }
     type PayoutData = CyclesPayoutData;
-    fn payout_data(&mut self) -> &mut Self::PayoutData {
+    fn payout_data(&self) -> &Self::PayoutData {
+        &self.cycles_payout_data
+    }
+    fn payout_data_mut(&mut self) -> &mut Self::PayoutData {
         &mut self.cycles_payout_data
     }
     fn payout_lock(&mut self) -> &mut bool {
@@ -704,7 +720,10 @@ impl VoidPositionTrait for VoidCyclesPosition {
     fn can_remove(&self) -> bool {
         self.cycles_payout_data.is_complete() && self.update_storage_position_data.status == true
     }
-    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData {
+    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData {
+        &self.update_storage_position_data
+    }
+    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
         &mut self.update_storage_position_data
     }
 }
@@ -758,8 +777,14 @@ impl VoidPositionTrait for VoidTokenPosition {
     fn position_id(&self) -> PositionId {
         self.position_id
     }    
+    fn positor(&self) -> Principal {
+        self.positor
+    }    
     type PayoutData = TokenPayoutData;
-    fn payout_data(&mut self) -> &mut Self::PayoutData {
+    fn payout_data(&self) -> &Self::PayoutData {
+        &self.token_payout_data
+    }
+    fn payout_data_mut(&mut self) -> &mut Self::PayoutData {
         &mut self.token_payout_data
     }
     fn payout_lock(&mut self) -> &mut bool {
@@ -768,7 +793,10 @@ impl VoidPositionTrait for VoidTokenPosition {
     fn can_remove(&self) -> bool {
         self.token_payout_data.is_complete() && self.update_storage_position_data.status == true
     }
-    fn update_storage_position_data(&mut self) -> &mut VPUpdateStoragePositionData {
+    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData {
+        &self.update_storage_position_data
+    }
+    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
         &mut self.update_storage_position_data
     }
 }

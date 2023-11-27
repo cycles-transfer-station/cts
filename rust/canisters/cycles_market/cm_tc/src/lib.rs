@@ -6,6 +6,7 @@ use std::{
     //time::Duration,
     thread::LocalKey,
 };
+use std::iter::DoubleEndedIterator;
 use cts_lib::{
     tools::{
         localkey::{
@@ -34,7 +35,7 @@ use cts_lib::{
         KiB,
         MiB,
         NANOS_IN_A_SECOND,
-        SECONDS_IN_A_HOUR,
+        SECONDS_IN_A_MINUTE,
         TRILLION,
     },
     types::{
@@ -67,7 +68,6 @@ use cts_lib::{
                 call_raw128,
                 reply,
                 reply_raw,
-                msg_cycles_refunded128,
                 msg_cycles_available128,
                 msg_cycles_accept128,
             },
@@ -367,12 +367,17 @@ const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 29] = b"CTS-CM-TOKEN-BALANCE-TRANSFER";
 
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
+pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_MINUTE * 5;
 
+const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
 
-pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_HOUR * 1;
+const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
 
+const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
+const POSITIONS_TOKEN_SUBACCOUNT: &[u8; 32] = &[5; 32];
 
+const CYCLES_DUST_COLLECTION_THRESHOLD: Cycles = 10_000_000_000; // 0.01T-cycles
 
 
 
@@ -476,7 +481,6 @@ fn new_id(cm_data_id_counter: &mut u128) -> u128 {
     id
 }
 
-
 async fn token_transfer(q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, CallError> {
     let r = icrc1_transfer(localkey::cell::get(&TOKEN_LEDGER_ID), q).await;
     if let Ok(ref tr) = r {
@@ -494,26 +498,7 @@ async fn token_balance(count_id: IcrcId) -> Result<Tokens, CallError> {
     icrc1_balance_of(localkey::cell::get(&TOKEN_LEDGER_ID), count_id).await
 }
 
-
-async fn check_usable_user_token_balance(user_id: &Principal) -> Result<Tokens, CallError> {
-    let user_cm_token_ledger_balance: Tokens = {
-        token_balance(
-            IcrcId{
-                owner: ic_cdk::api::id(),
-                subaccount: Some(principal_token_subaccount(user_id))
-            }
-        ).await?  
-    };
-    
-    let user_token_balance_in_the_lock: Tokens = with(&CM_DATA, |cm_data| check_user_token_balance_in_the_lock(cm_data, user_id));
-    
-    Ok(user_cm_token_ledger_balance.saturating_sub(user_token_balance_in_the_lock))
-    
-}
-
-
-// it is possible that this can be more than the user's-subaccount token ledger balance. cause when doing the payouts it logs the payout transfer success after the payout batch is done.
-// always use saturating_sub when subtracting this output from the user's-subaccount token ledger balance.
+/*
 fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -> Tokens {
     cm_data.token_positions.iter()
         .filter(|token_position: &&TokenPosition| { token_position.positor == *user_id })
@@ -535,8 +520,42 @@ fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -
             cummulator
         })
 }
+*/
+#[derive(CandidType, Deserialize)]
+pub enum PutUserTokenBalanceLockError {
+    UserIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
+    CyclesMarketIsBusy,
+}
+impl From<PutUserTokenBalanceLockError> for SellTokensError {
+    fn from(x: PutUserTokenBalanceLockError) -> SellTokensError {
+        match x {
+            PutUserTokenBalanceLockError::UserIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance => SellTokensError::CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
+            PutUserTokenBalanceLockError::CyclesMarketIsBusy => SellTokensError::CyclesMarketIsBusy,
+        }
+    }
+}
+impl From<PutUserTokenBalanceLockError> for TransferTokenBalanceError {
+    fn from(x: PutUserTokenBalanceLockError) -> TransferTokenBalanceError {
+        match x {
+            PutUserTokenBalanceLockError::UserIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance => TransferTokenBalanceError::CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
+            PutUserTokenBalanceLockError::CyclesMarketIsBusy => TransferTokenBalanceError::CyclesMarketIsBusy,
+        }
+    }
+}
 
-
+fn put_user_token_balance_lock(cm_data: &mut CMData, user: Principal) -> Result<(), PutUserTokenBalanceLockError> {
+    if cm_data.mid_call_user_token_balance_locks.contains(&user) {
+        return Err(PutUserTokenBalanceLockError::UserIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance);
+    }
+    if cm_data.mid_call_user_token_balance_locks.len() >= MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS {
+        return Err(PutUserTokenBalanceLockError::CyclesMarketIsBusy);
+    }
+    cm_data.mid_call_user_token_balance_locks.insert(user);
+    Ok(())
+}
+fn remove_user_token_balance_lock(cm_data: &mut CMData, user: Principal) {
+    cm_data.mid_call_user_token_balance_locks.remove(&user);
+}
 
 
 
@@ -678,14 +697,25 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
         trap("Caller must be a CTS-CYCLES-BANK.");
     }
     
-    with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_sell_call(cm_data); });
+    let m = with_mut(&CM_DATA, |cm_data| { 
+        put_user_token_balance_lock(cm_data, caller)?;
+        plus_one_ongoing_sell_call(cm_data);
+        Ok(())
+    });
+    if let Err(e) = m {
+        reply::<(SellTokensResult,)>((Err(e),));
+        return;
+    };
     
     let sell_tokens_result: SellTokensResult = sell_tokens_(caller, q).await;
     
-    with_mut(&CM_DATA, |cm_data| { minus_one_ongoing_sell_call(cm_data); });
+    with_mut(&CM_DATA, |cm_data| {
+        remove_user_token_balance_lock(cm_data, caller);
+        minus_one_ongoing_sell_call(cm_data); 
+    });
     
     reply::<(SellTokensResult,)>((sell_tokens_result,));
-    
+
     ic_cdk::spawn(do_payouts());
     return;   
 }
@@ -693,10 +723,6 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
 
 
 async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult {
-    // make sure it is a canister
-    if caller.as_slice().len() == 29 {
-        trap("Caller must be a canister");
-    }
     
     if q.tokens < minimum_tokens_match() {
         return Err(SellTokensError::SellTokensMinimum(minimum_tokens_match()));
@@ -707,38 +733,6 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
     }    
     
     with_mut(&CM_DATA, |cm_data| {
-        if cm_data.mid_call_user_token_balance_locks.contains(&caller) {
-            return Err(SellTokensError::CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance);
-        }
-        if cm_data.mid_call_user_token_balance_locks.len() >= MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS {
-            return Err(SellTokensError::CyclesMarketIsBusy);
-        }
-        cm_data.mid_call_user_token_balance_locks.insert(caller);
-        Ok(())
-    })?;    
-        
-    // check token balance and make sure to unlock the user on returns after here 
-    
-    let usable_user_token_balance: Tokens = {
-        match check_usable_user_token_balance(&caller).await {
-            Ok(t) => t,
-            Err(e) => {
-                with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&caller); });
-                return Err(SellTokensError::CheckUserCyclesMarketTokenLedgerBalanceError(e));        
-            }
-        }
-    };
-    
-    if usable_user_token_balance < q.tokens {
-        with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&caller); });
-        return Err(SellTokensError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance });
-    }
-    
-    
-        
-        
-    let r: SellTokensResult = with_mut(&CM_DATA, |cm_data| {
-        
         if cm_data.token_positions.len().saturating_add(cm_data.ongoing_sell_calls as usize) >= MAX_TOKEN_POSITIONS.saturating_sub(10)
         || MAX_VOID_TOKEN_POSITIONS
             .saturating_sub(cm_data.void_token_positions.len())
@@ -747,6 +741,34 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
             // check for a bump? 30/90-days of positions without matches get cancel/void. 
             return Err(SellTokensError::CyclesMarketIsBusy);
         }
+        Ok(())
+    })?;    
+    
+    // transfer token balance into the main-count 
+    // change this to an icrc2_transfer_from when sns leder plements icrc2
+    match token_transfer(
+        TokenTransferArg{
+            memo: None,
+            amount: q.tokens.into(),
+            fee: q.posit_transfer_ledger_fee.map(|n| n.into()),
+            from_subaccount: Some(principal_token_subaccount(&caller)),
+            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_TOKEN_SUBACCOUNT)},
+            created_at_time: None,
+        }
+    ).await {
+        Ok(transfer_result) => match transfer_result {
+            Ok(_block_id) => {}
+            Err(transfer_error) => {
+                return Err(SellTokensError::CollectTokensForThePositionLedgerTransferError(transfer_error));
+            }
+        }
+        Err(call_error) => {
+            return Err(SellTokensError::CollectTokensForThePositionLedgerTransferCallError(call_error));        
+        }
+    }
+    // must be success afner the token transfer.
+    
+    Ok(with_mut(&CM_DATA, |cm_data| {
         
         let token_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
     
@@ -777,14 +799,10 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
             &mut cm_data.candle_counter,
         );
         
-        Ok(SellTokensSuccess{
+        SellTokensSuccess{
             position_id: token_position_id,
-        })
-    });
-    
-    with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&caller); });
-    
-    r
+        }
+    }))    
 }
 
 
@@ -864,7 +882,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         cycles_payout_lock: false,
                         token_payout_lock: false,
                         cycles_payout_data: CyclesPayoutData::new(),
-                        token_payout_data: TokenPayoutData::new_for_a_trade_log()
+                        token_payout_data: TokenPayoutData::new()
                     }
                 );
                 
@@ -875,7 +893,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                     let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
                     matcher_void_positions.insert(
                         matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
-                        matcher_position.into_void_position_type(Some(PositionTerminationCause::Fill))
+                        matcher_position.into_void_position_type(PositionTerminationCause::Fill)
                     );
                     matcher_position_is_void = true;
                 }    
@@ -890,7 +908,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                     };
                     matchee_void_positions.insert(
                         position_for_the_void_void_positions_insertion_i,
-                        position_for_the_void.into_void_position_type(Some(PositionTerminationCause::Fill))
+                        position_for_the_void.into_void_position_type(PositionTerminationCause::Fill)
                     );
                 } else if matchee_position.current_position_available_cycles_per_token_rate() != matchee_position_vailable_rate_before_trade { 
                     match_trades(
@@ -945,7 +963,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
 
 
 
-
+/*
 #[derive(CandidType, Deserialize)]
 pub struct ViewTokenLockQuest {
     principal_id: Principal,
@@ -955,7 +973,7 @@ pub struct ViewTokenLockQuest {
 pub fn view_token_lock(q: ViewTokenLockQuest) -> Tokens {
     with(&CM_DATA, |cm_data| { check_user_token_balance_in_the_lock(cm_data, &q.principal_id) })
 }
-
+*/
 
 
 
@@ -987,7 +1005,7 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             let cycles_position_for_the_void_void_cycles_positions_insertion_i: usize = cm_data.void_cycles_positions.binary_search_by_key(&cycles_position_for_the_void.id, |vcp| { vcp.position_id }).unwrap_err();
             cm_data.void_cycles_positions.insert(
                 cycles_position_for_the_void_void_cycles_positions_insertion_i,
-                cycles_position_for_the_void.into_void_position_type(Some(PositionTerminationCause::UserCallVoidPosition))
+                cycles_position_for_the_void.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
             );
             Ok(())
         } else if let Ok(token_position_i) = cm_data.token_positions.binary_search_by_key(&q.position_id, |token_position| { token_position.id }) {
@@ -1001,7 +1019,7 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
             let token_position_for_the_void_void_token_positions_insertion_i: usize = cm_data.void_token_positions.binary_search_by_key(&token_position_for_the_void.id, |vip| { vip.position_id }).unwrap_err();
             cm_data.void_token_positions.insert(
                 token_position_for_the_void_void_token_positions_insertion_i,
-                token_position_for_the_void.into_void_position_type(Some(PositionTerminationCause::UserCallVoidPosition))
+                token_position_for_the_void.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
             );
             Ok(())
         } else {
@@ -1031,39 +1049,10 @@ pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) { // -> Transf
     
 async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
 
-    match with_mut(&CM_DATA, |cm_data| {
-        if cm_data.mid_call_user_token_balance_locks.len() >= MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS {
-            return Err(TransferTokenBalanceError::CyclesMarketIsBusy);
-        }
-        if cm_data.mid_call_user_token_balance_locks.contains(&user_id) {
-            return Err(TransferTokenBalanceError::CallerIsInTheMiddleOfACreateTokenPositionOrPurchaseCyclesPositionOrTransferTokenBalanceCall);
-        }
-        cm_data.mid_call_user_token_balance_locks.insert(user_id);
-        Ok(())
-    }) {
-        Ok(()) => {},
-        Err(transfer_token_balance_error) => {
-            return Err(transfer_token_balance_error);
-        }
-    }
-    
-    // check token balance and make sure to unlock the user on returns after here 
-    
-    let usable_user_token_balance: Tokens = {
-        match check_usable_user_token_balance(&user_id).await {
-            Ok(t) => t,
-            Err(e) => {
-                with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-                return Err(TransferTokenBalanceError::CheckUserCyclesMarketTokenLedgerBalanceCallError(e));
-            }
-        }
-    };    
-  
-    if usable_user_token_balance < q.tokens.saturating_add(q.token_fee) {
-        with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
-        return Err(TransferTokenBalanceError::UserTokenBalanceTooLow{ user_token_balance: usable_user_token_balance });          
-    }
-
+    with_mut(&CM_DATA, |cm_data| {
+        put_user_token_balance_lock(cm_data, user_id)?;
+        Ok::<(), TransferTokenBalanceError>(())
+    })?;
     
     let token_transfer_result = token_transfer(
         TokenTransferArg {
@@ -1076,7 +1065,9 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
         }   
     ).await;
     
-    with_mut(&CM_DATA, |cm_data| { cm_data.mid_call_user_token_balance_locks.remove(&user_id); });
+    with_mut(&CM_DATA, |cm_data| { 
+        remove_user_token_balance_lock(cm_data, user_id); 
+    });
 
     match token_transfer_result {
         Ok(token_transfer_result) => match token_transfer_result {
@@ -1248,7 +1239,8 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
 
 
 // -----------
-// view pending trades for a position
+// view trades in the trade_logs list
+// these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
 #[query(manual_reply = true)]
 pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
     with_mut(&CM_DATA, |cm_data| {
@@ -1270,7 +1262,7 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
                 .rev()
                 .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE)
                 .collect::<Vec<&TradeLog>>()
-                .iter()
+                .into_iter()
                 .rev()
                 .map(|tl| {
                     let mut v = Vec::new();
@@ -1294,16 +1286,26 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
 #[query(manual_reply = true)]
 pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
     fn d<T: CurrentPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, current_positions: &Vec<T>) -> Box<dyn Iterator<Item=PositionLog> + '_> {
-        Box::new(current_positions[
-            ..
-            match q.opt_start_before_id {
-                None => current_positions.len(),
-                Some(start_before_id) => current_positions.binary_search_by_key(&start_before_id, |p| p.id()).unwrap_or_else(|i| i)
-            }
-        ]
+        let start_before_i = match q.opt_start_before_id {
+            None => current_positions.len(),
+            Some(start_before_id) => current_positions.binary_search_by_key(&start_before_id, |p| p.id()).unwrap_or_else(|i| i)
+        };
+        let mut iter: Box<dyn DoubleEndedIterator<Item=PositionLog>> 
+        = Box::new(
+            current_positions[..start_before_i]
             .iter()
-            .filter(move |p| p.positor() == q.index_key.unwrap_or(p.positor()))
-            .map(|p| p.as_stable_memory_position_log(None)))
+            .map(|p| p.as_stable_memory_position_log(None))
+            .rev());
+        if let Some(index_key) = q.index_key {
+            iter = Box::new(iter.filter(move |pl| pl.positor == index_key));
+        }
+        Box::new(
+            iter
+                .take((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                .collect::<Vec<PositionLog>>()
+                .into_iter()
+                .rev()
+        )
     }
     with(&CM_DATA, |cm_data| {
         let mut v: Vec<PositionLog> = d(q.clone(), &cm_data.cycles_positions).chain(d(q, &cm_data.token_positions)).collect();
@@ -1319,8 +1321,48 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
 }
 
 
-
-// ------
+// extra byte for if the void-position-payout is complete
+// positions pending a void-position-payout and/or update-storage-logs-performance
+#[query(manual_reply = true)]
+pub fn view_void_positions_pending(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+    fn d<VoidPositionType: VoidPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, void_positions: &Vec<VoidPositionType>) -> Box<dyn Iterator<Item=(&PositionLog, bool/*is_payout_complete*/)> + '_> {
+        let start_before_i = match q.opt_start_before_id {
+            None => void_positions.len(),
+            Some(start_before_id) => void_positions.binary_search_by_key(&start_before_id, |p| p.position_id()).unwrap_or_else(|i| i)
+        };
+        let mut iter: Box<dyn DoubleEndedIterator<Item=(&PositionLog, bool)>> 
+        = Box::new(
+            void_positions[..start_before_i]
+            .iter()
+            .map(|vp| (&(vp.update_storage_position_data().update_storage_position_log), vp.payout_data().is_complete()))
+            .rev());
+        if let Some(index_key) = q.index_key {
+            iter = Box::new(iter.filter(move |(pl, _)| pl.positor == index_key));
+        }
+        Box::new(
+            iter
+                .take((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                .collect::<Vec<(&PositionLog, bool)>>()
+                .into_iter()
+                .rev()
+        )
+    }
+    with(&CM_DATA, |cm_data| {
+        let mut v: Vec<(&PositionLog, bool)> = d(q.clone(), &cm_data.void_cycles_positions).chain(d(q, &cm_data.void_token_positions)).collect();
+        v.sort_by_key(|(pl, _)| pl.id);
+        v.drain(..v.len().saturating_sub((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE));
+        let logs_b: Vec<Vec<u8>> = {
+            v.into_iter()
+            .map(|(pl, is_payout_complete)| { 
+                let mut v = pl.stable_memory_serialize();
+                v.push(is_payout_complete as u8);
+                v
+            })
+            .collect()
+        };
+        reply_raw(&logs_b.concat());
+    })
+}
 
 // only the logs, does not return current positions data
 #[query(manual_reply = true)]

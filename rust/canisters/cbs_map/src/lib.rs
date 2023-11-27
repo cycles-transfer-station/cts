@@ -82,7 +82,7 @@ impl CBSMData {
 const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
 
-const MAX_USERS: usize = 20_000; 
+const MAX_USERS: usize = 30_000; 
 
 const VIEW_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
 

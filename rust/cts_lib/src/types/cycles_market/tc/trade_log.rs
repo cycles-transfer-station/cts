@@ -15,7 +15,7 @@ use super::{PositionId};
 
 
 
-pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 223; 
+pub const STABLE_MEMORY_SERIALIZE_SIZE: usize = 225; 
 
 pub fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
     u128::from_be_bytes(log_b[18..34].try_into().unwrap())

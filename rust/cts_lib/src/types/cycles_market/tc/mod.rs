@@ -32,6 +32,7 @@ pub struct BuyTokensQuest {
 pub struct SellTokensQuest {
     pub tokens: Tokens,
     pub cycles_per_token_rate: CyclesPerToken,
+    pub posit_transfer_ledger_fee: Option<Tokens>,
 }
 
 
@@ -61,8 +62,8 @@ pub enum SellTokensError {
     RateCannotBeZero,
     CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
     CyclesMarketIsBusy,
-    CheckUserCyclesMarketTokenLedgerBalanceError(CallError),
-    UserTokenBalanceTooLow{ user_token_balance: Tokens },
+    CollectTokensForThePositionLedgerTransferCallError(CallError),
+    CollectTokensForThePositionLedgerTransferError(TokenTransferError)
 }
 
 
@@ -107,9 +108,7 @@ pub struct TransferTokenBalanceQuest {
 #[derive(CandidType, Deserialize)]
 pub enum TransferTokenBalanceError {
     CyclesMarketIsBusy,
-    CallerIsInTheMiddleOfACreateTokenPositionOrPurchaseCyclesPositionOrTransferTokenBalanceCall,
-    CheckUserCyclesMarketTokenLedgerBalanceCallError((u32, String)),
-    UserTokenBalanceTooLow{ user_token_balance: Tokens },
+    CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
     TokenTransferCallError((u32, String)),
     TokenTransferError(TokenTransferError)
 }
@@ -141,8 +140,8 @@ pub struct CMCyclesPositionPurchasePositorMessageQuest {
     pub cycles_purchase: Cycles,
     pub cycles_position_cycles_per_token_rate: CyclesPerToken,
     pub token_payment: Tokens,
-    pub token_transfer_block_height: BlockId,
-    pub token_transfer_timestamp_nanos: u128,
+    pub token_transfer_block_height: Option<BlockId>, // Option::None for the dust-collection.
+    pub token_ledger_transfer_fee: Tokens,
 }
 
 #[derive(CandidType, Serialize, Deserialize)]
@@ -176,8 +175,8 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
     pub cycles_payment: Cycles,
     pub token_position_cycles_per_token_rate: CyclesPerToken,
     pub token_purchase: Tokens,
-    pub token_transfer_block_height: BlockId,
-    pub token_transfer_timestamp_nanos: u128,
+    pub token_transfer_block_height: Option<BlockId>, // Option::None for the dust-collection.
+    pub token_ledger_transfer_fee: Tokens,
 }
 
 
