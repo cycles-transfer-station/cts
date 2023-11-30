@@ -86,7 +86,6 @@ async fn _do_payouts() {
             void_positions: &mut Vec<VoidPosition>, 
             do_payout: F,
             update_storage_positions_yes_or_no: bool,
-            trade_logs: &VecDeque<TradeLog>,
         ) 
         -> 
         (
@@ -114,10 +113,7 @@ async fn _do_payouts() {
                 
                 if update_storage_positions_yes_or_no == true
                 && update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE
-                && trade_logs.iter().any(|tl| { 
-                    [&tl.position_id_matcher, &tl.position_id_matchee].contains(&&vp.position_id()) == true 
-                    && tl.can_move_into_the_stable_memory_for_the_long_term_storage() == false
-                }) == false
+                && vp.payout_data().is_complete() == true // make sure the payout is complete before updating the storage-position-log. // the void-position-payout updates the position-log dust_collection and void_token_position_payout_ledger_transfer_fee fields.  
                 && vp.update_storage_position_data().status == false 
                 && vp.update_storage_position_data().lock == false {
                     vp.update_storage_position_data_mut().lock = true;
@@ -136,10 +132,10 @@ async fn _do_payouts() {
         let update_storage_positions_yes_or_no: bool = with(&POSITIONS_STORAGE_DATA, |positions_storage_data| { !positions_storage_data.storage_flush_lock }); 
         
         (void_cycles_positions_cycles_payouts_chunk, void_cycles_positions_update_storage_positions_chunk) 
-            = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout, update_storage_positions_yes_or_no, &cm_data.trade_logs);
+            = void_positions_payouts(&mut cm_data.void_cycles_positions, do_cycles_payout, update_storage_positions_yes_or_no);
         
         (void_token_positions_token_payouts_chunk, void_token_positions_update_storage_positions_chunk) 
-            = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no, &cm_data.trade_logs);
+            = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no);
                         
         if void_cycles_positions_update_storage_positions_chunk.len() > 0 
         || void_token_positions_update_storage_positions_chunk.len()  > 0 {
@@ -250,6 +246,9 @@ async fn _do_payouts() {
                     *vp.payout_lock() = false;
                     handle_payout_output(vp.payout_data_mut(), do_payout_output);
                     vp.update_storage_position_data_mut().update_storage_position_log.void_position_payout_dust_collection = vp.payout_data().dust_collection();     
+                    if let Some(ledger_transfer_fee) = vp.payout_data().token_payout_ledger_transfer_fee() {
+                        vp.update_storage_position_data_mut().update_storage_position_log.void_token_position_payout_ledger_transfer_fee = ledger_transfer_fee as u64;                        
+                    } 
                 }
             );
         }

@@ -36,6 +36,7 @@ pub struct PositionLog {
     pub creation_timestamp_nanos: u128,
     pub position_termination: Option<PositionTerminationData>,
     pub void_position_payout_dust_collection: bool,
+    pub void_token_position_payout_ledger_transfer_fee: u64, // in the use for the token-positions.
 }
 
 
@@ -62,6 +63,7 @@ impl StorageLogTrait for PositionLog {
             s[162] = data.cause.ser();
         }        
         s[163] = self.void_position_payout_dust_collection as u8;
+        s[164..172].copy_from_slice(&self.void_token_position_payout_ledger_transfer_fee.to_be_bytes());
         s.to_vec()
     }  
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
@@ -255,6 +257,7 @@ impl CurrentPositionTrait for CyclesPosition {
                 }
             }),
             void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.
+            void_token_position_payout_ledger_transfer_fee: 0, // this field is not used for the cycles-positions.
         }
     }
 
@@ -368,7 +371,8 @@ impl CurrentPositionTrait for TokenPosition {
                     cause: c
                 }
             }),
-            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.            
+            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.   
+            void_token_position_payout_ledger_transfer_fee: 0, // this field is update when a void-token-position-payout is done.                    
         }
     }
 
@@ -401,6 +405,7 @@ fn find_current_position_available_rate(
 pub trait PayoutDataTrait {
     fn is_complete(&self) -> bool;
     fn dust_collection(&self) -> bool;
+    fn token_payout_ledger_transfer_fee(&self) -> Option<Tokens>; // Some(ledger_transfer_fee) if this is a TokenPayoutData and if the transfer is complete
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -426,6 +431,7 @@ impl PayoutDataTrait for CyclesPayoutData {
         }
         false
     }
+    fn token_payout_ledger_transfer_fee(&self) -> Option<Tokens> { None }
 }
 
 
@@ -468,6 +474,9 @@ impl PayoutDataTrait for TokenPayoutData {
             }
         }
         false
+    }
+    fn token_payout_ledger_transfer_fee(&self) -> Option<Tokens> {
+        self.token_transfer.as_ref().map(|ttd| ttd.ledger_transfer_fee)
     }
 }
 
