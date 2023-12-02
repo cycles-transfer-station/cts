@@ -60,6 +60,12 @@ pub mod canister_code {
     }
 
     impl CanisterCode {
+        pub fn new(m: Vec<u8>) -> Self {
+            Self {
+                module_hash: crate::tools::sha256(&m),
+                module: m
+            }
+        }
         pub fn empty() -> Self {
             Self {
                 module_hash: [0u8; 32],
@@ -249,6 +255,25 @@ pub mod cycles_bank {
         pub start_with_user_cycles_balance: Cycles,
     }
     
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum CBTradeCyclesError {
+        MemoryIsFull,
+        CyclesBalanceTooLow{ cycles_balance: Cycles },
+        CMTradeCyclesCallError((u32, String)),
+        CMTradeCyclesCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+    }
+    
+    pub type CBTradeCyclesResult = Result<cm::tc::BuyTokensResult, CBTradeCyclesError>;
+    
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum CBTradeTokensError {
+        MemoryIsFull,
+        CMTradeTokensCallError(CallError),
+        CMTradeTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
+    }
+    
+    pub type CBTradeTokensResult = Result<cm::tc::SellTokensResult, CBTradeTokensError>;
+
 }
 
 
@@ -256,8 +281,68 @@ pub mod cycles_bank {
 
 
 pub mod cycles_market;
+pub use cycles_market as cm;
 
 
+
+pub mod http_request{
+    use super::*;
+    use serde_bytes::ByteBuf;
+    use candid::Nat;
+    
+    #[derive(Clone, Debug, CandidType, Deserialize)]
+    pub struct HttpRequest {
+        pub method: String,
+        pub url: String,
+        pub headers: Vec<(String, String)>,
+        #[serde(with = "serde_bytes")]
+        pub body: Vec<u8>,
+    }
+    
+    #[derive(Clone, Debug, CandidType)]
+    pub struct HttpResponse<'a> {
+        pub status_code: u16,
+        pub headers: Vec<(&'a str, &'a str)>,
+        pub body: &'a ByteBuf,
+        pub streaming_strategy: Option<StreamStrategy<'a>>,
+    }
+    
+
+    candid::define_function!(pub StreamCallback : (StreamCallbackTokenBackwards) -> (StreamCallbackHttpResponse) query);
+    
+    #[derive(Clone, Debug, CandidType)]
+    pub enum StreamStrategy<'a> {
+        Callback { callback: StreamCallback, token: StreamCallbackToken<'a>},
+    }
+    
+    #[derive(Clone, Debug, CandidType, Deserialize)]
+    pub struct StreamCallbackToken<'a> {
+        pub key: &'a str,
+        pub content_encoding: &'a str,
+        pub index: Nat,
+        // We don't care about the sha, we just want to be backward compatible.
+        pub sha256: Option<[u8; 32]>,
+    }
+    
+    #[derive(Clone, Debug, CandidType, Deserialize)]
+    pub struct StreamCallbackTokenBackwards {
+        pub key: String,
+        pub content_encoding: String,
+        pub index: Nat,
+        // We don't care about the sha, we just want to be backward compatible.
+        pub sha256: Option<[u8; 32]>,
+    }
+    
+    #[derive(Clone, Debug, CandidType)]
+    pub struct StreamCallbackHttpResponse<'a> {
+        pub body: &'a ByteBuf,
+        pub token: Option<StreamCallbackToken<'a>>,
+    }
+    
+    
+    
+        
+}
 
 
 

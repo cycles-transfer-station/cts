@@ -5,6 +5,7 @@ use cts_lib::{
     tools::{
         localkey::refcell::{with},
     },
+    types::http_request::*,
 };
 
 use serde::Serialize;
@@ -22,56 +23,6 @@ pub struct File {
 }
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
-
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct HttpRequest {
-    pub method: String,
-    pub url: String,
-    pub headers: Vec<(String, String)>,
-    #[serde(with = "serde_bytes")]
-    pub body: Vec<u8>,
-}
-
-#[derive(Clone, Debug, CandidType)]
-pub struct HttpResponse<'a> {
-    pub status_code: u16,
-    pub headers: Vec<(&'a str, &'a str)>,
-    pub body: &'a ByteBuf,
-    pub streaming_strategy: Option<StreamStrategy<'a>>,
-}
-
-candid::define_function!(pub StreamCallback : (StreamCallbackTokenBackwards) -> (StreamCallbackHttpResponse) query);
-
-#[derive(Clone, Debug, CandidType)]
-pub enum StreamStrategy<'a> {
-    Callback { callback: StreamCallback, token: StreamCallbackToken<'a>},
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct StreamCallbackToken<'a> {
-    pub key: &'a str,
-    pub content_encoding: &'a str,
-    pub index: Nat,
-    // We don't care about the sha, we just want to be backward compatible.
-    pub sha256: Option<[u8; 32]>,
-}
-
-#[derive(Clone, Debug, CandidType, Deserialize)]
-pub struct StreamCallbackTokenBackwards {
-    pub key: String,
-    pub content_encoding: String,
-    pub index: Nat,
-    // We don't care about the sha, we just want to be backward compatible.
-    pub sha256: Option<[u8; 32]>,
-}
-
-#[derive(Clone, Debug, CandidType)]
-pub struct StreamCallbackHttpResponse<'a> {
-    pub body: &'a ByteBuf,
-    pub token: Option<StreamCallbackToken<'a>>,
-}
-
 
 
 

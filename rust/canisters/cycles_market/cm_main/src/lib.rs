@@ -37,7 +37,6 @@ use cts_lib::{
         call_error_as_u32_and_string,
     },
     consts::{MiB, TRILLION},
-    icrc::Tokens,
 };
 use canister_tools::{self, MemoryId};
 
@@ -65,7 +64,7 @@ struct TradeContractData {
 #[derive(Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
-    trade_contracts: Vec<(Icrc1TokenTradeContract, TradeContractData)>,
+    trade_contracts: Vec<(TradeContractIdAndLedgerId, TradeContractData)>,
     tc_canister_code: CanisterCode,
     trades_storage_canister_code: CanisterCode,
     positions_storage_canister_code: CanisterCode,
@@ -98,10 +97,6 @@ thread_local! {
 }
 
 
-#[derive(CandidType, Deserialize)]
-struct CMMainInit {
-    cts_id: Principal,
-}
 
 #[init]
 fn init(cm_main_init: CMMainInit) {
@@ -128,13 +123,6 @@ fn post_upgrade() {
 // ----------------- UPLOAD-CANISTER-CODE --------------------
 
 
-#[derive(CandidType, Deserialize)]
-pub enum MarketCanisterType {
-    TradeContract,
-    PositionsStorage,
-    TradesStorage,
-}
-
 #[update]
 pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canister_type: MarketCanisterType) {
     caller_is_controller_gaurd(&caller());
@@ -157,17 +145,6 @@ pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canis
 
 
 
-#[derive(CandidType, Deserialize)]
-pub struct ControllerIsInTheMiddleOfADifferentCall{
-    kind: ControllerIsInTheMiddleOfADifferentCallKind,
-    must_call_continue: bool
-}
-#[derive(CandidType, Deserialize)]
-pub enum ControllerIsInTheMiddleOfADifferentCallKind {
-    ControllerCreateIcrc1TokenTradeContract
-}
-
-
 
 // --------
 
@@ -182,29 +159,6 @@ pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
 }
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
-pub struct ControllerCreateIcrc1TokenTradeContractQuest {
-    icrc1_ledger_id: Principal,
-    icrc1_ledger_transfer_fee: Tokens,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ControllerCreateIcrc1TokenTradeContractSuccess {
-    trade_contract_canister_id: Principal,
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum ControllerCreateIcrc1TokenTradeContractError {
-    ControllerIsInTheMiddleOfADifferentCall(ControllerIsInTheMiddleOfADifferentCall),
-    CreateCanisterIcrc1TokenTradeContractCallError(CallError),
-    MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError),
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
-    TCInitCandidEncodeError(String),
-    InstallCodeIcrc1TokenTradeContractCallError(CallError),
-}
 
 
 
@@ -217,7 +171,7 @@ fn unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mu
 
 
 #[update]
-pub async fn controller_create_icrc1token_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) 
+pub async fn controller_create_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError> {
 
     caller_is_controller_gaurd(&caller());
@@ -330,7 +284,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
         data.controller_create_icrc1token_trade_contract_mid_call_data = None;
         data.trade_contracts.push(
             (
-                Icrc1TokenTradeContract {
+                TradeContractIdAndLedgerId {
                     icrc1_ledger_canister_id: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                     trade_contract_canister_id: mid_call_data.icrc1token_trade_contract_canister_id.as_ref().unwrap().clone(),
                 },
@@ -353,7 +307,7 @@ pub enum ContinueControllerCreateIcrc1TokenTradeContractError {
 }
 
 #[update]
-pub async fn continue_controller_create_icrc1token_trade_contract() 
+pub async fn continue_controller_create_trade_contract() 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ContinueControllerCreateIcrc1TokenTradeContractError> {
     
     caller_is_controller_gaurd(&caller());
@@ -400,7 +354,7 @@ async fn continue_controller_create_icrc1token_trade_contract_()
 #[query(manual_reply = true)]
 pub fn view_icrc1_token_trade_contracts() {
     with(&CM_MAIN_DATA, |cm_main_data| {
-        reply::<(&Vec<(Icrc1TokenTradeContract, TradeContractData)>,)>((&(cm_main_data.trade_contracts),));
+        reply::<(&Vec<(TradeContractIdAndLedgerId, TradeContractData)>,)>((&(cm_main_data.trade_contracts),));
     });
 }
 

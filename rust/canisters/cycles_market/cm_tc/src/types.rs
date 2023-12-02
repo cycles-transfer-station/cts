@@ -10,7 +10,6 @@ pub type VoidTokenPositionId = PositionId;
 
 
 
-
 pub trait StorageLogTrait {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
     const STABLE_MEMORY_SERIALIZE_SIZE: usize;
@@ -19,24 +18,6 @@ pub trait StorageLogTrait {
     fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128;
     type LogIndexKey: CandidType + for<'a> Deserialize<'a> + PartialEq + Eq;
     fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey>;
-}
-
-
-// this one goes into the PositionLog storage but gets updated for the position-termination.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PositionLog {
-    pub id: PositionId,
-    pub positor: Principal,
-    pub quest: CreatePositionQuestLog,
-    pub position_kind: PositionKind,
-    pub mainder_position_quantity: u128, // if cycles position this is: Cycles, if Token position this is: Tokens.
-    pub fill_quantity: u128, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
-    pub fill_average_rate: CyclesPerToken,
-    pub payouts_fees_sum: u128, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
-    pub creation_timestamp_nanos: u128,
-    pub position_termination: Option<PositionTerminationData>,
-    pub void_position_payout_dust_collection: bool,
-    pub void_token_position_payout_ledger_transfer_fee: u64, // in the use for the token-positions.
 }
 
 
@@ -60,7 +41,12 @@ impl StorageLogTrait for PositionLog {
         if let Some(ref data) = self.position_termination { 
             s[153] = 1; 
             s[154..162].copy_from_slice(&(data.timestamp_nanos as u64).to_be_bytes());
-            s[162] = data.cause.ser();
+            s[162] = match data.cause {
+                PositionTerminationCause::Fill => 0,
+                PositionTerminationCause::Bump => 1,
+                PositionTerminationCause::TimePass => 2,
+                PositionTerminationCause::UserCallVoidPosition => 3
+            };
         }        
         s[163] = self.void_position_payout_dust_collection as u8;
         s[164..172].copy_from_slice(&self.void_token_position_payout_ledger_transfer_fee.to_be_bytes());
@@ -75,52 +61,7 @@ impl StorageLogTrait for PositionLog {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct CreatePositionQuestLog {
-    pub quantity: u128,
-    pub cycles_per_token_rate: CyclesPerToken
-}
 
-impl From<BuyTokensQuest> for CreatePositionQuestLog {
-    fn from(q: BuyTokensQuest) -> Self {
-        Self {
-            quantity: q.cycles,
-            cycles_per_token_rate: q.cycles_per_token_rate 
-        }
-    }
-}
-impl From<SellTokensQuest> for CreatePositionQuestLog {
-    fn from(q: SellTokensQuest) -> Self {
-        Self {
-            quantity: q.tokens,
-            cycles_per_token_rate: q.cycles_per_token_rate 
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct PositionTerminationData {
-    pub timestamp_nanos: u128,
-    pub cause: PositionTerminationCause
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub enum PositionTerminationCause {
-    Fill, // the position is fill[ed]. position.amount < minimum_token_match()
-    Bump, // the position got bumped
-    TimePass, // expired
-    UserCallVoidPosition, // the user cancelled the position by calling void_position
-}
-impl PositionTerminationCause {
-    pub fn ser(&self) -> u8 {
-        match self {
-            PositionTerminationCause::Fill => 0,
-            PositionTerminationCause::Bump => 1,
-            PositionTerminationCause::TimePass => 2,
-            PositionTerminationCause::UserCallVoidPosition => 3
-        }
-    }
-}
 
 
 

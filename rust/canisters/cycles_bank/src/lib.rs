@@ -43,11 +43,11 @@ use cts_lib::{
         CyclesTransferMemo,
         CallError,
         cycles_bank::{
-            CyclesBankInit,
+            *,
         },
         cycles_market::{
             tc as cm_icrc1token_trade_contract,
-            cm_main::Icrc1TokenTradeContract,
+            cm_main::TradeContractIdAndLedgerId,
         },
         cts::{
             LengthenMembershipQuest,
@@ -206,7 +206,7 @@ struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
     cycles_transfers_out: Vec<CyclesTransferOut>,
-    cm_trade_contracts: HashMap<Icrc1TokenTradeContract, CMTradeContractLogs>,
+    cm_trade_contracts: HashMap<TradeContractIdAndLedgerId, CMTradeContractLogs>,
 }
 
 impl UserData {
@@ -304,7 +304,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
         cb_data.user_data.cycles_balance = user_canister_init.start_with_user_cycles_balance;
     });
    
-    localkey::cell::set(&MEMORY_SIZE_AT_THE_START, core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES);
+    localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
 }
 
@@ -316,7 +316,7 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     
-    localkey::cell::set(&MEMORY_SIZE_AT_THE_START, core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES);
+    localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
     canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
 }
@@ -368,7 +368,7 @@ fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
         + 
         cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + CYCLES_TRANSFER_MEMO_MAX_SIZE/*for the cycles-transfer-memo-heap-size*/ + CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH/*for the possible-call-error-string-heap-size*/ )
         +
-        cb_data.user_data.cm_trade_contracts.len() * std::mem::size_of::<Icrc1TokenTradeContract>()
+        cb_data.user_data.cm_trade_contracts.len() * std::mem::size_of::<TradeContractIdAndLedgerId>()
         +
         cb_data.user_data.cm_trade_contracts
             .values()
@@ -436,6 +436,11 @@ fn maintenance_check() {
     if localkey::cell::get(&STOP_CALLS) == true { 
         trap("Maintenance, try soon."); 
     }
+}
+
+// returns number of wasm pages;
+fn wasm32_main_memory_size() -> usize {
+    core::arch::wasm32::memory_size(0)
 }
 
 
@@ -966,18 +971,8 @@ async fn complete_burn_icp_mint_cycles_() -> Result<BurnIcpMintCyclesSuccess, Co
 
 use cts_lib::types::cycles_market::tc as cm_tc;
 
-#[derive(CandidType)]
-pub enum CBTradeCyclesError {
-    MemoryIsFull,
-    CyclesBalanceTooLow{ cycles_balance: Cycles },
-    CMTradeCyclesCallError((u32, String)),
-    CMTradeCyclesCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-}
-
-type CBTradeCyclesResult = Result<cm_tc::BuyTokensResult, CBTradeCyclesError>;
-
 #[update]
-pub async fn cm_trade_cycles(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::BuyTokensQuest) -> CBTradeCyclesResult {
+pub async fn cm_trade_cycles(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_tc::BuyTokensQuest) -> CBTradeCyclesResult {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1052,17 +1047,8 @@ pub async fn cm_trade_cycles(icrc1token_trade_contract: Icrc1TokenTradeContract,
 
 
 
-#[derive(CandidType)]
-pub enum CBTradeTokensError {
-    MemoryIsFull,
-    CMTradeTokensCallError(CallError),
-    CMTradeTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-}
-
-type CBTradeTokensResult = Result<cm_tc::SellTokensResult, CBTradeTokensError>;
-
 #[update]
-pub async fn cm_trade_tokens(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_tc::SellTokensQuest) -> CBTradeTokensResult {
+pub async fn cm_trade_tokens(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_tc::SellTokensQuest) -> CBTradeTokensResult {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1127,7 +1113,7 @@ pub enum UserCMVoidPositionError {
 
 
 #[update]
-pub async fn cm_void_position(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_icrc1token_trade_contract::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+pub async fn cm_void_position(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_icrc1token_trade_contract::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1169,7 +1155,7 @@ pub enum UserCMTransferTokenBalanceError {
 }
 
 #[update]
-pub async fn cm_transfer_token_balance(icrc1token_trade_contract: Icrc1TokenTradeContract, q: cm_icrc1token_trade_contract::TransferTokenBalanceQuest) -> Result<BlockId, UserCMTransferTokenBalanceError> {
+pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_icrc1token_trade_contract::TransferTokenBalanceQuest) -> Result<BlockId, UserCMTransferTokenBalanceError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1226,10 +1212,10 @@ fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData)
     let caller: Principal = caller();
     cb_data.user_data.cm_trade_contracts
         .iter_mut()
-        .find(|(k,_v): &(&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
+        .find(|(k,_v): &(&TradeContractIdAndLedgerId, &mut CMTradeContractLogs)| {
             k.trade_contract_canister_id == caller
         })
-        .map(|(_k,v): (&Icrc1TokenTradeContract, &mut CMTradeContractLogs)| {
+        .map(|(_k,v): (&TradeContractIdAndLedgerId, &mut CMTradeContractLogs)| {
             v
         })
         .unwrap_or_else(|| trap("Unknown caller"))
@@ -1382,7 +1368,7 @@ pub struct UserUCMetrics<'a> {
     cycles_transfers_id_counter: u128,
     cycles_transfers_in_len: u128,
     cycles_transfers_out_len: u128,
-    cm_trade_contracts: Vec<&'a Icrc1TokenTradeContract>,   
+    cm_trade_contracts: Vec<&'a TradeContractIdAndLedgerId>,   
     cts_cb_authorization: bool, 
 }
 
@@ -1416,6 +1402,13 @@ pub fn metrics() { //-> UserUCMetrics {
 
 
 
+#[query]
+pub fn cycles_balance() -> Cycles {
+    if caller() != user_id() && caller() != cts_id() {
+        trap("Caller must be the user for this method.");
+    }
+    with(&CB_DATA, |cb_data| cb_data.user_data.cycles_balance)
+}
 
 
 // --------------------------------------------------------
@@ -1569,7 +1562,7 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
             canister_cycles_balance: canister_balance128(),
             cycles_balance: cb_data.user_data.cycles_balance,
             ctsfuel_balance: ctsfuel_balance(cb_data),
-            wasm_memory_size_bytes: ( core::arch::wasm32::memory_size(0)*WASM_PAGE_SIZE_BYTES ) as u128,
+            wasm_memory_size_bytes: ( wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES ) as u128,
             stable_memory_size_bytes: ic_cdk::api::stable::stable64_size() * WASM_PAGE_SIZE_BYTES as u64,
             storage_size_mib: cb_data.storage_size_mib,
             lifetime_termination_timestamp_seconds: cb_data.lifetime_termination_timestamp_seconds,

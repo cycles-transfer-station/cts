@@ -37,9 +37,9 @@ pub struct SellTokensQuest {
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum BuyTokensError {
-    BuyTokensMinimumTokens(Tokens),
+    MinimumPosition{ minimum_cycles: Cycles, minimum_tokens: Tokens},
     RateCannotBeZero,
     MsgCyclesTooLow,
     CyclesMarketIsBusy,
@@ -56,9 +56,9 @@ pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum SellTokensError {
-    SellTokensMinimum(Tokens),
+    MinimumPosition{ minimum_cycles: Cycles, minimum_tokens: Tokens},
     RateCannotBeZero,
     CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
     CyclesMarketIsBusy,
@@ -195,7 +195,7 @@ pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem:
 
 
 
-#[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum PositionKind {
     Cycles,
     Token

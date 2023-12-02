@@ -42,7 +42,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{*, tc::{*, trade_log}},
+        cycles_market::{*, tc::{*, trade_log, position_log::{self, *}}},
         cts::UserAndCB,
     },
     management_canister,
@@ -379,6 +379,7 @@ const POSITIONS_TOKEN_SUBACCOUNT: &[u8; 32] = &[5; 32];
 
 const CYCLES_DUST_COLLECTION_THRESHOLD: Cycles = 10_000_000_000; // 0.01T-cycles
 
+const MINIMUM_CYCLES_POSITION: Cycles = 1 * TRILLION; 
 
 
 
@@ -577,6 +578,7 @@ pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (
     
     let caller: Principal = caller();
     
+    #[cfg(not(feature = "without-cts-cb-auth-check"))]
     if is_cts_cb_authorization_valid(
         localkey::cell::get(&CTS_ID),        
         UserAndCB{
@@ -604,8 +606,8 @@ pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (
 
 fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
     
-    if q.cycles / q.cycles_per_token_rate < minimum_tokens_match() {
-        return Err(BuyTokensError::BuyTokensMinimumTokens(minimum_tokens_match()));
+    if q.cycles < MINIMUM_CYCLES_POSITION || q.cycles / q.cycles_per_token_rate < minimum_tokens_match() {
+        return Err(BuyTokensError::MinimumPosition{ minimum_cycles: MINIMUM_CYCLES_POSITION, minimum_tokens: minimum_tokens_match()});
     }    
     
     if q.cycles_per_token_rate == 0 {
@@ -686,6 +688,7 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
  
     let caller: Principal = caller();
     
+    #[cfg(not(feature = "without-cts-cb-auth-check"))]    
     if is_cts_cb_authorization_valid(
         localkey::cell::get(&CTS_ID),
         UserAndCB{
@@ -724,8 +727,8 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
 
 async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult {
     
-    if q.tokens < minimum_tokens_match() {
-        return Err(SellTokensError::SellTokensMinimum(minimum_tokens_match()));
+    if q.tokens < minimum_tokens_match() || q.tokens * q.cycles_per_token_rate < MINIMUM_CYCLES_POSITION {
+        return Err(SellTokensError::MinimumPosition{ minimum_cycles: MINIMUM_CYCLES_POSITION, minimum_tokens: minimum_tokens_match()});
     }
     
     if q.cycles_per_token_rate == 0 {
@@ -1396,12 +1399,6 @@ pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as Storage
 
 
 
-#[derive(CandidType, Deserialize, Clone)]
-pub struct ViewStorageLogsQuest<LogIndexKey> {
-    opt_start_before_id: Option<u128>,
-    index_key: Option<LogIndexKey>
-}
-
 
 fn view_storage_logs_<'a, LogType: StorageLogTrait>(
     q: ViewStorageLogsQuest<LogType::LogIndexKey>, 
@@ -1614,11 +1611,32 @@ pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQues
 }
 
 
-
-
-
-
-
+/*
+#[query]
+pub fn http_request(q: HttpRequest) -> HttpResponse {
+    
+    let path: &str = q.url.split("?").next().unwrap();
+    
+    if &path == "/logs" {
+        return with(&CM_DATA, |cm_data| {
+            HttpResponse {
+                status_code: 200,
+                headers: vec![], 
+                body: ByteBuf::new(
+                    format!("{:?}", cm_data).to_bytes()
+                ),
+            }
+        });
+    }
+    
+    return HttpResponse {
+        status_code: 404,
+        headers: vec![],
+        body: &ByteBuf::from(vec![]),
+        streaming_strategy: None
+    };
+}
+*/
 
 
 

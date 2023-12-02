@@ -27,6 +27,7 @@ use cts_lib::{
             CyclesBankInit,
         },
         cts::{LengthenMembershipQuest, UserAndCB},
+        http_request::*,
     },
     management_canister::{
         ManagementCanisterInstallCodeMode,
@@ -153,13 +154,7 @@ use frontcode::{
     File, 
     Files, 
     FilesHashes, 
-    HttpRequest, 
-    HttpResponse, 
     create_opt_stream_callback_token,
-    StreamStrategy,
-    StreamCallback,
-    StreamCallbackTokenBackwards,
-    StreamCallbackHttpResponse,
 };
 
 mod certification;
