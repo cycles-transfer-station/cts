@@ -19,5 +19,11 @@ ic-stable-structures = { workspace = true }
 ic-cdk-timers = "0.1.2"
 canister-tools = { workspace = true }
 
+[dev-dependencies]
+pocket-ic = "2.0.1"
+ic-icrc1-ledger = { git = "https://github.com/dfinity/ic", rev = "1131bd8d04cc57447e4ef1fd143ddaad4e06a811" }
+icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "1131bd8d04cc57447e4ef1fd143ddaad4e06a811" }
+bincode = "1.3.3"
+
 [features]
 without-cts-cb-auth-check = []

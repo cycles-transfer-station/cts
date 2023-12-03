@@ -42,7 +42,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{*, tc::{*, trade_log, position_log::{self, *}}},
+        cycles_market::{*, tc::{*, trade_log, position_log}},
         cts::UserAndCB,
     },
     management_canister,
@@ -56,7 +56,7 @@ use cts_lib::{
         TokenTransferArg,
         BlockId,
         icrc1_transfer,
-        icrc1_balance_of
+        //icrc1_balance_of
     },
     ic_cdk::{
         self,
@@ -111,6 +111,9 @@ use flush_logs::FlushLogsStorageError;
 
 mod candle_counter;
 use candle_counter::CandleCounter;
+
+#[cfg(test)]
+mod tests;
 
 // ---------------
 
@@ -208,8 +211,8 @@ pub struct StorageCanisterData {
 
 
 const STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION: MemoryId = MemoryId::new(0);
-const TRADES_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
-const POSITIONS_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(2);
+const POSITIONS_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(1);
+const TRADES_STORAGE_DATA_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 
 
@@ -466,6 +469,8 @@ fn canister_inspect_message() {
         "local_put_ic_root_key",        
     ].contains(&&method_name()[..]) {
         accept_message();
+    } else if method_name().starts_with("controller_") && is_controller(&caller()) == true {
+        accept_message();
     } else {
         trap(&format!("this method {} must be call by a canister or a query call.", method_name()));
     }
@@ -494,34 +499,12 @@ async fn token_transfer(q: TokenTransferArg) -> Result<Result<BlockId, TokenTran
     } 
     r
 }
-
+/*
 async fn token_balance(count_id: IcrcId) -> Result<Tokens, CallError> {
     icrc1_balance_of(localkey::cell::get(&TOKEN_LEDGER_ID), count_id).await
 }
-
-/*
-fn check_user_token_balance_in_the_lock(cm_data: &CMData, user_id: &Principal) -> Tokens {
-    cm_data.token_positions.iter()
-        .filter(|token_position: &&TokenPosition| { token_position.positor == *user_id })
-        .fold(0, |cummulator: Tokens, user_token_position: &TokenPosition| {
-            cummulator + user_token_position.current_position_tokens
-        })
-    +
-    cm_data.trade_logs.iter()
-        .filter(|tl: &&TradeLog| {
-            tl.token_payout_payor() == *user_id && ( tl.token_payout_data.token_transfer.is_none() || tl.token_payout_data.token_fee_collection.is_none() )
-        })
-        .fold(0, |mut cummulator: Tokens, tl: &TradeLog| {
-            if tl.token_payout_data.token_transfer.is_none() {
-                cummulator += tl.tokens.saturating_sub(tl.tokens_payout_fee);//.saturating_sub(tl.token_ledger_transfer_fee()); 
-            }
-            if tl.token_payout_data.token_fee_collection.is_none() {
-                cummulator += tl.tokens_payout_fee;//.saturating_add(tl.token_ledger_transfer_fee())
-            }
-            cummulator
-        })
-}
 */
+
 #[derive(CandidType, Deserialize)]
 pub enum PutUserTokenBalanceLockError {
     UserIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,

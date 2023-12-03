@@ -63,8 +63,11 @@ pub extern "C" fn do_payouts_public_method() {
         trap("caller without the authorization.");
     }
     
-    ic_cdk::spawn(_do_payouts());
-    reply::<()>(());
+    ic_cdk::spawn(async {
+        _do_payouts().await;
+        reply::<()>(());    
+    });
+    
 }
 
 

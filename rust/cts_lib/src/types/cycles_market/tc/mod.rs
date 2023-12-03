@@ -22,13 +22,13 @@ pub struct CMIcrc1TokenTradeContractInit {
 
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct BuyTokensQuest {
     pub cycles: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct SellTokensQuest {
     pub tokens: Tokens,
     pub cycles_per_token_rate: CyclesPerToken,
@@ -140,7 +140,7 @@ pub struct CMCyclesPositionPurchasePositorMessageQuest {
     pub cycles_purchase: Cycles,
     pub cycles_position_cycles_per_token_rate: CyclesPerToken,
     pub token_payment: Tokens,
-    pub token_transfer_block_height: Option<BlockId>, // Option::None for the dust-collection.
+    pub token_transfer_dust_collection: bool,
     pub token_ledger_transfer_fee: Tokens,
 }
 
@@ -175,7 +175,7 @@ pub struct CMTokenPositionPurchasePurchaserMessageQuest {
     pub cycles_payment: Cycles,
     pub token_position_cycles_per_token_rate: CyclesPerToken,
     pub token_purchase: Tokens,
-    pub token_transfer_block_height: Option<BlockId>, // Option::None for the dust-collection.
+    pub token_transfer_dust_collection: bool,
     pub token_ledger_transfer_fee: Tokens,
 }
 

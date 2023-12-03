@@ -45,10 +45,10 @@ pub async fn do_token_payout<T: TokenPayoutTrait>(q: T) -> TokenPayoutData {
                 }
             ).await {
                 Ok(token_transfer_result) => match token_transfer_result {
-                    Ok(block_height) => {
+                    Ok(_block_height) => {
                         token_payout_data.token_transfer = Some(
                             TokenTransferData{
-                                block_height: Some(block_height),
+                                did_transfer: true,
                                 ledger_transfer_fee: ledger_transfer_fee,
                             }
                         );
@@ -66,7 +66,7 @@ pub async fn do_token_payout<T: TokenPayoutTrait>(q: T) -> TokenPayoutData {
         } else {
             token_payout_data.token_transfer = Some(
                 TokenTransferData{
-                    block_height: None,
+                    did_transfer: false,
                     ledger_transfer_fee: ledger_transfer_fee,
                 }
             );
