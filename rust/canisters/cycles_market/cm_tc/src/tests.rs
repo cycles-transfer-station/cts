@@ -396,35 +396,35 @@ fn t() {
     let trades_log_storage_data = download_trades_log_storage_data(tc);
     assert_eq!(trades_log_storage_data.storage_buffer.len(), TradeLog::STABLE_MEMORY_SERIALIZE_SIZE);
     let tl_storage_backwards = tl_backwards(&trades_log_storage_data.storage_buffer[..TradeLog::STABLE_MEMORY_SERIALIZE_SIZE]); 
+    let trade_log = TradeLog{
+        position_id_matcher: 1,
+        position_id_matchee: 0,
+        id: 0,
+        matchee_position_positor: cb1,
+        matcher_position_positor: cb2,
+        tokens: trade_tokens,
+        cycles: trade_cycles,
+        cycles_per_token_rate: trade_tokens_rate,
+        matchee_position_kind: PositionKind::Token,
+        timestamp_nanos: tl_storage_backwards.timestamp_nanos,
+        tokens_payout_fee: tokens_payout_fee,
+        cycles_payout_fee: cycles_payout_fee,
+        cycles_payout_lock: false,
+        token_payout_lock: false,
+        cycles_payout_data: CyclesPayoutData{
+            cycles_payout: Some(true)
+        },
+        token_payout_data: TokenPayoutData{
+            token_transfer: Some(TokenTransferData{
+                did_transfer: true,
+                ledger_transfer_fee: LEDGER_TRANSFER_FEE,
+            })
+        }
+    };
     assert_eq!(
         tl_storage_backwards,
-        TradeLog{
-            position_id_matcher: 1,
-            position_id_matchee: 0,
-            id: 0,
-            matchee_position_positor: cb1,
-            matcher_position_positor: cb2,
-            tokens: trade_tokens,
-            cycles: trade_cycles,
-            cycles_per_token_rate: trade_tokens_rate,
-            matchee_position_kind: PositionKind::Token,
-            timestamp_nanos: tl_storage_backwards.timestamp_nanos,
-            tokens_payout_fee: tokens_payout_fee,
-            cycles_payout_fee: cycles_payout_fee,
-            cycles_payout_lock: false,
-            token_payout_lock: false,
-            cycles_payout_data: CyclesPayoutData{
-                cycles_payout: Some(true)
-            },
-            token_payout_data: TokenPayoutData{
-                token_transfer: Some(TokenTransferData{
-                    did_transfer: true,
-                    ledger_transfer_fee: LEDGER_TRANSFER_FEE,
-                })
-            }
-        }  
+        trade_log,
     );
-    
     
     let void_positions_pending_b: Vec<u8> = pic.query_call(
         tc,
@@ -469,7 +469,361 @@ fn t() {
         cycles_position_position_log
     );
     
+    // check for the trade-log through the view-trades-storage method. check that trade_log is the same.
+    
+    let view_trades_storage_logs: Vec<u8> = pic.query_call(
+        tc,
+        Principal::anonymous(),
+        "view_position_purchases_logs",
+        candid::encode_one(
+            ViewStorageLogsQuest::<Principal>{
+                opt_start_before_id: None,
+                index_key: None
+            }
+        ).unwrap(),
+    ).unwrap().unwrap();
+
+    assert_eq!(
+        view_trades_storage_logs.len(),
+        TradeLog::STABLE_MEMORY_SERIALIZE_SIZE,
+    );
+    assert_eq!(
+        tl_backwards(&view_trades_storage_logs[..]),
+        trade_log,
+    );
+    
+    
+    for i in 1_u128..100_u128 {
+        println!("{i}");
+        let (transfer_cb_sponse,): (CallResult<Vec<u8>>,) = call_candid_as(
+            &pic,
+            cb1,
+            RawEffectivePrincipal::None,
+            p1,
+            "transfer_icrc1",
+            (
+                ledger,
+                candid::encode_one(
+                    TransferArg{
+                        from_subaccount: None,
+                        to: tc_cb1_subaccount,
+                        fee: Some(LEDGER_TRANSFER_FEE.into()),
+                        created_at_time: None,
+                        memo: None,
+                        amount: (trade_tokens + LEDGER_TRANSFER_FEE).into(),
+                    }
+                ).unwrap()
+            )
+        ).unwrap();
+        let block = candid::decode_one::<Result<Nat, TransferError>>(&transfer_cb_sponse.unwrap()).unwrap().unwrap();
+        //println!("transfer at block: {block}");
+        
+        assert!(icrc1_balance(&pic, ledger, &tc_cb1_subaccount).unwrap() == trade_tokens + LEDGER_TRANSFER_FEE);
+        
+        let (cb_trade_tokens_result,): (CBTradeTokensResult,) = call_candid_as(
+            &pic,
+            cb1,
+            RawEffectivePrincipal::None,
+            p1,
+            "cm_trade_tokens",
+            (
+                tc_id_and_ledger_id, 
+                SellTokensQuest{
+                    tokens: trade_tokens,
+                    cycles_per_token_rate: trade_tokens_rate,
+                    posit_transfer_ledger_fee: Some(LEDGER_TRANSFER_FEE),
+                }
+            )
+        ).unwrap();
+        
+        let token_position_id: u128 = cb_trade_tokens_result.unwrap().unwrap().position_id;
+        //println!("token_position_id: {token_position_id}");
+        assert_eq!(token_position_id, i*2);
+        
+        assert!(icrc1_balance(&pic, ledger, &tc_cb1_subaccount).unwrap() == 0);
+        assert!(icrc1_balance(&pic, ledger, &tc_token_positions_subaccount).unwrap() == trade_tokens + tokens_payout_fee * i);
+        assert_eq!(
+            icrc1_balance(&pic, ledger, &Account{owner: cb1, subaccount: None}).unwrap(), 
+            CB_START_TOKEN_BALANCE - ((trade_tokens + (LEDGER_TRANSFER_FEE * 2))*(i+1)) 
+        );
+        
+        let download_cm_data = |tc: Principal| {
+            create_and_download_state_snapshot::<CMData>(&pic, cm_main, tc, 0)
+        };
+        let download_positions_log_storage_data = |tc: Principal| {
+            create_and_download_state_snapshot::<LogStorageData>(&pic, cm_main, tc, 1)  
+        };
+        let download_trades_log_storage_data = |tc: Principal| {
+            create_and_download_state_snapshot::<LogStorageData>(&pic, cm_main, tc, 2)  
+        };
+        
+        let cm_data: CMData = download_cm_data(tc);
+            
+        assert_eq!(
+            cm_data.token_positions[0],
+            TokenPosition{
+                id: i * 2,
+                positor: cb1,
+                quest: SellTokensQuest{
+                    tokens: trade_tokens,
+                    cycles_per_token_rate: trade_tokens_rate,
+                    posit_transfer_ledger_fee: Some(LEDGER_TRANSFER_FEE),
+                },
+                current_position_tokens: trade_tokens,
+                purchases_rates_times_token_quantities_sum: 0,
+                cycles_payouts_fees_sum: 0,
+                timestamp_nanos: cm_data.token_positions[0].timestamp_nanos,
+            }
+        );
+        assert_eq!(cm_data.token_positions.len(), 1);
+        assert_eq!(cm_data.cycles_positions.len(), 0);
+        assert_eq!(cm_data.void_token_positions.len(), 0);
+        assert_eq!(cm_data.void_cycles_positions.len(), 0);
+            
+                    
+        // make a trade. 
+        let trade_cycles: Cycles = trade_tokens * trade_tokens_rate; 
+        let (cb_trade_cycles_result,): (CBTradeCyclesResult,) = call_candid_as(
+            &pic,
+            cb2,
+            RawEffectivePrincipal::None,
+            p2,
+            "cm_trade_cycles",
+            (
+                tc_id_and_ledger_id, 
+                BuyTokensQuest{
+                    cycles: trade_cycles,
+                    cycles_per_token_rate: trade_tokens_rate,
+                }
+            )
+        ).unwrap();
+        let cycles_position_id = cb_trade_cycles_result.unwrap().unwrap().position_id;
+        //println!("cycles_position_id: {cycles_position_id}");
+        assert_eq!(cycles_position_id, i*2+1);
+        
+        let cycles_payout_fee = trade_cycles / 10_000 * 50;    
+        let tokens_payout_fee = cycles_payout_fee / trade_tokens_rate;
+        assert_eq!(
+            icrc1_balance(&pic, ledger, &tc_token_positions_subaccount).unwrap(), 
+            tokens_payout_fee + tokens_payout_fee*i 
+        );
+        assert_eq!(
+            icrc1_balance(&pic, ledger, &Account{owner: cb1, subaccount: None}).unwrap(), 
+            CB_START_TOKEN_BALANCE - ((trade_tokens + (LEDGER_TRANSFER_FEE * 2)) * (i+1))
+        );
+        assert_eq!(
+            icrc1_balance(&pic, ledger, &Account{owner: cb2, subaccount: None}).unwrap(), 
+            CB_START_TOKEN_BALANCE + ((trade_tokens - tokens_payout_fee - LEDGER_TRANSFER_FEE)*(i+1))
+        );
+        assert_eq!(
+            cb_cycles_balance(&pic, cb1, p1),
+            CB_START_CYCLES_BALANCE + ((trade_cycles - cycles_payout_fee)*(i+1))
+        );   
+        assert_eq!(
+            cb_cycles_balance(&pic, cb2, p2),
+            CB_START_CYCLES_BALANCE - (trade_cycles*(i+1))
+        );   
+        
+        let cm_data: CMData = download_cm_data(tc);
+        
+        let token_position_position_log = PositionLog{
+            id: i*2,
+            positor: cb1,
+            quest: CreatePositionQuestLog {
+                quantity: trade_tokens,
+                cycles_per_token_rate: trade_tokens_rate,
+            },
+            position_kind: PositionKind::Token,
+            mainder_position_quantity: 0, 
+            fill_quantity: trade_cycles, 
+            fill_average_rate: trade_tokens_rate,
+            payouts_fees_sum: cycles_payout_fee,
+            creation_timestamp_nanos: cm_data.void_token_positions[0].update_storage_position_data.update_storage_position_log.creation_timestamp_nanos,
+            position_termination: Some(
+                PositionTerminationData{
+                    timestamp_nanos: cm_data.void_token_positions[0].update_storage_position_data.update_storage_position_log.position_termination.as_ref().unwrap().timestamp_nanos,
+                    cause: PositionTerminationCause::Fill,
+                }
+            ),
+            void_position_payout_dust_collection: true,
+            void_token_position_payout_ledger_transfer_fee: LEDGER_TRANSFER_FEE as u64,    
+        };
+        
+        let cycles_position_position_log = PositionLog{
+            id: i*2 + 1,
+            positor: cb2,
+            quest: CreatePositionQuestLog {
+                quantity: trade_cycles,
+                cycles_per_token_rate: trade_tokens_rate,
+            },
+            position_kind: PositionKind::Cycles,
+            mainder_position_quantity: 0, 
+            fill_quantity: trade_tokens, 
+            fill_average_rate: trade_tokens_rate,
+            payouts_fees_sum: tokens_payout_fee,
+            creation_timestamp_nanos: cm_data.void_cycles_positions[0].update_storage_position_data.update_storage_position_log.creation_timestamp_nanos,
+            position_termination: Some(
+                PositionTerminationData{
+                    timestamp_nanos: cm_data.void_cycles_positions[0].update_storage_position_data.update_storage_position_log.position_termination.as_ref().unwrap().timestamp_nanos,
+                    cause: PositionTerminationCause::Fill,
+                }
+            ),
+            void_position_payout_dust_collection: true,
+            void_token_position_payout_ledger_transfer_fee: 0,    
+        };
+        
+        assert_eq!(
+            cm_data.void_token_positions[0],
+            VoidTokenPosition{
+                position_id: i*2,
+                tokens: 0,
+                positor: cb1,
+                token_payout_lock: false,
+                token_payout_data: TokenPayoutData{
+                    token_transfer: Some(TokenTransferData{
+                        did_transfer: false,
+                        ledger_transfer_fee: LEDGER_TRANSFER_FEE
+                    })
+                },
+                timestamp_nanos: cm_data.void_token_positions[0].timestamp_nanos,
+                update_storage_position_data: VPUpdateStoragePositionData{
+                    lock: false,
+                    status: false,
+                    update_storage_position_log: token_position_position_log.clone(), 
+                },    
+            }
+        );
+        
+        assert_eq!(
+            cm_data.void_cycles_positions[0],
+            VoidCyclesPosition{
+                position_id: i*2 + 1,
+                cycles: 0,
+                positor: cb2,
+                cycles_payout_lock: false,
+                cycles_payout_data: CyclesPayoutData{
+                    cycles_payout: Some(false),
+                },
+                timestamp_nanos: cm_data.void_cycles_positions[0].timestamp_nanos,
+                update_storage_position_data: VPUpdateStoragePositionData{
+                    lock: false,
+                    status: false,
+                    update_storage_position_log: cycles_position_position_log.clone()
+                },    
+            }
+        );
+        
+        assert_eq!(cm_data.trade_logs.len(), 0);
+        assert_eq!(cm_data.token_positions.len(), 0);
+        assert_eq!(cm_data.cycles_positions.len(), 0);
+        assert_eq!(cm_data.void_token_positions.len(), 1);
+        assert_eq!(cm_data.void_cycles_positions.len(), 1);
+        
+        let trades_log_storage_data = download_trades_log_storage_data(tc);
+        assert_eq!(trades_log_storage_data.storage_buffer.len(), TradeLog::STABLE_MEMORY_SERIALIZE_SIZE * (i+1) as usize);
+        let tl_storage_backwards = tl_backwards(&trades_log_storage_data.storage_buffer[trades_log_storage_data.storage_buffer.len() - TradeLog::STABLE_MEMORY_SERIALIZE_SIZE..]); 
+        let trade_log = TradeLog{
+            position_id_matcher: i*2 + 1,
+            position_id_matchee: i*2,
+            id: i,
+            matchee_position_positor: cb1,
+            matcher_position_positor: cb2,
+            tokens: trade_tokens,
+            cycles: trade_cycles,
+            cycles_per_token_rate: trade_tokens_rate,
+            matchee_position_kind: PositionKind::Token,
+            timestamp_nanos: tl_storage_backwards.timestamp_nanos,
+            tokens_payout_fee: tokens_payout_fee,
+            cycles_payout_fee: cycles_payout_fee,
+            cycles_payout_lock: false,
+            token_payout_lock: false,
+            cycles_payout_data: CyclesPayoutData{
+                cycles_payout: Some(true)
+            },
+            token_payout_data: TokenPayoutData{
+                token_transfer: Some(TokenTransferData{
+                    did_transfer: true,
+                    ledger_transfer_fee: LEDGER_TRANSFER_FEE,
+                })
+            }
+        };
+        assert_eq!(
+            tl_storage_backwards,
+            trade_log,
+        );
+        
+        let void_positions_pending_b: Vec<u8> = pic.query_call(
+            tc,
+            Principal::anonymous(),
+            "view_void_positions_pending",
+            candid::encode_one(
+                ViewStorageLogsQuest::<Principal>{
+                    opt_start_before_id: None,
+                    index_key: None
+                }
+            ).unwrap(),
+        ).unwrap().unwrap();
+        
+        assert_eq!(
+            void_positions_pending_b.len(),
+            (PositionLog::STABLE_MEMORY_SERIALIZE_SIZE + 1) * 2,
+        );
+        
+        let (pl_1, pl_1_payout_status): (PositionLog, bool) = (
+            pl_backwards(&void_positions_pending_b[0..PositionLog::STABLE_MEMORY_SERIALIZE_SIZE]),
+            void_positions_pending_b[PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] == 1,
+        );
+        
+        assert_eq!(pl_1_payout_status, true);
+        assert_eq!(
+            pl_1,
+            token_position_position_log,
+        );
+        
+        let (pl_2, pl_2_payout_status): (PositionLog, bool) = (
+            pl_backwards(&void_positions_pending_b[
+                PositionLog::STABLE_MEMORY_SERIALIZE_SIZE + 1
+                ..
+                PositionLog::STABLE_MEMORY_SERIALIZE_SIZE + 1 + PositionLog::STABLE_MEMORY_SERIALIZE_SIZE
+            ]),
+            void_positions_pending_b[(PositionLog::STABLE_MEMORY_SERIALIZE_SIZE * 2) + 1] == 1,
+        );
+        
+        assert_eq!(pl_2_payout_status, true);
+        assert_eq!(
+            pl_2,
+            cycles_position_position_log
+        );
+        
+        // check for the trade-log through the view-trades-storage method. check that trade_log is the same.
+        
+        let view_trades_storage_logs: Vec<u8> = pic.query_call(
+            tc,
+            Principal::anonymous(),
+            "view_position_purchases_logs",
+            candid::encode_one(
+                ViewStorageLogsQuest::<Principal>{
+                    opt_start_before_id: None,
+                    index_key: None
+                }
+            ).unwrap(),
+        ).unwrap().unwrap();
+    
+        assert_eq!(
+            view_trades_storage_logs.len(),
+            TradeLog::STABLE_MEMORY_SERIALIZE_SIZE * (i+1) as usize,
+        );
+        assert_eq!(
+            tl_backwards(&view_trades_storage_logs[view_trades_storage_logs.len() - TradeLog::STABLE_MEMORY_SERIALIZE_SIZE..]),
+            trade_log,
+        )
+        
+    }
+    
+    
 }
+
+
 
 
 
