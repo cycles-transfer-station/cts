@@ -757,8 +757,8 @@ pub fn delete_cycles_transfers_out(delete_cycles_transfers_out_ids: Vec<u128>) {
 // bank-token-methods
 
 
-#[update(manual_reply = true)]
-pub async fn transfer_icrc1(icrc1_ledger: Principal, icrc1_transfer_arg_raw: Vec<u8>) {//-> CallResult<Vec<u8>> {
+#[update]
+pub async fn transfer_icrc1(icrc1_ledger: Principal, icrc1_transfer_arg_raw: Vec<u8>) -> Result<Vec<u8>, CallError> {
     if caller() != user_id() { trap("Caller must be the user"); }
     
     let call_result: CallResult<Vec<u8>> = call_raw128(
@@ -768,7 +768,7 @@ pub async fn transfer_icrc1(icrc1_ledger: Principal, icrc1_transfer_arg_raw: Vec
         0
     ).await;
     
-    reply::<(CallResult<Vec<u8>>,)>((call_result,));
+    call_result.map_err(call_error_as_u32_and_string)
 }
 
 
@@ -825,7 +825,8 @@ pub struct BurnIcpMintCyclesData {
 
 #[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct BurnIcpMintCyclesQuest {
-    burn_icp: IcpTokens,    
+    burn_icp: IcpTokens, 
+    burn_icp_transfer_fee: IcpTokens,   
 }
 
 #[derive(CandidType, Deserialize)]
@@ -876,7 +877,12 @@ pub async fn burn_icp_mint_cycles(q: BurnIcpMintCyclesQuest) -> Result<BurnIcpMi
 async fn burn_icp_mint_cycles_(mut burn_icp_mint_cycles_data: BurnIcpMintCyclesData) -> Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError> {   
     
     if burn_icp_mint_cycles_data.cmc_icp_transfer_block_height.is_none() {
-        match ledger_topup_cycles_cmc_icp_transfer(burn_icp_mint_cycles_data.burn_icp_mint_cycles_quest.burn_icp, None, ic_cdk::api::id()).await {
+        match ledger_topup_cycles_cmc_icp_transfer(
+            burn_icp_mint_cycles_data.burn_icp_mint_cycles_quest.burn_icp, 
+            burn_icp_mint_cycles_data.burn_icp_mint_cycles_quest.burn_icp_transfer_fee,
+            None, 
+            ic_cdk::api::id()
+        ).await {
             Ok(block_height) => { burn_icp_mint_cycles_data.cmc_icp_transfer_block_height = Some(block_height); },
             Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
                 with_mut(&CB_DATA, |cb_data| { cb_data.burn_icp_mint_cycles_mid_call_data = None; });

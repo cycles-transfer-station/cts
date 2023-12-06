@@ -9,6 +9,7 @@ use cts_lib::{
                 call,
                 call_raw,
             },
+            canister_balance128,
         },
         init,
         pre_upgrade,
@@ -87,7 +88,7 @@ impl CMMainData {
 
 
 
-const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 40 * TRILLION;
+const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 70 * TRILLION;
 
 const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
@@ -208,6 +209,12 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError> {
     
     if mid_call_data.icrc1token_trade_contract_canister_id.is_none() {
+        if canister_balance128() < NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES + 20*TRILLION {
+            with_mut(&CM_MAIN_DATA, |data| {
+                data.controller_create_icrc1token_trade_contract_mid_call_data = None;
+            });
+            return Err(ControllerCreateIcrc1TokenTradeContractError::CyclesBalanceTooLow{ cycles_balance: canister_balance128() });
+        }
         match create_canister(
             ManagementCanisterCreateCanisterQuest{
                 settings: Some(ManagementCanisterOptionalCanisterSettings{

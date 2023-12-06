@@ -15,5 +15,8 @@ serde = { workspace = true }
 serde_bytes = { workspace = true }
 icrc-ledger-types = { workspace = true }
 ic-stable-structures = { workspace = true }
-canister_authorizations = { path = "../canister_authorizations" }
+canister_authorizations = { path = "./canister_authorizations" }
 futures = { workspace = true }
+
+[features]
+test = []

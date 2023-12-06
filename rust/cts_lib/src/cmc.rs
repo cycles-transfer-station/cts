@@ -10,7 +10,6 @@ use crate::{
         IcpTransferError,
         MAINNET_LEDGER_CANISTER_ID,
         MAINNET_CYCLES_MINTING_CANISTER_ID,
-        ICP_LEDGER_TRANSFER_DEFAULT_FEE
     },
     types::{CallError, Cycles},
     consts::ICP_LEDGER_TOP_UP_CANISTER_MEMO,
@@ -41,7 +40,7 @@ struct CmcNotifyTopUpCyclesQuest {
     canister_id: Principal,
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug, Clone)]
 pub enum CmcNotifyError {
     Refunded { block_index: Option<IcpBlockHeight>, reason: String },
     InvalidTransaction(String),
@@ -54,21 +53,21 @@ type NotifyTopUpResult = Result<Cycles, CmcNotifyError>;
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum LedgerTopupCyclesCmcIcpTransferError {
     IcpTransferCallError(CallError),
     IcpTransferError(IcpTransferError),
 }
 
 // make a public method to re-try a block-height
-pub async fn ledger_topup_cycles_cmc_icp_transfer(icp: IcpTokens, from_subaccount: Option<IcpIdSub>, topup_canister: Principal) -> Result<IcpBlockHeight, LedgerTopupCyclesCmcIcpTransferError> {
+pub async fn ledger_topup_cycles_cmc_icp_transfer(icp: IcpTokens, icp_transfer_fee: IcpTokens, from_subaccount: Option<IcpIdSub>, topup_canister: Principal) -> Result<IcpBlockHeight, LedgerTopupCyclesCmcIcpTransferError> {
 
     let cmc_icp_transfer_block_height: IcpBlockHeight = match icp_transfer(
         MAINNET_LEDGER_CANISTER_ID,
         IcpTransferArgs {
             memo: ICP_LEDGER_TOP_UP_CANISTER_MEMO,
             amount: icp,                              
-            fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE,
+            fee: icp_transfer_fee,
             from_subaccount: from_subaccount,
             to: IcpId::new(&MAINNET_CYCLES_MINTING_CANISTER_ID, &principal_icp_subaccount(&topup_canister)),
             created_at_time: Some(IcpTimestamp { timestamp_nanos: time_nanos_u64() })
@@ -89,7 +88,7 @@ pub async fn ledger_topup_cycles_cmc_icp_transfer(icp: IcpTokens, from_subaccoun
 }
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum LedgerTopupCyclesCmcNotifyError {
     CmcNotifyTopUpQuestCandidEncodeError(String),
     CmcNotifyCallError(CallError),

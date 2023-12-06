@@ -26,6 +26,7 @@ use cts_lib::{
     consts::{
         MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
+        TRILLION,
     },
     tools::{
         localkey::{
@@ -43,6 +44,7 @@ use cts_lib::{
                 call_raw128,
                 call,
             },
+            canister_balance128,
         }
     },
     ic_ledger_types::{
@@ -117,7 +119,7 @@ pub fn main_cts_icp_id() -> IcpId {  // do once
 
  
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum CheckCurrentXdrPerMyriadPerIcpCmcRateError {
     CmcGetRateCallError((u32, String)),
     CmcGetRateCallSponseCandidError(String),
@@ -172,7 +174,7 @@ pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPe
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum CreateCanisterError {
     CreateCanisterManagementCallQuestCandidError(String),
     CreateCanisterManagementCallSponseCandidError{candid_error: String, candid_bytes: Vec<u8>},
@@ -215,7 +217,7 @@ pub async fn create_canister(optional_canister_settings: Option<ManagementCanist
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum PutNewUserIntoACBSMError {
     CBSMPutNewUserCallFail(Principal, String), // principal of the failiing users-map-canister
     CBSMPutNewUserError(CBSMPutNewUserError),
@@ -268,10 +270,11 @@ pub async fn put_new_user_into_a_cbsm(user_id: Principal, cbsm_user_data: CBSMUs
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum CreateNewCBSMError {
     MaxCBSMapCanisters,
     CreateNewCBSMapLockIsOn,
+    CTSCyclesBalanceTooLow{ cycles_balance: Cycles },
     GetNewCanisterError(CreateCanisterError),
     CBSMapCanisterCodeNotFound,
     InstallCodeCallError(String)
@@ -291,6 +294,10 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
     });
     
     if possible_c.is_none() { 
+        if canister_balance128() < CREATE_CBS_MAP_CANISTER_CYCLES + 20*TRILLION {
+            with_mut(&CTS_DATA, |cts_data| { cts_data.create_new_cbs_map_lock = false; });
+            return Err(CreateNewCBSMError::CTSCyclesBalanceTooLow{ cycles_balance: canister_balance128() });
+        }
         possible_c = match create_canister(
             Some(ManagementCanisterOptionalCanisterSettings{
                 controllers : None,

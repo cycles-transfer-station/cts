@@ -372,9 +372,18 @@ const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_MINUTE * 5;
 
-const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
+#[cfg(not(feature = "test"))]
+pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
 
-const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
+#[cfg(feature = "test")]
+pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 2 * KiB;
+
+#[cfg(not(feature = "test"))]
+pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
+
+#[cfg(feature = "test")]
+pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1 * KiB; 
+
 
 const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
@@ -558,7 +567,7 @@ fn minus_one_ongoing_buy_call(cm_data: &mut CMData) {
 
 #[update(manual_reply = true)]
 pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> BuyTokensResult
-    
+    ic_cdk::print("trade_cycles start");
     let caller: Principal = caller();
     
     #[cfg(not(feature = "without-cts-cb-auth-check"))]
@@ -617,7 +626,7 @@ fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
         }
         
         let cycles_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
-        
+        ic_cdk::print(&format!("creating cycles-position id: {cycles_position_id}"));
         let cycles_position: CyclesPosition = CyclesPosition{
             id: cycles_position_id,
             positor: caller,
@@ -668,7 +677,7 @@ fn minus_one_ongoing_sell_call(cm_data: &mut CMData) {
 
 #[update(manual_reply = true)]
 pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> SellTokensResult
- 
+    ic_cdk::print("trade_tokens start");
     let caller: Principal = caller();
     
     #[cfg(not(feature = "without-cts-cb-auth-check"))]    
@@ -757,7 +766,7 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
     Ok(with_mut(&CM_DATA, |cm_data| {
         
         let token_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
-    
+        ic_cdk::print(&format!("creating token-position id: {token_position_id}"));
         let token_position: TokenPosition = TokenPosition{
             id: token_position_id,
             positor: caller,
@@ -1445,7 +1454,7 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct StorageCanister {
     // The id of the first log in this storage-canister
     first_log_id : u128,

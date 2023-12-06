@@ -197,7 +197,7 @@ pub mod cbs_map {
         pub cts_id: Principal
     }
 
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone)]    
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]    
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
         pub first_membership_creation_timestamp_nanos: u128,
@@ -206,19 +206,19 @@ pub mod cbs_map {
         pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData> // some if canister is uninstalled
     }
     
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone)]
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]
     pub struct CyclesBankTerminationUninstallData {
         pub uninstall_timestamp_nanos: u64,
         pub user_cycles_balance: Cycles,
     }
 
-    #[derive(CandidType,Deserialize)]
+    #[derive(CandidType,Deserialize, Debug)]
     pub enum PutNewUserError {
         CanisterIsFull,
         FoundUser(CBSMUserData)
     }
     
-    #[derive(CandidType, Deserialize)]
+    #[derive(CandidType, Deserialize, Debug)]
     pub enum UpdateUserError {
         UserNotFound
     }

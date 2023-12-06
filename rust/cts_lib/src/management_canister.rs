@@ -78,7 +78,7 @@ pub enum ManagementCanisterCanisterStatusVariant {
     stopped,
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct CanisterIdRecord {
     pub canister_id : Principal
 }

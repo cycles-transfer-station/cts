@@ -49,6 +49,7 @@ pub async fn do_payouts() {
             );       
         },
         Err(call_error) => {
+            ic_cdk::print(&format!("payout error: {:?}", call_error));
             with_mut(&CM_DATA, |cm_data| {
                 cm_data.do_payouts_errors.push(call_error_as_u32_and_string(call_error));
             });

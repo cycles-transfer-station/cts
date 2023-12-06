@@ -7,16 +7,23 @@ use crate::{
 };
 use cm_storage_lib::{FlushQuestForward, FlushResult, FlushError};
 use cts_lib::{
-    types::CallError,
+    types::{CallError, Cycles},
+    consts::TRILLION,
     tools::{
         localkey::refcell::{with,with_mut},
         time_nanos_u64,
         time_nanos,
         call_error_as_u32_and_string,
     },
-    ic_cdk::api::call::{
-        call_raw128,
-        call_with_payment128,
+    ic_cdk::{
+        self, 
+        api::{
+            call::{
+                call_raw128,
+                call_with_payment128,
+            },
+            canister_balance128,
+        }
     }
 };
 use serde::{Serialize, Deserialize};
@@ -52,7 +59,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
     });
     
     if go == true {
-        
+        ic_cdk::print("go for the flush-logs.");
         let storage_canister_id: Principal = {
             match with(&LOG_STORAGE_DATA, |data| { 
                 data.storage_canisters
@@ -66,6 +73,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
                     match create_storage_canister(LOG_STORAGE_DATA).await {
                         Ok(p) => p,
                         Err(e) => {
+                            ic_cdk::print(&format!("create storage canister error: {:?}", e));
                             with_mut(&LOG_STORAGE_DATA, |data| {
                                 data.storage_flush_lock = false;
                                 data.flush_storage_errors.push((FlushLogsStorageError::CreateStorageCanisterError(e), time_nanos_u64()));
@@ -76,6 +84,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
                 }
             }
         };
+        ic_cdk::print(&format!("flush-logs using storage canister id: {storage_canister_id}"));        
         
         let chunk_sizes: Vec<usize>/*vec len is the num_of_chunks*/ = with(&LOG_STORAGE_DATA, |data| {
             let max_chunk_size: usize = {
@@ -118,6 +127,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
                     }
                 }
                 Err(flush_call_error) => {
+                    ic_cdk::print(&format!("flush call error: {:?}", flush_call_error));
                     with_mut(&LOG_STORAGE_DATA, |data| {
                         data.flush_storage_errors.push((FlushLogsStorageError::StorageCanisterCallError(call_error_as_u32_and_string(flush_call_error)), time_nanos_u64()));
                     });
@@ -129,6 +139,8 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
         with_mut(&LOG_STORAGE_DATA, |data| {
             data.storage_flush_lock = false;
         });
+        
+        ic_cdk::print("done with the flush-logs");
     }
 }
 
@@ -136,8 +148,9 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum CreateStorageCanisterError {
+    CyclesBalanceTooLow{ cycles_balance: Cycles },
     CreateCanisterCallError(CallError),
     InstallCodeCandidError(String),
     InstallCodeCallError(CallError),
@@ -150,6 +163,9 @@ async fn create_storage_canister(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'sta
     let canister_id: Principal = match with_mut(&LOG_STORAGE_DATA, |data| { data.create_storage_canister_temp_holder.take() }) {
         Some(canister_id) => canister_id,
         None => {
+            if canister_balance128() < CREATE_STORAGE_CANISTER_CYCLES + 20*TRILLION {
+                return Err(CreateStorageCanisterError::CyclesBalanceTooLow{ cycles_balance: canister_balance128() });
+            }
             match call_with_payment128::<(ManagementCanisterCreateCanisterQuest,), (CanisterIdRecord,)>(
                 Principal::management_canister(),
                 "create_canister",

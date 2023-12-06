@@ -2,7 +2,7 @@
 use candid::{Principal, CandidType, Deserialize};
 use serde::Serialize;
 use crate::{
-    types::{CallError}, 
+    types::{CallError, Cycles}, 
     icrc::Tokens
 };
 
@@ -49,6 +49,7 @@ pub struct ControllerCreateIcrc1TokenTradeContractSuccess {
 #[derive(CandidType, Deserialize, Debug)]
 pub enum ControllerCreateIcrc1TokenTradeContractError {
     ControllerIsInTheMiddleOfADifferentCall(ControllerIsInTheMiddleOfADifferentCall),
+    CyclesBalanceTooLow{ cycles_balance: Cycles },
     CreateCanisterIcrc1TokenTradeContractCallError(CallError),
     MidCallError(ControllerCreateIcrc1TokenTradeContractMidCallError),
 }
