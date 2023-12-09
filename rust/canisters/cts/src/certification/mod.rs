@@ -10,17 +10,14 @@ use cts_lib::{
         sha256,
         localkey::refcell::{with},
     },
-    consts::{
-        NANOS_IN_A_SECOND,
-        SECONDS_IN_A_DAY
-    },
-    ic_cdk::api::{set_certified_data, data_certificate, trap,},
+    ic_cdk::api::{set_certified_data, data_certificate, trap},
 };
 
 use crate::{
     CTSData,
     CTS_DATA,
-       
+    CB_AUTHS_MAX_SIZE,
+    MINIMUM_CB_AUTH_DURATION_NANOS,       
 };
 use serde::Serialize;
 
@@ -39,11 +36,15 @@ const LABEL_CB_AUTHS: &[u8; 3] = b"sig";
 
 
 pub fn put_cb_auth(cb_auths: &mut CBAuths, user_and_cb: UserAndCB) {
+    if cb_auths.len() >= CB_AUTHS_MAX_SIZE {
+        cb_auths.prune_expired(time_nanos_u64(), CB_AUTHS_MAX_SIZE / 2);
+    }   
     cb_auths.put(
         sha256(&CTS_CB_AUTHORIZATIONS_SEED[..]),
         sha256(&user_and_cb.create_cts_cb_authorization_msg()[..]),
-        time_nanos_u64().saturating_add((NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64) 
+        time_nanos_u64().saturating_add(MINIMUM_CB_AUTH_DURATION_NANOS) 
     );
+    //cts_lib::ic_cdk::print(&format!("cb-auths-len after put: {}", cb_auths.len()));
 }
 
 

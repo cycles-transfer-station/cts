@@ -51,7 +51,7 @@ use cts_lib::{
         CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO,
         NANOS_IN_A_SECOND,
         SECONDS_IN_A_DAY,
-        //CTS_LOCAL_ID,
+        CTS_ID,
     },
     tools::{
         sha256,
@@ -201,12 +201,7 @@ impl CTSData {
             users_transfer_icp: HashMap::new(),
             users_lengthen_membership: HashMap::new(),
             users_lengthen_membership_cb_cycles_payment: HashMap::new(),
-            cb_cache: Cache::<Principal, Option<Principal>>::new({
-                #[cfg(not(feature = "test"))]
-                {1400}
-                #[cfg(feature = "test")]
-                {4}
-            })
+            cb_cache: Cache::<Principal, Option<Principal>>::new(CB_CACHE_SIZE),
         }
     }
 }
@@ -251,6 +246,17 @@ const MAX_USERS_LENGTHEN_MEMBERSHIP_CB_CYCLES_PAYMENT: usize = 170;
 
 pub const MINIMUM_CTS_CYCLES_TRANSFER_IN_CYCLES: Cycles = 5_000_000_000;
 
+pub const CB_CACHE_SIZE: usize = {
+    #[cfg(not(feature = "test"))]
+    {1400}
+    #[cfg(feature = "test")]
+    {4}
+};
+
+pub const CB_AUTHS_MAX_SIZE: usize = CB_CACHE_SIZE;
+pub const MINIMUM_CB_AUTH_DURATION_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
+
+
 
 const STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID: MemoryId = MemoryId::new(0);
 
@@ -287,6 +293,11 @@ fn init(cts_init: CTSInit) {
     if NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES {
         trap("NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES");
     }
+    
+    #[cfg(feature = "test")]
+    if ic_cdk::api::id() == CTS_ID {
+        trap("Must be a mainnet build.")
+    }
 } 
 
 
@@ -308,6 +319,11 @@ fn post_upgrade() {
     
     if NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES {
         trap("NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES");
+    }
+    
+    #[cfg(feature = "test")]
+    if ic_cdk::api::id() == CTS_ID {
+        trap("Must be a mainnet build.")
     }
 } 
 
@@ -1196,8 +1212,6 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
 
     with_mut(&CTS_DATA, |cts_data| { 
         cts_data.users_purchase_cycles_bank.remove(&user_id); 
-        
-        // check if need to prune old certifications
         put_cb_auth(&mut cts_data.cb_auths, UserAndCB{ user_id, cb_id: purchase_cycles_bank_data.cycles_bank_canister.as_ref().unwrap().clone() });
         set_root_hash(cts_data);
         
@@ -1219,7 +1233,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum FindCyclesBankError {
     UserIsInTheMiddleOfAPurchaseCyclesBankCall{ must_call_complete: bool },
     FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),
@@ -1272,7 +1286,7 @@ async fn find_cycles_bank_(user_id: &Principal) -> Result<Option<Principal>, Fin
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum SetCBAuthError {
     CBNotFound,
     FindUserInTheCBSMapsError(FindUserInTheCBSMapsError),

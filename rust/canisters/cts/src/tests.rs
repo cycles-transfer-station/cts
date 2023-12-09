@@ -10,9 +10,187 @@ use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, Transfe
 use crate::*;
 
 const LEDGER_TRANSFER_FEE: u128 = 10_000;
+const CMC_RATE: u128 = 55555;
+const ICP_MINTER: Principal = Principal::from_slice(&[1,1,1,1,1]);
+const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
+const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
+const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
+const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
+
+
 
 #[test]
-fn t() {
+fn purchase_cycles_bank_test() {
+    let (pic, cts, cm_main) = cts_setup();
+    let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
+    for i in 0..(CB_CACHE_SIZE * 3) {
+        let user = Principal::from_slice(&(i as u64).to_be_bytes());
+        // test purchase_cycles_bank
+        let cb: Principal = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
+        println!("cb: {}", cb);
+        users_and_cbs.push((user, cb));
+        assert!(
+            pic.cycle_balance(cb)
+            >=
+            NEW_CYCLES_BANK_CREATION_CYCLES - NETWORK_CANISTER_CREATION_FEE_CYCLES - 5_000_000_000/*for the install and managment canister calls*/,
+        );
+        assert_eq!(
+            icrc1_balance(&pic, ICP_LEDGER, &Account{owner:cts,subaccount: None}),
+            ((MEMBERSHIP_COST_CYCLES / CMC_RATE) - (NEW_CYCLES_BANK_CREATION_CYCLES / CMC_RATE)) * (i+1) as u128
+        );
+        assert_eq!(cb_cycles_balance(&pic, cb, user), 0);        
+        pic.advance_time(core::time::Duration::from_nanos(MINIMUM_CB_AUTH_DURATION_NANOS * 2));
+    }
+    
+    for (user,cb) in users_and_cbs.iter() {
+        // test find_cycles_bank
+        let (find_user_cb_r,): (Result<Option<Principal>, FindCyclesBankError>,) = call_candid_as(
+            &pic,
+            cts,
+            RawEffectivePrincipal::None,
+            *user,
+            "find_cycles_bank",
+            ()
+        ).unwrap();
+        let find_user_cb: Principal = find_user_cb_r.unwrap().unwrap();     
+        assert_eq!(*cb, find_user_cb);
+        // test cts-cb-auth
+        let (set_cb_auth_r,): (Result<(), SetCBAuthError>,) = call_candid_as(
+            &pic,
+            cts,
+            RawEffectivePrincipal::None,
+            *user,
+            "set_cb_auth",
+            ()
+        ).unwrap();
+        set_cb_auth_r.unwrap();
+        let (cb_auth,): (Vec<u8>,) = query_candid_as(
+            &pic,
+            cts,
+            *user,
+            "get_cb_auth",
+            (cb,)
+        ).unwrap();
+        local_put_ic_root_key(&pic, cb.clone());
+        let _: () = call_candid_as(
+            &pic,
+            *cb,
+            RawEffectivePrincipal::None,
+            *user,
+            "user_upload_cts_cb_authorization",
+            (cb_auth,)
+        ).unwrap();
+        
+        // check metrics
+    }
+}
+
+#[test]
+fn test_cb_transfer_icrc1() {
+    let (pic, cts, cm_main) = cts_setup();
+    let user = Principal::from_slice(&(0123456789 as u64).to_be_bytes());
+    let cb: Principal = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
+    
+    let cb_canister_cycles_balance = pic.cycle_balance(cb);
+    println!("cb_canister_cycles_balance: {cb_canister_cycles_balance}");
+    mint_icp(&pic, Account{owner: cb,subaccount: None}, 500_000_000_000);
+        
+    for ii in 0..100 {
+        let (tr,): (Result<Vec<u8>, CallError>,) = call_candid_as(
+            &pic,
+            cb,
+            RawEffectivePrincipal::None,
+            user,
+            "transfer_icrc1",
+            (ICP_LEDGER, encode_one(
+                TransferArg{
+                    from_subaccount: None,
+                    to: Account{
+                        owner: user,
+                        subaccount: None
+                    },
+                    fee: Some(LEDGER_TRANSFER_FEE.into()),
+                    created_at_time: None,
+                    memo: Some(ii.into()),
+                    amount: 5.into(),
+                }
+            ).unwrap()),
+        ).unwrap();
+        candid::decode_one::<Result<Nat, TransferError>>(&tr.unwrap()).unwrap().unwrap();
+    }
+    
+    let cb_canister_cycles_balance = pic.cycle_balance(cb);
+    println!("cb_canister_cycles_balance: {cb_canister_cycles_balance}");    
+   
+}
+
+
+
+fn mint_icp(pic: &PocketIc, to: Account, amount: u128) {
+    let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
+        pic,
+        ICP_LEDGER,
+        RawEffectivePrincipal::None,
+        ICP_MINTER,            
+        "icrc1_transfer",
+        (TransferArg{
+            from_subaccount: None,
+            to: to,
+            fee: None,
+            created_at_time: None,
+            memo: None,
+            amount: amount.into(),
+        },)
+    ).unwrap();
+    mint_icp_r.unwrap();
+}
+
+
+fn mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal) -> Principal {
+    mint_icp(
+        &pic,
+        Account{ owner: cts, subaccount: Some(principal_token_subaccount(&user)) },
+        MEMBERSHIP_COST_CYCLES / CMC_RATE + LEDGER_TRANSFER_FEE*2,
+    );
+    let (purchase_cb_result,): (Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError>,) = call_candid_as(
+        &pic,
+        cts,
+        RawEffectivePrincipal::None,
+        user,
+        "purchase_cycles_bank",
+        (PurchaseCyclesBankQuest{},)
+    ).unwrap();
+    let cb = purchase_cb_result.unwrap().cycles_bank_canister_id;    
+    cb
+}    
+
+fn cb_cycles_balance(pic: &PocketIc, cb: Principal, user: Principal) -> Cycles {
+    let (cb_cycles_balance,): (Cycles,) = call_candid_as(&pic, cb, RawEffectivePrincipal::None, user, "cycles_balance", ()).unwrap(); 
+    cb_cycles_balance    
+}
+
+fn icrc1_balance(pic: &PocketIc, ledger: Principal, countid: &Account) -> u128 {
+    call_candid(
+        pic,
+        ledger,
+        RawEffectivePrincipal::None,
+        "icrc1_balance_of",
+        (countid,),
+    ).map(|t: (u128,)| t.0).unwrap()
+}
+
+fn local_put_ic_root_key(pic: &PocketIc, cb: Principal) {
+    let _: () = call_candid(
+        &pic,
+        cb,
+        RawEffectivePrincipal::None,
+        "local_put_ic_root_key",
+        (&pic.root_key().unwrap()[37..],)
+    ).unwrap();
+}
+
+
+fn cts_setup() -> (PocketIc, Principal/*CTS*/, Principal/*CM_MAIN*/) {
     let pic = PocketIcBuilder::new()
         .with_nns_subnet()
         .with_fiduciary_subnet()
@@ -20,9 +198,9 @@ fn t() {
     let _nns_subnet = pic.topology().get_nns().unwrap();
     let fid_subnet = pic.topology().get_fiduciary().unwrap();
     
-    let icp_minter = Principal::from_slice(&[1,1,1,1,1]);
+    let icp_minter = ICP_MINTER;
     let icp_ledger_wasm = std::fs::read("ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz").unwrap();
-    let icp_ledger = pic.create_canister_with_id(None, None, Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap()).unwrap();
+    let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
     pic.add_cycles(icp_ledger, 1_000 * TRILLION);    
     pic.install_canister(
         icp_ledger, 
@@ -49,10 +227,9 @@ fn t() {
         None
     );
      
-    let nns_governance = Principal::from_text("rrkah-fqaaa-aaaaa-aaaaq-cai").unwrap();
-     
+    let nns_governance = NNS_GOVERNANCE;
     let cmc_wasm = std::fs::read("cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz").unwrap();
-    let cmc = pic.create_canister_with_id(None, None, Principal::from_text("rkp4c-7iaaa-aaaaa-aaaca-cai").unwrap()).unwrap();
+    let cmc = pic.create_canister_with_id(None, None, CMC).unwrap();
     pic.add_cycles(cmc, 1_000 * TRILLION);    
     pic.install_canister(
         cmc, 
@@ -77,7 +254,7 @@ fn t() {
         None
     );
        
-    let cmc_rate: u128 = 55555;
+    let cmc_rate: u128 = CMC_RATE;
     let (r,): (Result<(), String>,) = call_candid_as(
         &pic,
         cmc,
@@ -114,12 +291,9 @@ fn t() {
     ).unwrap();
     //r.unwrap();
     */
-    // ---
     
-    let cts_controller = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
-    
+    let cts_controller = CTS_CONTROLLER;
     let cm_main: Principal = pic.create_canister_on_subnet(Some(cts_controller), None, fid_subnet);
-    
     let cts_wasm: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/release/cts.wasm").unwrap();
     let cts: Principal = pic.create_canister_on_subnet(Some(cts_controller), None, fid_subnet);
     println!("cts: {cts}");    
@@ -152,97 +326,5 @@ fn t() {
         (CanisterCode::new(std::fs::read("../../target/wasm32-unknown-unknown/release/cbs_map.wasm").unwrap()),)
     ).unwrap();
     
-    
-    // --- setup complete ---
-    let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
-    for i in 0..10 {
-        let user = Principal::from_slice(&(i as u64).to_be_bytes());
-        let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
-            &pic,
-            icp_ledger,
-            RawEffectivePrincipal::None,
-            icp_minter,            
-            "icrc1_transfer",
-            (TransferArg{
-                from_subaccount: None,
-                to: Account{
-                    owner: cts,
-                    subaccount: Some(principal_token_subaccount(&user))
-                },
-                fee: None,
-                created_at_time: None,
-                memo: None,
-                amount: (MEMBERSHIP_COST_CYCLES / cmc_rate + LEDGER_TRANSFER_FEE*2).into(),
-            },)
-        ).unwrap();
-        mint_icp_r.unwrap();
-        
-        let (purchase_cb_result,): (Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError>,) = call_candid_as(
-            &pic,
-            cts,
-            RawEffectivePrincipal::None,
-            user,
-            "purchase_cycles_bank",
-            (PurchaseCyclesBankQuest{},)
-        ).unwrap();
-        let cb = purchase_cb_result.unwrap().cycles_bank_canister_id;
-        println!("cb: {}", cb);
-        users_and_cbs.push((user, cb));
-    }
-    
-    let (user1, cb1) = users_and_cbs[0];
-    let cb_canister_cycles_balance = pic.cycle_balance(cb1);
-    println!("cb_canister_cycles_balance: {cb_canister_cycles_balance}");
-        
-        let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
-            &pic,
-            icp_ledger,
-            RawEffectivePrincipal::None,
-            icp_minter,            
-            "icrc1_transfer",
-            (TransferArg{
-                from_subaccount: None,
-                to: Account{
-                    owner: cb1,
-                    subaccount: None
-                },
-                fee: None,
-                created_at_time: None,
-                memo: None,
-                amount: 500_000_000_000u128.into(),
-            },)
-        ).unwrap();
-        mint_icp_r.unwrap();
-        
-    for ii in 0..100 {
-        let (tr,): (Result<Vec<u8>, CallError>,) = call_candid_as(
-            &pic,
-            cb1,
-            RawEffectivePrincipal::None,
-            user1,
-            "transfer_icrc1",
-            (icp_ledger, encode_one(
-                TransferArg{
-                    from_subaccount: None,
-                    to: Account{
-                        owner: user1,
-                        subaccount: None
-                    },
-                    fee: Some(LEDGER_TRANSFER_FEE.into()),
-                    created_at_time: None,
-                    memo: Some(ii.into()),
-                    amount: 5.into(),
-                }
-            ).unwrap()),
-        ).unwrap();
-        candid::decode_one::<Result<Nat, TransferError>>(&tr.unwrap()).unwrap().unwrap();
-    }
-    
-    let cb_canister_cycles_balance = pic.cycle_balance(cb1);
-    println!("cb_canister_cycles_balance: {cb_canister_cycles_balance}");
-    
-    
-    
-    
-    
+    (pic, cts, cm_main)
 }

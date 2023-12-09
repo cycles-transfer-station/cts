@@ -31,20 +31,21 @@ pub const TRILLION: u128 = 1_000_000_000_000;
 
 pub const CYCLES_PER_XDR: Cycles = TRILLION; // 1T cycles = 1 XDR
 
-pub const NETWORK_CANISTER_CREATION_FEE_CYCLES                  : Cycles = 100_000_000_000;
-//pub const NETWORK_COMPUTE_PERCENT_ALLOCATED_PER_SECOND_FEE_CYCLES:Cycles= 100_000;
-//pub const NETWORK_UPDATE_MESSAGE_EXECUTION_FEE_CYCLES           : Cycles = 590_000;
-//pub const NETWORK_TEN_UPDATE_INSTRUCTIONS_EXECUTION_FEE_CYCLES  : Cycles = 4;
-//pub const NETWORK_XNET_CALL_FEE_CYCLES                          : Cycles = 260_000;             // For every inter-canister call performed (includes the cost for sending the request and receiving the response)
-//pub const NETWORK_XNET_BYTE_TRANSMISSION_FEE_CYCLES             : Cycles = 1_000;               // For every byte sent in an inter-canister call (for bytes sent in the request and response)
-//pub const NETWORK_INGRESS_MESSAGE_CEPTION_FEE_CYCLES            : Cycles = 1_200_000;
-//pub const NETWORK_INGRESS_BYTE_CEPTION_FEE_CYCLES               : Cycles = 2_000;               // what about bytes sent back as a sponse?
+pub const NETWORK_CANISTER_CREATION_FEE_CYCLES_13_NODE_SUBNET: Cycles = 100_000_000_000;
+
 #[allow(non_upper_case_globals)]
 pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES_13_NODE_SUBNET: Cycles = 127_000;             // 4 SDR per GiB per year => 4e12 Cycles per year
+
+pub const FIDUCIARY_SUBNET_SIZE: u128 = 28;
+
+const fn fiduciary_subnet_cost(thirteen_node_subnet_cost: Cycles) -> Cycles {
+    thirteen_node_subnet_cost * FIDUCIARY_SUBNET_SIZE / 13 
+} 
+
+pub const NETWORK_CANISTER_CREATION_FEE_CYCLES/*_FIDUCIARY_SUBNET*/: Cycles = fiduciary_subnet_cost(NETWORK_CANISTER_CREATION_FEE_CYCLES_13_NODE_SUBNET);
+
 #[allow(non_upper_case_globals)]
-pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES/*_FIDUCIARY_SUBNET*/: Cycles = {
-    (NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES_13_NODE_SUBNET as f64 * (28.0 / 13.0)) as Cycles  
-};
+pub const NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES/*_FIDUCIARY_SUBNET*/: Cycles = fiduciary_subnet_cost(NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES_13_NODE_SUBNET);
 
 
 
@@ -74,7 +75,7 @@ pub const CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO: IcpMemo = IcpMemo(u
 
 
 
-pub const CTS_LOCAL_ID: &'static [u8; 10] = b"cts_local_";
-
+//pub const CTS_LOCAL_ID: &'static [u8; 10] = b"cts_local_";
+pub const CTS_ID: Principal = Principal::from_slice(&[0,0,0,0,2,48,0,110,1,1]); // em3jm-bqaaa-aaaar-qabxa-cai
 
 

@@ -1,6 +1,5 @@
 use crate::{
     types::cts::{UserAndCB},
-    consts::CTS_LOCAL_ID,
     tools::localkey,
     ic_cdk::api::call::{arg_data, reply},
 };
@@ -21,20 +20,25 @@ pub fn is_cts_cb_authorization_valid(cts_id: Principal, user_and_cb: UserAndCB, 
         authorization,
         cts_id,
         CTS_CB_AUTHORIZATIONS_SEED,        
-        if cts_id == Principal::from_slice(CTS_LOCAL_ID) {
-            localkey::cell::get(&LOCAL_IC_ROOT_KEY)
-        } else {
-            IC_ROOT_KEY
+        {
+            #[cfg(not(feature = "test"))]
+            {IC_ROOT_KEY}
+            #[cfg(feature = "test")]
+            {localkey::cell::get(&LOCAL_IC_ROOT_KEY)}
         }
     )
 }
-
-thread_local!{
-    static LOCAL_IC_ROOT_KEY: Cell<[u8; 96]> = Cell::new([0; 96]);
+#[cfg(feature = "test")]
+mod local_put_ic_root_key {
+    use super::*;
+    thread_local!{
+        pub static LOCAL_IC_ROOT_KEY: Cell<[u8; 96]> = Cell::new([0; 96]);
+    }
+    #[export_name = "canister_update local_put_ic_root_key"] 
+    pub fn local_put_ic_root_key() {
+        localkey::cell::set(&LOCAL_IC_ROOT_KEY, arg_data::<(Vec<u8>,)>().0.try_into().unwrap());
+        reply(());
+    }
 }
-
-#[export_name = "canister_update local_put_ic_root_key"] 
-pub fn local_put_ic_root_key() {
-    localkey::cell::set(&LOCAL_IC_ROOT_KEY, arg_data::<(Vec<u8>,)>().0.try_into().unwrap());
-    reply(());
-}
+#[cfg(feature = "test")]
+use local_put_ic_root_key::LOCAL_IC_ROOT_KEY;

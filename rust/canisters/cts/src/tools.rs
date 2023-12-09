@@ -363,7 +363,7 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum FindUserInTheCBSMapsError {
     CBSMapsFindUserCallFails(Vec<(Principal, (u32, String))>)
 }
