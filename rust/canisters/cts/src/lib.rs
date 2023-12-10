@@ -20,7 +20,6 @@ use cts_lib::{
         cache::Cache,
         cbs_map::{
             CBSMUserData,
-            CBSMUpgradeCBError,
             self,
         },
         cycles_bank::{
@@ -51,7 +50,6 @@ use cts_lib::{
         CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO,
         NANOS_IN_A_SECOND,
         SECONDS_IN_A_DAY,
-        CTS_ID,
     },
     tools::{
         sha256,
@@ -163,10 +161,6 @@ use certification::*;
 
 // -------
 
-#[derive(Serialize, Deserialize)]
-pub struct Stub;
-
-// --------
 
 #[derive(Serialize, Deserialize)]
 pub struct CTSData {
@@ -176,7 +170,7 @@ pub struct CTSData {
     frontcode_files: Files,
     frontcode_files_hashes: FilesHashes,
     cb_auths: CBAuths,
-    cbs_maps: Vec<(Principal, ModuleHash)>,
+    cbs_maps: HashMap<Principal, CBSMStatus>,
     create_new_cbs_map_lock: bool,
     temp_create_new_cbsmap_holder: Option<Principal>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
@@ -194,7 +188,7 @@ impl CTSData {
             frontcode_files: Files::new(),
             frontcode_files_hashes: FilesHashes::new(),
             cb_auths: CBAuths::default(),
-            cbs_maps: Vec::new(),
+            cbs_maps: HashMap::new(),
             create_new_cbs_map_lock: false,
             temp_create_new_cbsmap_holder: None,
             users_purchase_cycles_bank: HashMap::new(),
@@ -206,7 +200,12 @@ impl CTSData {
     }
 }
 
- 
+#[derive(Serialize, Deserialize)]
+pub struct CBSMStatus {
+    module_hash: [u8; 32],
+}
+    
+    
 type ModuleHash = [u8; 32];
  
  
@@ -230,6 +229,7 @@ pub const NEW_CYCLES_BANK_CREATION_CYCLES: Cycles = {
     + NEW_CYCLES_BANK_CTSFUEL
     + NEW_CYCLES_BANK_BACKUP_CYCLES
 };
+pub const NEW_CYCLES_BANK_FREEZING_THRESHOLD: u128 = 2592000 * 3;
 
 pub const MAX_USERS_PURCHASE_CYCLES_BANK: usize = 170; // the max number of entries in the hashmap at the same-time
 
@@ -295,7 +295,7 @@ fn init(cts_init: CTSInit) {
     }
     
     #[cfg(feature = "test")]
-    if ic_cdk::api::id() == CTS_ID {
+    if ic_cdk::api::id() == cts_lib::consts::CTS_ID {
         trap("Must be a mainnet build.")
     }
 } 
@@ -311,7 +311,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() { 
-    canister_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(Stub) -> CTSData>);
+    canister_tools::post_upgrade(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID, None::<fn(CTSData) -> CTSData>);
     
     with(&CTS_DATA, |cts_data| {
         set_root_hash(&cts_data);
@@ -322,7 +322,7 @@ fn post_upgrade() {
     }
     
     #[cfg(feature = "test")]
-    if ic_cdk::api::id() == CTS_ID {
+    if ic_cdk::api::id() == cts_lib::consts::CTS_ID {
         trap("Must be a mainnet build.")
     }
 } 
@@ -477,19 +477,15 @@ pub struct PurchaseCyclesBankData {
     current_xdr_icp_rate: Option<XdrPerMyriadPerIcp>,
     original_user_icp_ledger_balance: Option<IcpTokens>,
     look_if_user_is_in_the_cbs_maps: bool,
-    referral_cycles_bank_canister_id: Option<Principal>, // use if a referral
     create_cycles_bank_canister_block_height: Option<IcpBlockHeight>,
     create_cycles_bank_canister_cmc_notify_topup_cycles: Option<Cycles>,
     cycles_bank_canister: Option<Principal>,
     cbs_map: Option<Principal>,
     cycles_bank_canister_uninstall_code: bool,
-    cycles_bank_canister_install_code: bool,
+    cycles_bank_canister_install_code: Option<ModuleHash>,
     cycles_bank_canister_status_record: Option<ManagementCanisterCanisterStatusRecord>,
+    update_cbsm_user_data_with_the_cb_module_hash: bool,
     collect_icp: bool,
-    collect_cycles_cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
-    collect_cycles_cmc_notify_cycles: Option<Cycles>,
-    referral_user_referral_payment_cycles_transfer: bool,
-    user_referral_payment_cycles_transfer: bool,
     transfer_mainder_user_cts_icp_balance: Option<u64>,
     
 }
@@ -501,11 +497,7 @@ pub enum PurchaseCyclesBankMidCallError{
     CBSMapsFindUserCallFails(Vec<(Principal, (u32, String))>),
     PutNewUserIntoACBSMError(PutNewUserIntoACBSMError),
     CreateCyclesBankCanisterLedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    //CreateCyclesBankCanisterIcpTransferError(IcpTransferError),
-    //CreateCyclesBankCanisterIcpTransferCallError((u32, String)),
     CreateCyclesBankCanisterLedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-    //CreateCyclesBankCanisterCmcNotifyError(CmcNotifyError),
-    //CreateCyclesBankCanisterCmcNotifyCallError((u32, String)),
     CreateCyclesBankManagementCallError(CallError),
     CyclesBankUninstallCodeCallError((u32, String)),
     CyclesBankCodeNotFound,
@@ -514,10 +506,8 @@ pub enum PurchaseCyclesBankMidCallError{
     CyclesBankModuleVerificationError,
     CyclesBankStartCanisterCallError((u32, String)),
     CyclesBankUpdateSettingsCallError((u32, String)),
-    CollectCyclesLedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    CollectCyclesLedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-    ReferralUserReferralPaymentCyclesTransferCallError((u32, String)),
-    UserReferralPaymentCyclesTransferCallError((u32, String)),
+    UpdateCBSMUserDataWithTheCBModuleHashCallError(CallError),
+    UpdateCBSMUserDataWithTheCBModuleHashError(cbs_map::UpdateUserError),
     CollectIcpTransferError(IcpTransferError),
     CollectIcpTransferCallError((u32, String)),
     TransferMainderUserCTSICPTransferCallError(CallError),
@@ -528,7 +518,6 @@ pub enum PurchaseCyclesBankMidCallError{
 
 #[derive(CandidType, Deserialize, Debug)]
 pub enum PurchaseCyclesBankError{
-    ReferralUserCannotBeTheCaller,
     CheckIcpBalanceCallError((u32, String)),
     CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
     UserIcpLedgerBalanceTooLow{
@@ -539,16 +528,13 @@ pub enum PurchaseCyclesBankError{
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     CTSIsBusy,
     FoundCyclesBank(Principal),
-    ReferralUserCyclesBankNotFound,
     CreateCyclesBankCanisterCmcNotifyError(CmcNotifyError),
     MidCallError(PurchaseCyclesBankMidCallError),    // call complete_purchase_cycles_bank on this sponse
 }
 
 
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct PurchaseCyclesBankQuest {
-    //opt_referral_user_id: Option<Principal>,
-}
+pub struct PurchaseCyclesBankQuest {}
 
 
 #[derive(CandidType, Deserialize)]
@@ -571,13 +557,7 @@ fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_dat
 pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
 
     let user_id: Principal = caller();
-    /*
-    if let Some(ref referral_user_id) = q.opt_referral_user_id {
-        if *referral_user_id == user_id {
-            return Err(PurchaseCyclesBankError::ReferralUserCannotBeTheCaller);
-        }
-    }
-    */
+    
     let purchase_cycles_bank_data: PurchaseCyclesBankData = with_mut(&CTS_DATA, |cts_data| {
         check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| PurchaseCyclesBankError::UserIsInTheMiddleOfADifferentCall(e))?;
         if cts_data.users_purchase_cycles_bank.len() >= MAX_USERS_PURCHASE_CYCLES_BANK {
@@ -591,19 +571,15 @@ pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<Purchase
             current_xdr_icp_rate: None,
             original_user_icp_ledger_balance: None,
             look_if_user_is_in_the_cbs_maps: false,
-            referral_cycles_bank_canister_id: None,
             create_cycles_bank_canister_block_height: None,
             create_cycles_bank_canister_cmc_notify_topup_cycles: None,
             cycles_bank_canister: None,
             cbs_map: None,
             cycles_bank_canister_uninstall_code: false,
-            cycles_bank_canister_install_code: false,
+            cycles_bank_canister_install_code: None,
             cycles_bank_canister_status_record: None,
+            update_cbsm_user_data_with_the_cb_module_hash: false,
             collect_icp: false,
-            collect_cycles_cmc_icp_transfer_block_height: None,
-            collect_cycles_cmc_notify_cycles: None,
-            referral_user_referral_payment_cycles_transfer: false,
-            user_referral_payment_cycles_transfer: false,
             transfer_mainder_user_cts_icp_balance: None,
         };
         cts_data.users_purchase_cycles_bank.insert(user_id, purchase_cycles_bank_data.clone());
@@ -723,37 +699,8 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                     return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CBSMapsFindUserCallFails(umc_call_errors)));
                 }
             }
-        }
-        
+        }   
     }
-    /*
-    if purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.is_some() {
-    
-        if purchase_cycles_bank_data.referral_cycles_bank_canister_id.is_none() {
-        
-            match find_cycles_bank_(purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.as_ref().unwrap()).await {
-                Ok(opt_cycles_bank_canister_id) => match opt_cycles_bank_canister_id {
-                    Some(cycles_bank_canister_id) => {
-                        purchase_cycles_bank_data.referral_cycles_bank_canister_id = Some(cycles_bank_canister_id);
-                    },
-                    None => {
-                        with_mut(&CTS_DATA, |cts_data| { cts_data.users_purchase_cycles_bank.remove(&user_id); });
-                        return Err(PurchaseCyclesBankError::ReferralUserCyclesBankNotFound);
-                    }
-                },
-                Err(find_user_in_the_cbsms_error) => match find_user_in_the_cbsms_error {
-                    FindUserInTheCBSMapsError::CBSMapsFindUserCallFails(umc_call_errors) => {
-                        purchase_cycles_bank_data.lock = false;
-                        write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                        return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CBSMapsFindUserCallFails(umc_call_errors)));
-                    }
-                }
-            }
-            
-        }
-        
-    }
-    */
     
     if purchase_cycles_bank_data.create_cycles_bank_canister_block_height.is_none() {
         let create_cycles_bank_canister_block_height = match ledger_topup_cycles_cmc_icp_transfer(
@@ -922,7 +869,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             Err(uninstall_code_call_error) => {
                 purchase_cycles_bank_data.lock = false;
                 write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankUninstallCodeCallError((uninstall_code_call_error.0 as u32, uninstall_code_call_error.1))));
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankUninstallCodeCallError(call_error_as_u32_and_string(uninstall_code_call_error))));
             }
         }
         
@@ -930,34 +877,39 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     }
 
 
-    if purchase_cycles_bank_data.cycles_bank_canister_install_code == false {
+    if purchase_cycles_bank_data.cycles_bank_canister_install_code.is_none() {
     
         if with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module().len() == 0 }) {
             purchase_cycles_bank_data.lock = false;
             write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
             return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankCodeNotFound));
         }
-
-        match with(&CTS_DATA, |cts_data| {
-            call_raw128( //::<(ManagementCanisterInstallCodeQuest,), ()>(
-                MANAGEMENT_CANISTER_ID,
-                "install_code",
-                encode_one(&ManagementCanisterInstallCodeQuest {
-                    mode : ManagementCanisterInstallCodeMode::install,
-                    canister_id : purchase_cycles_bank_data.cycles_bank_canister.unwrap(),
-                    wasm_module : cts_data.cycles_bank_canister_code.module(),
-                    arg : &encode_one(&CyclesBankInit{ 
-                        cts_id: id(), 
-                        cbsm_id: purchase_cycles_bank_data.cbs_map.unwrap(),
-                        user_id: user_id,
-                        storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
-                        lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
-                        start_with_user_cycles_balance: 0
-                    }).unwrap()
-                }).unwrap(),
-                0
-            )
-        }).await {
+        
+        let (install_code_call_future, module_hash) = with(&CTS_DATA, |cts_data| {
+            (
+                call_raw128( //::<(ManagementCanisterInstallCodeQuest,), ()>(
+                    MANAGEMENT_CANISTER_ID,
+                    "install_code",
+                    encode_one(&ManagementCanisterInstallCodeQuest {
+                        mode : ManagementCanisterInstallCodeMode::install,
+                        canister_id : purchase_cycles_bank_data.cycles_bank_canister.unwrap(),
+                        wasm_module : cts_data.cycles_bank_canister_code.module(),
+                        arg : &encode_one(&CyclesBankInit{ 
+                            cts_id: id(), 
+                            cbsm_id: purchase_cycles_bank_data.cbs_map.unwrap(),
+                            user_id: user_id,
+                            storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
+                            lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
+                            start_with_user_cycles_balance: 0
+                        }).unwrap()
+                    }).unwrap(),
+                    0
+                ),
+                cts_data.cycles_bank_canister_code.module_hash().clone()
+            )                
+        });
+        
+        match install_code_call_future.await {
             Ok(_) => {},
             Err(put_code_call_error) => {
                 purchase_cycles_bank_data.lock = false;
@@ -966,7 +918,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             }
         }
         
-        purchase_cycles_bank_data.cycles_bank_canister_install_code = true;
+        purchase_cycles_bank_data.cycles_bank_canister_install_code = Some(module_hash);
     }
     
     if purchase_cycles_bank_data.cycles_bank_canister_status_record.is_none() {
@@ -996,7 +948,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
     if purchase_cycles_bank_data.cycles_bank_canister_status_record.as_ref().unwrap().module_hash.is_none() || purchase_cycles_bank_data.cycles_bank_canister_status_record.as_ref().unwrap().module_hash.as_ref().unwrap().clone() != with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.module_hash().clone() }) {
         // go back a couple of steps
         purchase_cycles_bank_data.cycles_bank_canister_uninstall_code = false;                                  
-        purchase_cycles_bank_data.cycles_bank_canister_install_code = false;
+        purchase_cycles_bank_data.cycles_bank_canister_install_code = None;
         purchase_cycles_bank_data.cycles_bank_canister_status_record = None;
         purchase_cycles_bank_data.lock = false;
         write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
@@ -1019,11 +971,8 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                 write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
                 return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CyclesBankStartCanisterCallError((start_canister_call_error.0 as u32, start_canister_call_error.1))));
             }
-        }
-        
+        }   
     }
-
-
     
     let put_cycles_bank_canister_settings: ManagementCanisterCanisterSettings = ManagementCanisterCanisterSettings{
         controllers : vec![
@@ -1033,7 +982,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         ],
         compute_allocation : 0,
         memory_allocation : NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128,
-        freezing_threshold : 2592000 * 3 
+        freezing_threshold : NEW_CYCLES_BANK_FREEZING_THRESHOLD,
     };
     
     if purchase_cycles_bank_data.cycles_bank_canister_status_record.as_ref().unwrap().settings != put_cycles_bank_canister_settings {
@@ -1062,83 +1011,32 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         }
     }
     
-    /*
-    // hand out the referral-bonuses if there is.
-    if purchase_cycles_bank_data.purchase_cycles_bank_quest.opt_referral_user_id.is_some() {
-        
-        if purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height.is_none() {
-            match ledger_topup_cycles_cmc_icp_transfer(
-                cycles_to_icptokens(MEMBERSHIP_COST_CYCLES - NEW_CYCLES_BANK_CREATION_CYCLES, purchase_cycles_bank_data.current_xdr_icp_rate.unwrap()), 
-                ICP_LEDGER_TRANSFER_DEFAULT_FEE,
-                Some(principal_icp_subaccount(&user_id)), 
-                id()
-            ).await {
-                Ok(block_height) => {
-                    purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height = Some(block_height);
-                },
-                Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
-                    purchase_cycles_bank_data.lock = false;
-                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectCyclesLedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error)));
-                }
-            }
-        }
-        
-        if purchase_cycles_bank_data.collect_cycles_cmc_notify_cycles.is_none() {
-            match ledger_topup_cycles_cmc_notify(purchase_cycles_bank_data.collect_cycles_cmc_icp_transfer_block_height.unwrap(), id()).await {
-                Ok(topup_cycles) => {
-                    purchase_cycles_bank_data.collect_cycles_cmc_notify_cycles = Some(topup_cycles); 
-                }, 
-                Err(ledger_topup_cycles_cmc_notify_error) => {
-                    purchase_cycles_bank_data.lock = false;
-                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::CollectCyclesLedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
-                }
-            }
-        }
-        
-        if purchase_cycles_bank_data.referral_user_referral_payment_cycles_transfer == false {
-            match call_with_payment128::<(CyclesTransfer,), ()>(
-                purchase_cycles_bank_data.referral_cycles_bank_canister_id.as_ref().unwrap().clone(),        
-                "cycles_transfer",
-                (CyclesTransfer{
-                    memo: CyclesTransferMemo::Text("CTS-REFERRAL-PAYMENT".to_string())
-                },),
-                1_000_000_000_000
-            ).await {
+    if purchase_cycles_bank_data.update_cbsm_user_data_with_the_cb_module_hash == false {
+        match call::<(Principal, cbs_map::CBSMUserDataUpdateFields), (cbs_map::UpdateUserResult,)>(
+            purchase_cycles_bank_data.cbs_map.as_ref().unwrap().clone(),
+            "update_user",
+            (user_id, cbs_map::CBSMUserDataUpdateFields{
+                cycles_bank_latest_known_module_hash: Some(purchase_cycles_bank_data.cycles_bank_canister_install_code.as_ref().unwrap().clone()),
+                ..Default::default()
+            })
+        ).await {
+            Ok((update_user_result,)) => match update_user_result {
                 Ok(()) => {
-                    purchase_cycles_bank_data.referral_user_referral_payment_cycles_transfer = true;
-                }, 
-                Err(referral_user_referral_payment_cycles_transfer_call_error) => {
+                    purchase_cycles_bank_data.update_cbsm_user_data_with_the_cb_module_hash = true;
+                }
+                Err(update_user_error) => {
                     purchase_cycles_bank_data.lock = false;
                     write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::ReferralUserReferralPaymentCyclesTransferCallError((referral_user_referral_payment_cycles_transfer_call_error.0 as u32, referral_user_referral_payment_cycles_transfer_call_error.1))));
+                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::UpdateCBSMUserDataWithTheCBModuleHashError(update_user_error)));
                 }
             }
-        }
-        
-        if purchase_cycles_bank_data.user_referral_payment_cycles_transfer == false {
-            match call_with_payment128::<(CyclesTransfer,), ()>(
-                purchase_cycles_bank_data.cycles_bank_canister.as_ref().unwrap().clone(),
-                "cycles_transfer",
-                (CyclesTransfer{
-                    memo: CyclesTransferMemo::Text("CTS-REFERRAL-PAYMENT".to_string())
-                },),
-                1_000_000_000_000
-            ).await {
-                Ok(()) => {
-                    purchase_cycles_bank_data.user_referral_payment_cycles_transfer = true;
-                }, 
-                Err(user_referral_payment_cycles_transfer_call_error) => {
-                    purchase_cycles_bank_data.lock = false;
-                    write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
-                    return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::UserReferralPaymentCyclesTransferCallError((user_referral_payment_cycles_transfer_call_error.0 as u32, user_referral_payment_cycles_transfer_call_error.1))));
-                }
+            Err(update_user_call_error) => {
+                purchase_cycles_bank_data.lock = false;
+                write_purchase_cycles_bank_data(&user_id, purchase_cycles_bank_data);
+                return Err(PurchaseCyclesBankError::MidCallError(PurchaseCyclesBankMidCallError::UpdateCBSMUserDataWithTheCBModuleHashCallError(call_error_as_u32_and_string(update_user_call_error))));
             }
         }
-        
-    } else {
-    */    
+    }
     
     if purchase_cycles_bank_data.collect_icp == false {
         match transfer_user_icp_ledger(
@@ -2173,26 +2071,6 @@ async fn complete_lengthen_membership_cb_cycles_payment_(user_id: Principal) -> 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // --------------------------------------------------------------------------
 // :CONTROLLER-METHODS.
 
@@ -2226,7 +2104,7 @@ pub fn controller_view_cbsms() {
     caller_is_controller_gaurd(&caller());
     
     with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(Vec<&Principal>,)>((cts_data.cbs_maps.iter().map(|t| &t.0).collect(),));
+        ic_cdk::api::call::reply::<(Vec<&Principal>,)>((cts_data.cbs_maps.keys().collect(),));
     });
 }
 
@@ -2241,96 +2119,6 @@ pub enum ControllerUpgradeUMCCallErrorType {
     StartCanisterCallError
 }
 
-
-/*
-#[update]
-pub async fn controller_upgrade_umcs(opt_upgrade_umcs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Vec<ControllerUpgradeUMCError>/*umcs that upgrade call-fail*/ {
-    caller_is_controller_gaurd(&caller());
-    
-    if with(&CTS_DATA, |cts_data| cts_data.cbs_map_canister_code.module().len() == 0 ) {
-        trap("USERS_MAP_CANISTER_CODE.module().len() is 0.")
-    }
-    
-    let upgrade_umcs: Vec<Principal> = {
-        if let Some(upgrade_umcs) = opt_upgrade_umcs {
-            with(&CTS_DATA, |cts_data| { 
-                upgrade_umcs.iter().for_each(|upgrade_umc| {
-                    if cts_data.cbs_maps.contains(&upgrade_umc) == false {
-                        trap(&format!("cts cbs_maps does not contain: {:?}", upgrade_umc));
-                    }
-                });
-            });    
-            upgrade_umcs
-        } else {
-            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.clone() })
-        }
-    };     
-    
-    let sponses: Vec<Result<(), ControllerUpgradeUMCError>> = futures::future::join_all(
-        upgrade_umcs.iter().map(|umc_id| {
-            async {
-            
-                match call::<(CanisterIdRecord,), ()>(
-                    MANAGEMENT_CANISTER_ID,
-                    "stop_canister",
-                    (CanisterIdRecord{ canister_id: *umc_id/*copy*/ },)
-                ).await {
-                    Ok(_) => {},
-                    Err(stop_canister_call_error) => {
-                        return Err((*umc_id/*copy*/, ControllerUpgradeUMCCallErrorType::StopCanisterCallError, (stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
-                    }
-                }
-            
-                match with(&CTS_DATA, |cts_data| {
-                    call_raw128(
-                        MANAGEMENT_CANISTER_ID,
-                        "install_code",
-                        encode_one(&ManagementCanisterInstallCodeQuest{
-                            mode : ManagementCanisterInstallCodeMode::upgrade,
-                            canister_id : *umc_id/*copy*/,
-                            wasm_module : cts_data.cbs_map_canister_code.module(),
-                            arg : &post_upgrade_arg,
-                        }).unwrap(),
-                        0
-                    )
-                }).await {
-                    Ok(_) => {},
-                    Err(upgrade_code_call_error) => {
-                        return Err((*umc_id/*copy*/, ControllerUpgradeUMCCallErrorType::UpgradeCodeCallError, (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)));
-                    }
-                }
-
-                match call::<(CanisterIdRecord,), ()>(
-                    MANAGEMENT_CANISTER_ID,
-                    "start_canister",
-                    (CanisterIdRecord{ canister_id: *umc_id/*copy*/ },)
-                ).await {
-                    Ok(_) => {},
-                    Err(start_canister_call_error) => {
-                        return Err((umc_id.clone(), ControllerUpgradeUMCCallErrorType::StartCanisterCallError, (start_canister_call_error.0 as u32, start_canister_call_error.1))); 
-                    }
-                }
-                
-                Ok(())
-            }
-        }).collect::<Vec<_>>()
-    ).await;
-    
-    
-    sponses.into_iter().filter_map(
-        |upgrade_umc_sponse: Result<(), ControllerUpgradeUMCError>| {
-            match upgrade_umc_sponse {
-                Ok(_) => None,
-                Err(upgrade_umc_error) => Some(upgrade_umc_error)
-            }
-        }
-    ).collect::<Vec<ControllerUpgradeUMCError>>()
-    
-}
-*/
-
-
-
 #[update]
 pub async fn controller_upgrade_cbsms(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
     caller_is_controller_gaurd(&caller());
@@ -2344,12 +2132,21 @@ pub async fn controller_upgrade_cbsms(q: ControllerUpgradeCSQuest) -> Vec<(Princ
     });
     
     let cbsms: Vec<Principal> = match q.specific_cs {
-        Some(specific_cbsms) => specific_cbsms.into_iter().collect(),
+        Some(specific_cbsms) => {
+            with(&CTS_DATA, |cts_data| {
+                for cbsm in specific_cbsms.iter() { 
+                    if cts_data.cbs_maps.contains_key(cbsm) == false {
+                        trap(&format!("cts cbs_maps does not contain: {}", cbsm));
+                    }
+                }
+            });
+            specific_cbsms.into_iter().collect()
+        }
         None => {
             with(&CTS_DATA, |cts_data| {
                 cts_data.cbs_maps.iter()
-                .filter_map(|(cbsm, module_hash)| {
-                    if module_hash != cc.module_hash() {
+                .filter_map(|(cbsm, cbsm_status)| {
+                    if &cbsm_status.module_hash != cc.module_hash() {
                         Some(cbsm.clone())
                     } else {
                         None
@@ -2361,14 +2158,14 @@ pub async fn controller_upgrade_cbsms(q: ControllerUpgradeCSQuest) -> Vec<(Princ
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(cbsms, &cc, &q.post_upgrade_quest).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cbsms, &cc, &q.post_upgrade_quest).await;
     
     with_mut(&CTS_DATA, |cts_data| {
         for (cbsm, uo) in rs.iter() {
             if let Some(ref r) = uo.install_code_result {
                 if r.is_ok() {
-                    if let Some(i) = cts_data.cbs_maps.iter_mut().find(|i| i.0 == *cbsm) {
-                        i.1 = cc.module_hash().clone();
+                    if let Some(cbsm_status) = cts_data.cbs_maps.get_mut(cbsm) {
+                        cbsm_status.module_hash = cc.module_hash().clone();
                     } else {
                         ic_cdk::print("check this");
                     } 
@@ -2407,10 +2204,10 @@ pub fn controller_put_cycles_bank_canister_code(canister_code: CanisterCode) -> 
 
 
 
-pub type ControllerPutUCCodeOntoTheUMCError = (Principal, (u32, String));
+pub type ControllerPutUCCodeOntoTheUMCError = (Principal, CallError);
 
 #[update]
-pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal>>) -> Vec<ControllerPutUCCodeOntoTheUMCError>/*umcs that the put_uc_code call fail*/ {
+pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal>>) -> Vec<ControllerPutUCCodeOntoTheUMCError>/*umcs that the put_uc_code call fail. if empty, means every call is success*/ {
     caller_is_controller_gaurd(&caller());
         
     if with(&CTS_DATA, |cts_data| cts_data.cycles_bank_canister_code.module().len() == 0 ) {
@@ -2420,37 +2217,32 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal
     let call_umcs: Vec<Principal> = {
         if let Some(call_umcs) = opt_umcs {
             with(&CTS_DATA, |cts_data| { 
-                call_umcs.iter().for_each(|call_umc| {
-                    let cbs_maps: Vec<&Principal> = cts_data.cbs_maps.iter().map(|t| &t.0).collect();
-                    if cbs_maps.contains(&&call_umc) == false {
+                for call_umc in call_umcs.iter() { 
+                    if cts_data.cbs_maps.contains_key(call_umc) == false {
                         trap(&format!("cts cbs_maps does not contain: {:?}", call_umc));
                     }
-                });
+                }
             });    
             call_umcs
         } else {
-            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.iter().map(|t| t.0.clone()).collect() })
+            with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.keys().cloned().collect() })
         }
     };    
     
-    let sponses: Vec<Result<(), ControllerPutUCCodeOntoTheUMCError>> = futures::future::join_all(
-        call_umcs.iter().map(|call_umc| {
-            async {
-                match call::<(&CanisterCode,), ()>(
-                    *call_umc,
-                    "cts_put_user_canister_code",
-                    (unsafe{&*with(&CTS_DATA, |cts_data| { &(cts_data.cycles_bank_canister_code) as *const CanisterCode })},)
-                ).await {
-                    Ok(_) => {},
-                    Err(call_error) => {
-                        return Err((call_umc.clone(), (call_error.0 as u32, call_error.1)));
-                    }
-                }
-                
-                Ok(())
-            }
-        }).collect::<Vec<_>>()
-    ).await;
+    let cc: CanisterCode = with(&CTS_DATA, |cts_data| { cts_data.cycles_bank_canister_code.clone() });
+    
+    async fn call_umc_fn(call_umc: Principal, cc: &CanisterCode) -> Result<(), ControllerPutUCCodeOntoTheUMCError> {
+        match call::<(&CanisterCode,), ()>(
+            call_umc.clone(),
+            "cts_put_user_canister_code",
+            (cc,)
+        ).await {
+            Ok(_) => Ok(()),
+            Err(call_error) => Err((call_umc, call_error_as_u32_and_string(call_error))),
+        }
+    }
+    
+    let sponses: Vec<Result<(), ControllerPutUCCodeOntoTheUMCError>> = futures::future::join_all(call_umcs.into_iter().map(|umc| call_umc_fn(umc, &cc))).await;
     
     sponses.into_iter().filter_map(
         |call_umc_sponse: Result<(), ControllerPutUCCodeOntoTheUMCError>| {
@@ -2464,37 +2256,13 @@ pub async fn controller_put_uc_code_onto_the_umcs(opt_umcs: Option<Vec<Principal
 
 
 
-#[derive(CandidType, Deserialize)]
-pub enum ControllerUpgradeUCSOnAUMCError {
-    CTSUpgradeUCSCallError((u32, String))
-}
-
-
-
-#[update]
-pub async fn controller_upgrade_ucs_on_a_umc(umc: Principal, opt_upgrade_ucs: Option<Vec<Principal>>, post_upgrade_arg: Vec<u8>) -> Result<Option<Vec<CBSMUpgradeCBError>>, ControllerUpgradeUCSOnAUMCError> {       // /*:chunk-0 of the ucs that upgrade-fail*/ 
-    caller_is_controller_gaurd(&caller());
-    
-    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.iter().find(|t| t.0 == umc).is_none() }) {
-        trap(&format!("cts cbs_maps does not contain: {:?}", umc));
-    }
-    
-    match call::<(Option<Vec<Principal>>, Vec<u8>/*post-upgrade-arg*/), (Option<Vec<CBSMUpgradeCBError>>,)>(
-        umc,
-        "cts_upgrade_ucs_chunk",
-        (opt_upgrade_ucs, post_upgrade_arg)
-    ).await {
-        Ok((opt_uc_upgrade_fails,)) => Ok(opt_uc_upgrade_fails),
-        Err(call_error) => Err(ControllerUpgradeUCSOnAUMCError::CTSUpgradeUCSCallError((call_error.0 as u32, call_error.1)))
-    }
-
-}
-
-
-
 #[update]
 pub async fn controller_upgrade_cbsm_cbs_chunk(cbsm: Principal, q: ControllerUpgradeCSQuest) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
     caller_is_controller_gaurd(&caller());
+    
+    if with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.contains_key(&cbsm) }) == false {
+        trap(&format!("cts cbs_maps does not contain {}", cbsm));
+    }
     
     if let Some(ref new_cc) = q.new_canister_code {
         new_cc.verify_module_hash().unwrap();
@@ -2509,7 +2277,7 @@ pub async fn controller_upgrade_cbsm_cbs_chunk(cbsm: Principal, q: ControllerUpg
         (q,)        
     )
     .await
-    .map(|t| t.0) // unwrap the one-tuple sponse
+    .map(|t| t.0)
     .map_err(call_error_as_u32_and_string)
 }
 

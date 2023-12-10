@@ -53,7 +53,7 @@ pub struct ManagementCanisterOptionalCanisterSettings {
     pub freezing_threshold : Option<u128>,
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ManagementCanisterCanisterSettings {
     pub controllers : Vec<Principal>,
     pub compute_allocation : u128,
@@ -61,7 +61,7 @@ pub struct ManagementCanisterCanisterSettings {
     pub freezing_threshold : u128
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ManagementCanisterCanisterStatusRecord {
     pub status : ManagementCanisterCanisterStatusVariant,
     pub settings: ManagementCanisterCanisterSettings,
@@ -71,7 +71,7 @@ pub struct ManagementCanisterCanisterStatusRecord {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum ManagementCanisterCanisterStatusVariant {
     running,
     stopping,

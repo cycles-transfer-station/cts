@@ -34,7 +34,7 @@ debug = false
 ic-cdk = "0.10.0"
 ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "9c9a7cd55c77fcdd12330952cae95b484eeb3690" } 
 ic-ledger-types = "0.7.0"
-candid = "0.9.5"
+candid = "0.9.10"
 sha2 = "0.9.1"
 serde = { version = "1.0.137", features = ["derive"] }
 serde_bytes = "0.11.6"

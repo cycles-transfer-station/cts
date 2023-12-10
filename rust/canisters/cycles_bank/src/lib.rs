@@ -1361,34 +1361,14 @@ pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::C
 
 
 
-#[derive(CandidType)]
-pub struct UserUCMetrics<'a> {
-    global_allocator_counter: u64,
-    cycles_balance: Cycles,
-    ctsfuel_balance: CTSFuel,
-    storage_size_mib: u128,
-    lifetime_termination_timestamp_seconds: u128,
-    user_id: Principal,
-    user_canister_creation_timestamp_nanos: u128,
-    storage_usage: u128,
-    cycles_transfers_id_counter: u128,
-    cycles_transfers_in_len: u128,
-    cycles_transfers_out_len: u128,
-    cm_trade_contracts: Vec<&'a TradeContractIdAndLedgerId>,   
-    cts_cb_authorization: bool, 
-}
-
-
-
-
 #[query(manual_reply = true)]
-pub fn metrics() { //-> UserUCMetrics {
+pub fn metrics() { //-> UserCBMetrics {
     if caller() != user_id() && caller() != cts_id() {
         trap("Caller must be the user for this method.");
     }
     
     with(&CB_DATA, |cb_data| {
-        reply::<(UserUCMetrics,)>((UserUCMetrics{
+        reply::<(UserCBMetrics,)>((UserCBMetrics{
             global_allocator_counter: get_allocated_bytes_count() as u64,
             cycles_balance: cb_data.user_data.cycles_balance,
             ctsfuel_balance: ctsfuel_balance(cb_data),
@@ -1400,8 +1380,9 @@ pub fn metrics() { //-> UserUCMetrics {
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
-            cm_trade_contracts: cb_data.user_data.cm_trade_contracts.keys().collect(),
-            cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0
+            cm_trade_contracts: cb_data.user_data.cm_trade_contracts.keys().cloned().collect(),
+            cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0,
+            cbsm_id: cb_data.cbsm_id
         },));
     });
 }

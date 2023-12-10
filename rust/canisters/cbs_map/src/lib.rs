@@ -39,8 +39,8 @@ use cts_lib::{
             CBSMUserData,
             PutNewUserError,
             UpdateUserError,
-            CBSMUpgradeCBError,
-            //CBSMUpgradeCBErrorKind
+            UpdateUserResult,
+            CBSMUserDataUpdateFields,
         },
     },
     global_allocator_counter::get_allocated_bytes_count
@@ -63,7 +63,6 @@ struct CBSMData {
     cts_id: Principal,
     users_map: UsersMap,
     cycles_bank_canister_code: CanisterCode,
-    cycles_bank_canister_upgrade_fails: Vec<CBSMUpgradeCBError>,
 }
 impl CBSMData {
     fn new() -> Self {
@@ -71,29 +70,22 @@ impl CBSMData {
             cts_id: Principal::from_slice(&[]),
             users_map: UsersMap::new(),
             cycles_bank_canister_code: CanisterCode::empty(),
-            cycles_bank_canister_upgrade_fails: Vec::new(),
         }
     }
 }
 
 
 
-
 const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
-
 const MAX_USERS: usize = 30_000; 
-
-const VIEW_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE: usize = 500;
 
 
 
 thread_local! {
     static CBSM_DATA: RefCell<CBSMData> = RefCell::new(CBSMData::new());
-    
     // not save in a CBSMData
-    static     STOP_CALLS: Cell<bool> = Cell::new(false);
-    static     STATE_SNAPSHOT_CBSM_DATA_CANDID_BYTES: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static STOP_CALLS: Cell<bool> = Cell::new(false);
 }
 
 
@@ -203,23 +195,36 @@ pub fn void_user() {
 
 
 
-#[export_name = "canister_update update_user"]
-pub fn update_user() {
+#[update]
+pub fn update_user(user_id: Principal, update_fields: CBSMUserDataUpdateFields) -> UpdateUserResult {
     if caller() != cts_id() {
         trap("caller must be the CTS");
     }
-    let (user_id, umc_user_data): (Principal, CBSMUserData) = arg_data::<(Principal, CBSMUserData)>();
     with_mut(&CBSM_DATA, |cbsm_data| {
-        match cbsm_data.users_map.get(&user_id) {
-            Some(_found_umc_user_data) => {
-                cbsm_data.users_map.insert(user_id, umc_user_data);
-                reply::<(Result<(), UpdateUserError>,)>((Ok(()),));  
+        match cbsm_data.users_map.get_mut(&user_id) {
+            Some(found_user_data) => {
+                if let Some(change_cycles_bank_canister_id) = update_fields.cycles_bank_canister_id {
+                    found_user_data.cycles_bank_canister_id = change_cycles_bank_canister_id; 
+                }
+                if let Some(change_first_membership_creation_timestamp_nanos) = update_fields.first_membership_creation_timestamp_nanos {
+                    found_user_data.first_membership_creation_timestamp_nanos = change_first_membership_creation_timestamp_nanos; 
+                }
+                if let Some(change_cb_latest_known_module_hash) = update_fields.cycles_bank_latest_known_module_hash {
+                    found_user_data.cycles_bank_latest_known_module_hash = change_cb_latest_known_module_hash; 
+                }
+                if let Some(change_cb_lifetime_termination_timestamp_seconds) = update_fields.cycles_bank_lifetime_termination_timestamp_seconds {
+                    found_user_data.cycles_bank_lifetime_termination_timestamp_seconds = change_cb_lifetime_termination_timestamp_seconds; 
+                }
+                if let Some(change_membership_termination_cb_uninstall_data) = update_fields.membership_termination_cb_uninstall_data {
+                    found_user_data.membership_termination_cb_uninstall_data = change_membership_termination_cb_uninstall_data; 
+                }
+                Ok(())  
             },
             None => {
-                reply::<(Result<(), UpdateUserError>,)>((Err(UpdateUserError::UserNotFound),));
+                Err(UpdateUserError::UserNotFound)
             }
         }
-    });
+    })
 }
 
 
@@ -273,7 +278,7 @@ pub fn cts_put_user_canister_code(canister_code: CanisterCode) -> () {
 }
 
 #[query(manual_reply = true)]
-pub fn cts_see_uc_code_module_hash() {
+pub fn cts_view_uc_code_module_hash() {
     if caller() != cts_id() {
         trap("caller must be the CTS");
     }
@@ -281,9 +286,6 @@ pub fn cts_see_uc_code_module_hash() {
         reply::<(&[u8; 32],)>((cbsm_data.cycles_bank_canister_code.module_hash(),));
     });
 }
-
-
-
 
 
 
@@ -301,7 +303,7 @@ pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(P
     
     let users_cbs: Vec<(Principal, Principal)> = match q.specific_cs {
         Some(specific_cs) => {
-            with(&CBSM_DATA, |cbsm_data| {
+            let ones_in_the_users_map = with(&CBSM_DATA, |cbsm_data| {
                 cbsm_data.users_map.iter()
                 .filter_map(|(user_id, d)| {
                     if specific_cs.contains(&d.cycles_bank_canister_id) {
@@ -310,14 +312,19 @@ pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(P
                         None
                     }
                 })
-                .collect()                
-            })
+                .collect::<Vec<_>>()                
+            });
+            if ones_in_the_users_map.len() != specific_cs.len() {
+                trap(&format!("cbsm users_map does not contain some of the cycles-banks set in the specific_cs parameter."));
+            }
+            ones_in_the_users_map
         }
         None => {
             with(&CBSM_DATA, |cbsm_data| {
                 cbsm_data.users_map.iter()
                 .filter_map(|(user_id, d)| {
-                    if &d.cycles_bank_latest_known_module_hash != cc.module_hash() {
+                    if &d.cycles_bank_latest_known_module_hash != cc.module_hash() 
+                    && d.cycles_bank_latest_known_module_hash != [0u8; 32] {            // [0u8; 32] means that the canister is still in the middle of the purchase_cycles_bank method. 
                         Some((user_id.clone(), d.cycles_bank_canister_id.clone()))
                     } else {
                         None
@@ -331,7 +338,7 @@ pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(P
     
     let (users, cbs): (Vec<Principal>, Vec<Principal>) = users_cbs.into_iter().unzip();
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(cbs, &cc, &q.post_upgrade_quest).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cbs, &cc, &q.post_upgrade_quest).await;
     
     with_mut(&CBSM_DATA, |cbsm_data| {
         for (user_id, (_cb, uo)) in users.into_iter().zip(rs.iter()) {
@@ -348,190 +355,6 @@ pub async fn controller_upgrade_cbs_chunk(q: ControllerUpgradeCSQuest) -> Vec<(P
     });
     
     return rs;
-    
-}
-
-
-
-
-/*
-
-#[update(manual_reply = true)]
-pub async fn cts_upgrade_ucs_chunk() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-    
-    // make sure the cycles_bank_canister_upgrade_fails vec is empty ?
-    
-    if with(&CBSM_DATA, |cbsm_data| { cbsm_data.cycles_bank_canister_code.module().len() == 0 }) {
-        trap("No user-canister-code found on this umc");
-    }
-
-    let (opt_upgrade_ucs, post_upgrade_arg): (Option<Vec<Principal>>, Vec<u8>) = arg_data::<(Option<Vec<Principal>>, Vec<u8>)>();
-    
-    let upgrade_ucs: Vec<(Principal, Principal)> = {
-        if let Some(q_upgrade_ucs) = opt_upgrade_ucs {
-            if q_upgrade_ucs.len() > CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE {
-                trap(&format!("Max upgrade_ucs: {:?}", CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE));
-            }
-            let mut q_upgrade_ucs_good_check_map: HashMap<Principal, Option<Principal>> = q_upgrade_ucs.into_iter().map(|q_upgrade_uc| { (q_upgrade_uc, None) }).collect::<HashMap<Principal, Option<Principal>>>();
-            with(&CBSM_DATA, |cbsm_data| {
-                for (user_id, umc_user_data) in cbsm_data.users_map.iter() {
-                    if q_upgrade_ucs_good_check_map.contains_key(&(umc_user_data.cycles_bank_canister_id)) {
-                        q_upgrade_ucs_good_check_map.insert(umc_user_data.cycles_bank_canister_id, Some(/*copy*/*user_id));
-                    }
-                }
-            });
-            for (q_upgrade_uc, is_with_a_user_id) in q_upgrade_ucs_good_check_map.iter() {
-                if is_with_a_user_id.is_none() {
-                    trap(&format!("umc users_map does not contain the user_canister: {:?}", q_upgrade_uc));
-                }
-            }
-            q_upgrade_ucs_good_check_map.into_iter().map(|(q_upgrade_uc, with_the_user_id): (Principal, Option<Principal>)| { (with_the_user_id.unwrap(), q_upgrade_uc) }).collect::<Vec<(Principal, Principal)>>()
-        } else {
-            let mut upgrade_ucs_gather: Vec<(Principal, Principal)> = Vec::new();
-            with(&CBSM_DATA, |cbsm_data| { 
-                let current_uc_code_module_hash: [u8; 32] = cbsm_data.cycles_bank_canister_code.module_hash().clone();
-                for (user_id, umc_user_data) in cbsm_data.users_map.iter() {
-                    if upgrade_ucs_gather.len() >= CYCLES_BANK_CANISTER_UPGRADES_CHUNK_SIZE {
-                        break;
-                    }
-                    if umc_user_data.cycles_bank_latest_known_module_hash != current_uc_code_module_hash {
-                        upgrade_ucs_gather.push((user_id.clone(), umc_user_data.cycles_bank_canister_id.clone()));
-                    }
-                }
-            });
-            upgrade_ucs_gather
-        }
-    };    
-    
-    if upgrade_ucs.len() == 0 {
-        reply::<(Option<&Vec<CBSMUpgradeCBError>>,)>((None,));
-        return;
-    }
-    
-    // PORTANT!! trying to do a loop here of any sort, for-loop or loop{}-block over chunks of the upgrade_ucs will cause memory corruption in a localkey.with closure within the async block  
-    // Now one chunk per call.
-   
-    let sponses: Vec<Result<[u8; 32], CBSMUpgradeCBError>> = futures::future::join_all(
-        upgrade_ucs.iter().map(|upgrade_uc| {
-            async {
-                let (_user_id,upgrade_uc): (Principal, Principal) = upgrade_uc.clone();
-                
-                match call::<(CanisterIdRecord,), ()>(
-                    MANAGEMENT_CANISTER_ID,
-                    "stop_canister",
-                    (CanisterIdRecord{ canister_id: upgrade_uc },)
-                ).await {
-                    Ok(_) => {},
-                    Err(stop_canister_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::StopCanisterCallError(stop_canister_call_error.0 as u32, stop_canister_call_error.1))); 
-                    }
-                }
-                
-                let install_code_quest_b: Vec<u8> = match with(&CBSM_DATA, |cbsm_data| {
-                    encode_one(&ManagementCanisterInstallCodeQuest{
-                        mode : ManagementCanisterInstallCodeMode::upgrade,
-                        canister_id : upgrade_uc,
-                        wasm_module : &(cbsm_data.cycles_bank_canister_code.module()),
-                        arg : &post_upgrade_arg,
-                    }) 
-                }) {
-                    Ok(b) => b,
-                    Err(candid_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::UpgradeCodeCallCandidError{candid_error: format!("{:?}", candid_error)}));
-                    }
-                }; 
-                
-                let user_canister_code_module_hash: [u8; 32] = with(&CBSM_DATA, |cbsm_data| { cbsm_data.cycles_bank_canister_code.module_hash().clone() });
-                match call_raw128(
-                    MANAGEMENT_CANISTER_ID,
-                    "install_code",
-                    &install_code_quest_b,
-                    0
-                ).await {
-                    Ok(_) => {},
-                    Err(upgrade_code_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::UpgradeCodeCallError{wasm_module_hash: user_canister_code_module_hash, call_error: (upgrade_code_call_error.0 as u32, upgrade_code_call_error.1)}));
-                    }
-                }
-                
-                match call::<(CanisterIdRecord,), ()>(
-                    MANAGEMENT_CANISTER_ID,
-                    "start_canister",
-                    (CanisterIdRecord{ canister_id: upgrade_uc },)
-                ).await {
-                    Ok(_) => {},
-                    Err(start_canister_call_error) => {
-                        return Err((upgrade_uc, CBSMUpgradeCBErrorKind::StartCanisterCallError(start_canister_call_error.0 as u32, start_canister_call_error.1))); 
-                    }
-                }
-                
-                Ok(user_canister_code_module_hash)
-            }
-        }).collect::<Vec<_/*anonymous-future*/>>() 
-    ).await;
-        
-    let mut/*mut for the append*/ current_upgrade_fails: Vec<CBSMUpgradeCBError> = Vec::new();
-    
-    // doing this outside of the async blocks. i seen memory corruption in a localkey refcell with(&) in the async blocks. i rather keep the with_mut(&) out of it
-    with_mut(&CBSM_DATA, |cbsm_data| {
-        for ((user_id, _user_canister_id), sponse)/*: ((Principal,Principal),Result<[u8; 32], CBSMUpgradeCBError>)*/ in upgrade_ucs.into_iter().zip(sponses.into_iter()) {    
-            match sponse {
-                Ok(user_canister_code_module_hash) => {
-                    match cbsm_data.users_map.get_mut(&user_id) {
-                        Some(umc_user_data) => {
-                            (*umc_user_data).cycles_bank_latest_known_module_hash = user_canister_code_module_hash; 
-                        },
-                        None => {}
-                    }
-                },
-                Err(umc_upgrade_uc_error) => {
-                    current_upgrade_fails.push(umc_upgrade_uc_error);
-                }
-            }
-        }
-    });
-    
-    reply::<(Option<&Vec<CBSMUpgradeCBError>>,)>((Some(&current_upgrade_fails),));
-    
-    with_mut(&CBSM_DATA, |cbsm_data| {
-        cbsm_data.cycles_bank_canister_upgrade_fails.append(&mut current_upgrade_fails);
-        std::mem::drop(current_upgrade_fails); // cause its empty by the append
-    });
-    
-}
-
-*/
-
-
-
-
-
-#[query(manual_reply = true)]
-pub fn cts_view_user_canister_upgrade_fails() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");            
-    }
-    
-    let (chunk_i,): (u64,) = arg_data::<(u64,)>();
-    
-    with(&CBSM_DATA, |cbsm_data| {
-        reply::<(Option<&[CBSMUpgradeCBError]>,)>((cbsm_data.cycles_bank_canister_upgrade_fails.chunks(VIEW_CYCLES_BANK_CANISTER_UPGRADE_FAILS_CHUNK_SIZE).nth(chunk_i.try_into().unwrap()),));
-    });
-}
-
-#[update]
-pub fn cts_clear_user_canister_upgrade_fails() {
-    if caller() != cts_id() {
-        trap("caller must be the CTS");
-    }
-        
-    with_mut(&CBSM_DATA, |cbsm_data| {
-        cbsm_data.cycles_bank_canister_upgrade_fails.clear();
-        cbsm_data.cycles_bank_canister_upgrade_fails.shrink_to_fit();
-    });
 }
 
 
@@ -580,11 +403,10 @@ pub struct UMCMetrics {
     cycles_balance: u128,
     user_canister_code_hash: Option<[u8; 32]>,
     users_map_len: u64,
-    user_canister_upgrade_fails_len: u64,
 }
 
 #[query]
-pub fn cts_see_metrics() -> UMCMetrics {
+pub fn cts_view_metrics() -> UMCMetrics {
     if caller() != cts_id() {
         trap("caller must be the CTS");
     }
@@ -596,7 +418,6 @@ pub fn cts_see_metrics() -> UMCMetrics {
             cycles_balance: ic_cdk::api::canister_balance128(),
             user_canister_code_hash: if cbsm_data.cycles_bank_canister_code.module().len() != 0 { Some(cbsm_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
             users_map_len: cbsm_data.users_map.len() as u64,
-            user_canister_upgrade_fails_len: cbsm_data.cycles_bank_canister_upgrade_fails.len() as u64,
         }
     })
 }

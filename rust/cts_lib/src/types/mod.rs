@@ -197,7 +197,7 @@ pub mod cbs_map {
         pub cts_id: Principal
     }
 
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]    
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]    
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
         pub first_membership_creation_timestamp_nanos: u128,
@@ -206,7 +206,17 @@ pub mod cbs_map {
         pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData> // some if canister is uninstalled
     }
     
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]
+    // None means values are kept as they are. Some means change the field-values.
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, Default)]    
+    pub struct CBSMUserDataUpdateFields {
+        pub cycles_bank_canister_id: Option<Principal>,
+        pub first_membership_creation_timestamp_nanos: Option<u128>,
+        pub cycles_bank_latest_known_module_hash: Option<[u8; 32]>,
+        pub cycles_bank_lifetime_termination_timestamp_seconds: Option<u128>,
+        pub membership_termination_cb_uninstall_data: Option<Option<CyclesBankTerminationUninstallData>>            
+    }
+    
+    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
     pub struct CyclesBankTerminationUninstallData {
         pub uninstall_timestamp_nanos: u64,
         pub user_cycles_balance: Cycles,
@@ -223,19 +233,7 @@ pub mod cbs_map {
         UserNotFound
     }
     
-    pub type CBSMUpgradeCBError = (Principal, CBSMUpgradeCBErrorKind);
-
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug)]
-    pub enum CBSMUpgradeCBErrorKind {
-        StopCanisterCallError(u32, String),
-        UpgradeCodeCallError{wasm_module_hash: [u8; 32], call_error: (u32, String)},
-        UpgradeCodeCallCandidError{candid_error: String},
-        StartCanisterCallError(u32, String)
-    }
-
-
-
-
+    pub type UpdateUserResult = Result<(), UpdateUserError>;
 
 }
 
@@ -244,6 +242,7 @@ pub mod cbs_map {
 
 pub mod cycles_bank {
     use super::*;
+    use super::cycles_market::cm_main::TradeContractIdAndLedgerId;
 
     #[derive(CandidType, Deserialize)]
     pub struct CyclesBankInit {
@@ -254,6 +253,24 @@ pub mod cycles_bank {
         pub lifetime_termination_timestamp_seconds: u128,
         pub start_with_user_cycles_balance: Cycles,
     }
+    
+    #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
+    pub struct UserCBMetrics {
+        pub global_allocator_counter: u64,
+        pub cycles_balance: Cycles,
+        pub ctsfuel_balance: CTSFuel,
+        pub storage_size_mib: u128,
+        pub lifetime_termination_timestamp_seconds: u128,
+        pub user_id: Principal,
+        pub user_canister_creation_timestamp_nanos: u128,
+        pub storage_usage: u128,
+        pub cycles_transfers_id_counter: u128,
+        pub cycles_transfers_in_len: u128,
+        pub cycles_transfers_out_len: u128,
+        pub cm_trade_contracts: Vec<TradeContractIdAndLedgerId>,   
+        pub cts_cb_authorization: bool, 
+        pub cbsm_id: Principal,
+    }    
     
     #[derive(CandidType, Deserialize, Debug)]
     pub enum CBTradeCyclesError {

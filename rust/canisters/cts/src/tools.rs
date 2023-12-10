@@ -4,6 +4,7 @@ use crate::{
     MAX_CBS_MAPS,
     CREATE_CBS_MAP_CANISTER_CYCLES,
     CREATE_CBS_MAP_CANISTER_NETWORK_MEMORY_ALLOCATION,
+    CBSMStatus
 };
 //use candid::{CandidType,Deserialize};
 pub use cts_lib::cmc::*;
@@ -228,8 +229,7 @@ pub enum PutNewUserIntoACBSMError {
 // this function as of now does not check if the user exists already in one of the users-map-canisters. use the find_user-function for that.
 pub async fn put_new_user_into_a_cbsm(user_id: Principal, cbsm_user_data: CBSMUserData) -> Result<Principal, PutNewUserIntoACBSMError> {
     
-    for i in (0..with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.len() })).rev() {
-        let cbsm_id:Principal = with(&CTS_DATA, |cts_data| { cts_data.cbs_maps[i].0 });
+    for cbsm_id in with(&CTS_DATA, |cts_data| { cts_data.cbs_maps.keys().cloned().collect::<Vec<_>>() }).into_iter().rev() {
         match call::<(Principal, CBSMUserData), (Result<(), CBSMPutNewUserError>,)>(
             cbsm_id,
             "put_new_user",
@@ -342,7 +342,7 @@ pub async fn create_new_cbs_map() -> Result<Principal, CreateNewCBSMError> {
     ).await {
         Ok(_) => {
             with_mut(&CTS_DATA, |cts_data| { 
-                cts_data.cbs_maps.push((c, cbsm_module_hash)); 
+                cts_data.cbs_maps.insert(c, CBSMStatus{ module_hash: cbsm_module_hash }); 
                 cts_data.create_new_cbs_map_lock = false; 
             });
             Ok(c)    
@@ -370,24 +370,29 @@ pub enum FindUserInTheCBSMapsError {
 
 pub async fn find_user_in_the_cbs_maps(user_id: Principal) -> Result<Option<(CBSMUserData, Principal)>, FindUserInTheCBSMapsError> {
     
-    let call_results: Vec<CallResult<(Option<CBSMUserData>,)>> = futures::future::join_all(
-        with(&CTS_DATA, |cts_data| { 
-            cts_data.cbs_maps.iter().map(
-                |(cbsm, _)| { 
-                    call::<(Principal,), (Option<CBSMUserData>,)>(
-                        cbsm.clone(), 
-                        "find_user", 
-                        (user_id,)
-                    )
-                }
-            ).collect::<Vec<_>>()
-        })
+    let cbsms: Vec<Principal> = with(&CTS_DATA, |cts_data| { 
+        cts_data.cbs_maps.keys().cloned().collect()
+    });
+    
+    type HelperOutput = (Principal, CallResult<(Option<CBSMUserData>,)>);
+    async fn helper_(cbsm: Principal, user_id: Principal) -> HelperOutput {
+        (
+            cbsm,
+            call::<(Principal,), (Option<CBSMUserData>,)>(
+                cbsm, 
+                "find_user", 
+                (user_id,)
+            ).await
+        )
+    }
+    
+    let call_results: Vec<HelperOutput> = futures::future::join_all(
+        cbsms.into_iter().map(|cbsm| helper_(cbsm, user_id))
     ).await;
     
     let mut call_fails: Vec<(Principal, (u32, String))> = Vec::new();
     
-    for (i,call_result) in call_results.into_iter().enumerate() {
-        let cbsm_id: Principal = with(&CTS_DATA, |cts_data| cts_data.cbs_maps[i].0);
+    for (cbsm_id, call_result) in call_results.into_iter() {
         match call_result {
             Ok((optional_cbsm_user_data,)) => match optional_cbsm_user_data {
                 Some(cbsm_user_data) => return Ok(Some((cbsm_user_data, cbsm_id))),

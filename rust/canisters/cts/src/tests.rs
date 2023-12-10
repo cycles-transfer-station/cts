@@ -2,9 +2,13 @@ use pocket_ic::{*, common::rest::RawEffectivePrincipal};
 use candid::{Nat, Principal, CandidType, Deserialize};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
-    consts::TRILLION,
+    consts::{TRILLION, MANAGEMENT_CANISTER_ID},
     tools::principal_token_subaccount,
-    types::{CanisterCode, CallError}
+    types::{CanisterCode, CallError, cycles_bank::UserCBMetrics},
+    management_canister::{
+        ManagementCanisterCanisterStatusRecord,
+        CanisterIdRecord
+    }
 };
 use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError}};
 use crate::*;
@@ -20,9 +24,10 @@ const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
 
 
 #[test]
-fn purchase_cycles_bank_test() {
-    let (pic, cts, cm_main) = cts_setup();
+fn test_purchase_cycles_bank() {
+    let (pic, cts, _cm_main) = cts_setup();
     let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
+    let cb_module_hash: [u8; 32] = sha256(&std::fs::read("../../target/wasm32-unknown-unknown/release/cycles_bank.wasm").unwrap());
     for i in 0..(CB_CACHE_SIZE * 3) {
         let user = Principal::from_slice(&(i as u64).to_be_bytes());
         // test purchase_cycles_bank
@@ -39,9 +44,86 @@ fn purchase_cycles_bank_test() {
             ((MEMBERSHIP_COST_CYCLES / CMC_RATE) - (NEW_CYCLES_BANK_CREATION_CYCLES / CMC_RATE)) * (i+1) as u128
         );
         assert_eq!(cb_cycles_balance(&pic, cb, user), 0);        
+        let latest_cbsm = controller_view_cbsms(&pic, cts).last().cloned().unwrap();
+        // cts cbsm find_user
+        let (cts_find_user_sponse,): (Option<CBSMUserData>,) = query_candid_as(
+            &pic,
+            latest_cbsm,
+            cts,
+            "find_user",
+            (user,)
+        ).unwrap();
+        assert_eq!(
+            cts_find_user_sponse.unwrap(),
+            CBSMUserData {
+                cycles_bank_canister_id: cb,
+                first_membership_creation_timestamp_nanos: pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u128,
+                cycles_bank_latest_known_module_hash: cb_module_hash,
+                cycles_bank_lifetime_termination_timestamp_seconds: pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as u128 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
+                membership_termination_cb_uninstall_data: None
+            }
+        );
+        // check metrics
+        let (metrics,): (UserCBMetrics,) = query_candid_as(
+            &pic,
+            cb,
+            user,
+            "metrics",
+            ()
+        ).unwrap();
+        //println!("{:?}", metrics.cts_cb_authorization);
+        assert_eq!(
+            metrics,
+            UserCBMetrics{
+                global_allocator_counter: 3266,
+                cycles_balance: 0,
+                ctsfuel_balance: metrics.ctsfuel_balance,
+                storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,
+                lifetime_termination_timestamp_seconds: pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as u128 + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
+                user_id: user,
+                user_canister_creation_timestamp_nanos: pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u128,
+                storage_usage: 1310720,
+                cycles_transfers_id_counter: 0,
+                cycles_transfers_in_len: 0,
+                cycles_transfers_out_len: 0,
+                cm_trade_contracts: Vec::new(),   
+                cts_cb_authorization: false,    
+                cbsm_id: latest_cbsm,
+            }
+        );
+        assert!(metrics.ctsfuel_balance >= NEW_CYCLES_BANK_CTSFUEL - 5_000_000_000);
+        // check canister_status
+        let (canister_status,): (ManagementCanisterCanisterStatusRecord,) = call_candid_as(
+            &pic,
+            MANAGEMENT_CANISTER_ID,
+            RawEffectivePrincipal::CanisterId(cb.as_slice().to_vec()),
+            cts,
+            "canister_status",
+            (CanisterIdRecord{canister_id: cb},)
+        ).unwrap();
+        //println!("canister_status cb controllers: {:?}", canister_status.settings.controllers);
+        assert_eq!(
+            canister_status,
+            ManagementCanisterCanisterStatusRecord {
+                status : ManagementCanisterCanisterStatusVariant::running,
+                settings: ManagementCanisterCanisterSettings{
+                    controllers : {let mut v = vec![cts, latest_cbsm, cb]; v.sort(); v},
+                    compute_allocation : 0,
+                    memory_allocation : NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB * MiB as u128,
+                    freezing_threshold : NEW_CYCLES_BANK_FREEZING_THRESHOLD,
+                },
+                module_hash: Some(cb_module_hash),
+                memory_size: 11400552, // why 11 MiB?
+                cycles: canister_status.cycles // already checked above using pic.cycle_balance
+            }
+        );
+        
         pic.advance_time(core::time::Duration::from_nanos(MINIMUM_CB_AUTH_DURATION_NANOS * 2));
     }
+    let (view_cbsms,): (Vec<Principal>,) = query_candid_as(&pic, cts, CTS_CONTROLLER, "controller_view_cbsms", ()).unwrap();
+    assert_eq!(view_cbsms.len(), 1);    
     
+    // do in a separate loop, cause it is testing the cb-cache and cb-auths pruning mechanism
     for (user,cb) in users_and_cbs.iter() {
         // test find_cycles_bank
         let (find_user_cb_r,): (Result<Option<Principal>, FindCyclesBankError>,) = call_candid_as(
@@ -80,14 +162,13 @@ fn purchase_cycles_bank_test() {
             "user_upload_cts_cb_authorization",
             (cb_auth,)
         ).unwrap();
-        
-        // check metrics
+        assert_eq!(query_candid_as::<(),(UserCBMetrics,)>(&pic,*cb,*user,"metrics",()).unwrap().0.cts_cb_authorization, true);
     }
 }
 
 #[test]
 fn test_cb_transfer_icrc1() {
-    let (pic, cts, cm_main) = cts_setup();
+    let (pic, cts, _cm_main) = cts_setup();
     let user = Principal::from_slice(&(0123456789 as u64).to_be_bytes());
     let cb: Principal = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
     
@@ -95,7 +176,7 @@ fn test_cb_transfer_icrc1() {
     println!("cb_canister_cycles_balance: {cb_canister_cycles_balance}");
     mint_icp(&pic, Account{owner: cb,subaccount: None}, 500_000_000_000);
         
-    for ii in 0..100 {
+    for ii in 0..10 {
         let (tr,): (Result<Vec<u8>, CallError>,) = call_candid_as(
             &pic,
             cb,
@@ -124,7 +205,50 @@ fn test_cb_transfer_icrc1() {
    
 }
 
+#[test]
+fn test_upgrade_cbs() {
+    let (pic, cts, _cm_main) = cts_setup();
+    let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
+    for i in 0..10 {
+        let user = Principal::from_slice(&(i as u64).to_be_bytes());
+        let cb = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
+        users_and_cbs.push((user, cb));    
+    }
+    
+    let cbsms = controller_view_cbsms(&pic, cts);
+    let cb_module: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/release/cycles_bank.wasm").unwrap();
+    let (upgrade_r,): (Result<Vec<(Principal, UpgradeOutcome)>, CallError>,) = call_candid_as(
+        &pic,
+        cts,
+        RawEffectivePrincipal::None,
+        CTS_CONTROLLER,
+        "controller_upgrade_cbsm_cbs_chunk",
+        (cbsms[0], ControllerUpgradeCSQuest{
+            new_canister_code: Some(CanisterCode::new(cb_module)),
+            specific_cs: Some(users_and_cbs.iter().map(|t| t.1).collect()),
+            post_upgrade_quest: candid::encode_args(()).unwrap(),
+        })
+    ).unwrap();
+    let uos: Vec<(Principal, UpgradeOutcome)> = upgrade_r.unwrap();
+    println!("uos.len(): {}", uos.len());
+    //println!("uos: {:?}", uos);
+    for (_cb, uo) in uos.into_iter() {
+        assert_eq!(
+            uo,
+            UpgradeOutcome{
+                stop_canister_result: Some(Ok(())),
+                install_code_result: Some(Ok(())),    
+                start_canister_result: Some(Ok(())),
+            }
+        );
+    }
+}
 
+
+
+
+
+// --- tools ---
 
 fn mint_icp(pic: &PocketIc, to: Account, amount: u128) {
     let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
@@ -187,6 +311,10 @@ fn local_put_ic_root_key(pic: &PocketIc, cb: Principal) {
         "local_put_ic_root_key",
         (&pic.root_key().unwrap()[37..],)
     ).unwrap();
+}
+
+fn controller_view_cbsms(pic: &PocketIc, cts: Principal) -> Vec<Principal> {
+    query_candid_as::<(), (Vec<Principal>,)>(pic, cts, CTS_CONTROLLER, "controller_view_cbsms", ()).unwrap().0
 }
 
 

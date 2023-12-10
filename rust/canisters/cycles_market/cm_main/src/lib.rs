@@ -400,7 +400,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters_(tcs, &tc_cc, &q.post_upgrade_quest).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest).await;
     
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {

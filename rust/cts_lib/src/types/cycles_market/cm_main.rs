@@ -7,7 +7,7 @@ use crate::{
 };
 
 
-#[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TradeContractIdAndLedgerId {
     pub icrc1_ledger_canister_id: Principal,
     pub trade_contract_canister_id: Principal,
