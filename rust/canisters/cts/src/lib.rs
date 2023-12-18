@@ -247,9 +247,9 @@ const MAX_USERS_LENGTHEN_MEMBERSHIP_CB_CYCLES_PAYMENT: usize = 170;
 pub const MINIMUM_CTS_CYCLES_TRANSFER_IN_CYCLES: Cycles = 5_000_000_000;
 
 pub const CB_CACHE_SIZE: usize = {
-    #[cfg(not(feature = "test"))]
+    #[cfg(not(debug_assertions))]
     {1400}
-    #[cfg(feature = "test")]
+    #[cfg(debug_assertions)]
     {4}
 };
 
@@ -294,10 +294,6 @@ fn init(cts_init: CTSInit) {
         trap("NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES");
     }
     
-    #[cfg(feature = "test")]
-    if ic_cdk::api::id() == cts_lib::consts::CTS_ID {
-        trap("Must be a mainnet build.")
-    }
 } 
 
 
@@ -321,10 +317,6 @@ fn post_upgrade() {
         trap("NEW_CYCLES_BANK_CREATION_CYCLES > MEMBERSHIP_COST_CYCLES");
     }
     
-    #[cfg(feature = "test")]
-    if ic_cdk::api::id() == cts_lib::consts::CTS_ID {
-        trap("Must be a mainnet build.")
-    }
 } 
 
 
@@ -1518,7 +1510,7 @@ impl LengthenMembershipMidCallData {
 
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum LengthenMembershipError {
     LengthenYearsCannotBeZero,
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
@@ -1539,7 +1531,7 @@ pub enum LengthenMembershipError {
 }
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum LengthenMembershipMidCallError {
     PositCyclesIntoTheCyclesBankCallError(CallError), // for the cb_cycles_payment method
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
@@ -1662,7 +1654,6 @@ fn lengthen_membership_unlock_and_write_user(cts_data: &mut CTSData, user: &Prin
             IcpTokens::from_e8s(
                 cycles_to_icptokens(MEMBERSHIP_COST_CYCLES.saturating_mul(mid_call_data.lengthen_membership_quest.lengthen_years), xdr_permyriad_per_icp_rate)
                 .e8s() 
-                .saturating_add(1)
                 .saturating_add(ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() * 2)
             )
         }; 
@@ -1683,13 +1674,9 @@ fn lengthen_membership_unlock_and_write_user(cts_data: &mut CTSData, user: &Prin
     
     
     let user_payment_icp: IcpTokens = {
-         IcpTokens::from_e8s(
-            cycles_to_icptokens(
-                MEMBERSHIP_COST_CYCLES.saturating_mul(mid_call_data.lengthen_membership_quest.lengthen_years), 
-                mid_call_data.xdr_permyriad_per_icp_rate.as_ref().unwrap().clone()
-            )
-            .e8s() 
-            .saturating_add(1)
+        cycles_to_icptokens(
+            MEMBERSHIP_COST_CYCLES.saturating_mul(mid_call_data.lengthen_membership_quest.lengthen_years), 
+            mid_call_data.xdr_permyriad_per_icp_rate.as_ref().unwrap().clone()
         )
     };
     
@@ -1823,14 +1810,14 @@ async fn finish_lengthen_membership_update_cycles_bank_and_update_cbsm_(
      
                                                                                                 
     if mid_call_data.update_cbsm == false {
-        match call::<(Principal/*user-id*/, CBSMUserData), (Result<(), cbs_map::UpdateUserError>,)>(
+        match call::<(Principal/*user-id*/, cbs_map::CBSMUserDataUpdateFields), (Result<(), cbs_map::UpdateUserError>,)>(
             mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().1,
             "update_user",
             (
                 user_id,
-                CBSMUserData{
-                    cycles_bank_lifetime_termination_timestamp_seconds: mid_call_data.new_lifetime_termination_timestamp_seconds().unwrap(),
-                    ..mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.clone()
+                cbs_map::CBSMUserDataUpdateFields{
+                    cycles_bank_lifetime_termination_timestamp_seconds: Some(mid_call_data.new_lifetime_termination_timestamp_seconds().unwrap()),
+                    ..Default::default()
                 } 
             )
         ).await {
@@ -2288,8 +2275,8 @@ pub async fn controller_upgrade_cbsm_cbs_chunk(cbsm: Principal, q: ControllerUpg
 
 // ----- PURCHASE_CYCLES_BANK-METHODS --------------------------
 
-#[export_name = "canister_query controller_see_users_purchase_cycles_bank"]
-pub fn controller_see_users_purchase_cycles_bank() {
+#[export_name = "canister_query controller_view_users_purchase_cycles_bank"]
+pub fn controller_view_users_purchase_cycles_bank() {
     caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(Vec<(&Principal, &PurchaseCyclesBankData)>,)>((cts_data.users_purchase_cycles_bank.iter().collect::<Vec<(&Principal, &PurchaseCyclesBankData)>>(),));
@@ -2369,8 +2356,8 @@ pub async fn controller_complete_users_purchase_cycles_bank(opt_complete_users_p
 // ------ UsersTransferIcp-METHODS -----------------
 
 
-#[export_name = "canister_query controller_see_users_transfer_icp"]
-pub fn controller_see_users_transfer_icp() {
+#[export_name = "canister_query controller_view_users_transfer_icp"]
+pub fn controller_view_users_transfer_icp() {
     caller_is_controller_gaurd(&caller());
     with(&CTS_DATA, |cts_data| {
         ic_cdk::api::call::reply::<(Vec<(&Principal, &TransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&Principal, &TransferIcpData)>>(),));
@@ -2480,10 +2467,10 @@ pub fn controller_see_stop_calls_flag() -> bool {
 
 #[derive(CandidType, Deserialize)]
 pub struct ControllerCallCanisterQuest {
-    callee: Principal,
-    method_name: String,
-    arg_raw: Vec<u8>,
-    cycles: Cycles
+    pub callee: Principal,
+    pub method_name: String,
+    pub arg_raw: Vec<u8>,
+    pub cycles: Cycles
 }
 
 #[update(manual_reply = true)]

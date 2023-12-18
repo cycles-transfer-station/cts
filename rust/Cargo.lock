@@ -845,6 +845,7 @@ dependencies = [
  "ic-nns-common",
  "icp-ledger",
  "icrc-ledger-types 0.1.4 (git+https://github.com/dfinity/ic?rev=d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a)",
+ "more-asserts",
  "num-traits",
  "pocket-ic",
  "serde",
@@ -3224,6 +3225,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "more-asserts"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
 
 [[package]]
 name = "new_debug_unreachable"

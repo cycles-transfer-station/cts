@@ -16,5 +16,3 @@ futures = { workspace = true }
 canister-tools = { workspace = true }
 
 
-[features]
-test = ["cts_lib/test"]

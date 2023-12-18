@@ -30,7 +30,7 @@ use icrc_ledger_types::icrc1::{
 };
 
 const LEDGER_TRANSFER_FEE: u128 = 3;
-const WASMS_DIR: &str = "../../../target/wasm32-unknown-unknown/release/";
+const WASMS_DIR: &str = "../../../target/wasm32-unknown-unknown/debug/";
 const CB_START_CYCLES_BALANCE: Cycles = 500_000 * TRILLION;
 
 
@@ -172,7 +172,8 @@ fn t() {
     let cycles_payout_fee = trade_cycles / 10_000 * 50;    
     let tokens_payout_fee = cycles_payout_fee / trade_tokens_rate;
     
-    for i in 0_u128..50 {
+    for i in 0_u128..500 {
+        pic.advance_time(core::time::Duration::from_secs(60));
         println!("{i}");
         
         let token_position_id: u128 = create_token_position(&pic, p1, cb1, tc, ledger, trade_tokens, trade_tokens_rate, LEDGER_TRANSFER_FEE);

@@ -21,7 +21,8 @@ use cts_lib::{
                 arg_data,
                 arg_data_raw_size,
                 call,
-                call_raw128
+                call_raw128,
+                call_with_payment128,
             },
         },
         update, 
@@ -63,6 +64,7 @@ use cts_lib::{
         WASM_PAGE_SIZE_BYTES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
         TRILLION,
+        MANAGEMENT_CANISTER_ID,
     },
     tools::{
         time_nanos,
@@ -78,6 +80,7 @@ use cts_lib::{
         call_error_as_u32_and_string,
     },
     icrc::{BlockId},
+    management_canister::CanisterIdRecord,
     global_allocator_counter::get_allocated_bytes_count,
 };
 use canister_tools::{self, MemoryId};
@@ -1490,12 +1493,70 @@ pub fn get_cts_cb_auth() { //-> (Principal/*UserId*/, Vec<u8>/*auth*/) {
     });
 }
 
+#[derive(CandidType, Deserialize)]
+pub struct ManagementCanisterDepositCyclesQuest{
+    canister_id: Principal,
+    cycles: Cycles
+}
+#[derive(CandidType, Deserialize)]
+pub enum ManagementCanisterDepositCyclesError{
+    CyclesBalanceTooLow{ cycles_balance: Cycles },
+    CallError(CallError),
+}
+
+#[update]
+pub async fn management_canister_deposit_cycles(q: ManagementCanisterDepositCyclesQuest) -> Result<u128/*cycles-transfer-out-id*/, ManagementCanisterDepositCyclesError> {
+    if caller() != with(&CB_DATA, |cb_data| { cb_data.user_id }) {
+        trap("Caller must be the user.");
+    }
+    
+    with_mut(&CB_DATA, |cb_data| { 
+        if cb_data.user_data.cycles_balance < q.cycles {
+            return Err(ManagementCanisterDepositCyclesError::CyclesBalanceTooLow{ cycles_balance: cb_data.user_data.cycles_balance });
+        }
+        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(q.cycles);
+        Ok(())
+    })?;
+    
+    match call_with_payment128(
+        MANAGEMENT_CANISTER_ID,
+        "deposit_cycles",
+        (CanisterIdRecord{canister_id: q.canister_id},),
+        q.cycles
+    ).await {
+        Ok(()) => {
+            // make cycles-transfer-log
+            let cycles_transfer_id = with_mut(&CB_DATA, |cb_data| { 
+                let cycles_transfer_id = new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter);
+                cb_data.user_data.cycles_transfers_out.push(
+                    CyclesTransferOut{
+                        id: cycles_transfer_id,
+                        for_the_canister: q.canister_id,
+                        cycles_sent: q.cycles,
+                        cycles_refunded: Some(0), 
+                        cycles_transfer_memo: CyclesTransferMemo::Text("deposit_cycles".to_string()),
+                        timestamp_nanos: time_nanos(),
+                        opt_cycles_transfer_call_error: None,
+                    }
+                );
+                cycles_transfer_id
+            });
+            Ok(cycles_transfer_id)
+        }
+        Err(call_error) => {
+            with_mut(&CB_DATA, |cb_data| {
+                cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(q.cycles);
+            });
+            return Err(ManagementCanisterDepositCyclesError::CallError(call_error_as_u32_and_string(call_error)));
+        }
+    }
+}
 
 
 
 
 
-
+// ---------------
 
 #[update]
 pub fn cts_set_stop_calls_flag(stop_calls_flag: bool) {

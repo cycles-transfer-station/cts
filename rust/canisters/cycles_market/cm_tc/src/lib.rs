@@ -372,16 +372,16 @@ const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
 pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_MINUTE * 5;
 
-#[cfg(not(feature = "test"))]
+#[cfg(not(debug_assertions))]
 pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
 
-#[cfg(feature = "test")]
+#[cfg(debug_assertions)]
 pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 2 * KiB;
 
-#[cfg(not(feature = "test"))]
+#[cfg(not(debug_assertions))]
 pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
 
-#[cfg(feature = "test")]
+#[cfg(debug_assertions)]
 pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1 * KiB; 
 
 
@@ -570,7 +570,7 @@ pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (
     ic_cdk::print("trade_cycles start");
     let caller: Principal = caller();
     
-    #[cfg(not(feature = "without-cts-cb-auth-check"))]
+    #[cfg(not(debug_assertions))]
     if is_cts_cb_authorization_valid(
         localkey::cell::get(&CTS_ID),        
         UserAndCB{
@@ -680,7 +680,7 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
     ic_cdk::print("trade_tokens start");
     let caller: Principal = caller();
     
-    #[cfg(not(feature = "without-cts-cb-auth-check"))]    
+    #[cfg(not(debug_assertions))]
     if is_cts_cb_authorization_valid(
         localkey::cell::get(&CTS_ID),
         UserAndCB{

@@ -25,6 +25,4 @@ ic-icrc1-ledger = { git = "https://github.com/dfinity/ic", rev = "1131bd8d04cc57
 icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "1131bd8d04cc57447e4ef1fd143ddaad4e06a811" }
 bincode = "1.3.3"
 
-[features]
-without-cts-cb-auth-check = []
-test = ["cts_lib/test", "without-cts-cb-auth-check"]
+

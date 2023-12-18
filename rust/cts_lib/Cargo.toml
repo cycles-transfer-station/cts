@@ -18,5 +18,4 @@ ic-stable-structures = { workspace = true }
 canister_authorizations = { path = "./canister_authorizations" }
 futures = { workspace = true }
 
-[features]
-test = []
+

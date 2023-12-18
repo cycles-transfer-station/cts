@@ -13,16 +13,16 @@ pub fn is_cts_cb_authorization_valid(cts_id: Principal, user_and_cb: UserAndCB, 
         cts_id,
         CTS_CB_AUTHORIZATIONS_SEED,        
         {
-            #[cfg(not(feature = "test"))]
+            #[cfg(not(debug_assertions))]
             {IC_ROOT_KEY}
-            #[cfg(feature = "test")]
+            #[cfg(debug_assertions)]
             {localkey::cell::get(&LOCAL_IC_ROOT_KEY)}
         }
     )
 }
 
 
-#[cfg(feature = "test")]
+#[cfg(debug_assertions)]
 mod local_put_ic_root_key {
     use super::*;
     use ic_cdk::api::call::{arg_data, reply}; 
@@ -36,6 +36,6 @@ mod local_put_ic_root_key {
         reply(());
     }
 }
-#[cfg(feature = "test")] use local_put_ic_root_key::LOCAL_IC_ROOT_KEY;
-#[cfg(feature = "test")] use crate::tools::localkey;
+#[cfg(debug_assertions)] use local_put_ic_root_key::LOCAL_IC_ROOT_KEY;
+#[cfg(debug_assertions)] use crate::tools::localkey;
 

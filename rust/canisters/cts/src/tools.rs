@@ -35,6 +35,7 @@ use cts_lib::{
         },
         user_icp_id,
         principal_icp_subaccount,
+        time_seconds,
     },
     ic_cdk::{
         api::{
@@ -146,7 +147,7 @@ pub type CheckCurrentXdrPerMyriadPerIcpCmcRateSponse = Result<u64, CheckCurrentX
 pub async fn check_current_xdr_permyriad_per_icp_cmc_rate() -> CheckCurrentXdrPerMyriadPerIcpCmcRateSponse {
 
     let latest_known_cmc_rate: IcpXdrConversionRate = LATEST_KNOWN_CMC_RATE.with(|r| { r.get() }); 
-    if time() / 1_000_000_000 - latest_known_cmc_rate.timestamp_seconds < 60*10 {
+    if (time_seconds() as u64).saturating_sub(latest_known_cmc_rate.timestamp_seconds) < 60*10 {
         return Ok(latest_known_cmc_rate.xdr_permyriad_per_icp);
     }
     
