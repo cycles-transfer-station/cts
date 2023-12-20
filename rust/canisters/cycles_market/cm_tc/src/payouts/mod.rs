@@ -55,6 +55,15 @@ pub async fn do_payouts() {
             });
         }
     }
+    
+    if with(&CM_DATA, |cm_data| {
+        cm_data.void_cycles_positions.len() != 0
+        || cm_data.void_token_positions.len() != 0
+        || cm_data.trade_logs.len() != 0
+    }) {
+        fn spawn_do_payouts() { ic_cdk::spawn(do_payouts()); }
+        ic_cdk_timers::set_timer(core::time::Duration::from_secs(30), spawn_do_payouts);
+    }
 }
 
 #[export_name = "canister_update do_payouts_public_method"]

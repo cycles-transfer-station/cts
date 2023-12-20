@@ -51,4 +51,5 @@ futures = "0.3.23"
 num-traits = "0.2.15"
 canister-tools = "0.1.4"
 ic0 = "0.18.11"
+ic-cdk-timers = "0.4"
 

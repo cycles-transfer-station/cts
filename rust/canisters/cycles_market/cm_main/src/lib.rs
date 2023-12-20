@@ -7,7 +7,7 @@ use cts_lib::{
             call::{
                 reply,
                 call,
-                call_raw,
+                call_raw128,
             },
             canister_balance128,
         },
@@ -207,6 +207,17 @@ pub async fn controller_create_trade_contract(q: ControllerCreateIcrc1TokenTrade
 
 async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: ControllerCreateIcrc1TokenTradeContractMidCallData) 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError> {
+    
+    if let Some(tc_id_and_ledger_id) = with(&CM_MAIN_DATA, |cm_main_data| { 
+        cm_main_data.trade_contracts.iter()
+        .find(|t| { t.0.icrc1_ledger_canister_id == mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id })
+        .map(|t| { t.0 })
+    }) {
+        with_mut(&CM_MAIN_DATA, |data| {
+            data.controller_create_icrc1token_trade_contract_mid_call_data = None;
+        });
+        return Err(ControllerCreateIcrc1TokenTradeContractError::TradeContractForTheLedgerAlreadyCreated(tc_id_and_ledger_id));    
+    }
     
     if mid_call_data.icrc1token_trade_contract_canister_id.is_none() {
         if canister_balance128() < NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES + 20*TRILLION {
@@ -455,7 +466,7 @@ pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: Contr
 pub async fn controller_view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> Result<Vec<u8>, CallError> { 
     caller_is_controller_gaurd(&caller());
     
-    call_raw(
+    call_raw128(
         tc,
         "controller_view_payouts_errors",
         encode_one(chunk_i).unwrap(),        
@@ -469,4 +480,27 @@ pub async fn controller_view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> R
 
 
 
+// ----- CONTROLLER_CALL_CANISTER-METHOD --------------------------
+
+#[derive(CandidType, Deserialize)]
+pub struct ControllerCallCanisterQuest {
+    pub callee: Principal,
+    pub method_name: String,
+    pub arg_raw: Vec<u8>,
+    pub cycles: Cycles
+}
+
+#[update]
+pub async fn controller_call_canister(q: ControllerCallCanisterQuest) -> Result<Vec<u8>, CallError> {
+    caller_is_controller_gaurd(&caller());
+        
+    call_raw128(
+        q.callee,
+        &q.method_name,
+        &q.arg_raw,
+        q.cycles
+    )
+    .await
+    .map_err(call_error_as_u32_and_string)
+}
 
