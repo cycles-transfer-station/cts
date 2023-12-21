@@ -664,7 +664,9 @@ fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_dat
 // for the now a user must pay with the icp.
 #[update]
 pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
-
+    
+    trap("The CTS no longer lives on this canister. The CTS is now at the URL: https://cycles-transfer-station.com.");
+    
     let user_id: Principal = caller();
 
     if let Some(ref referral_user_id) = q.opt_referral_user_id {
