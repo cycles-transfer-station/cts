@@ -43,7 +43,6 @@ use cts_lib::{
             CBSMUserDataUpdateFields,
         },
     },
-    global_allocator_counter::get_allocated_bytes_count
 };
 
 use candid::{
@@ -398,7 +397,6 @@ pub async fn cts_call_canister() {
 
 #[derive(CandidType, Deserialize)]
 pub struct UMCMetrics {
-    global_allocator_counter: u64,
     stable_size: u64,
     cycles_balance: u128,
     user_canister_code_hash: Option<[u8; 32]>,
@@ -413,7 +411,6 @@ pub fn cts_view_metrics() -> UMCMetrics {
 
     with(&CBSM_DATA, |cbsm_data| {
         UMCMetrics {
-            global_allocator_counter: get_allocated_bytes_count() as u64,    
             stable_size: ic_cdk::api::stable::stable64_size(),
             cycles_balance: ic_cdk::api::canister_balance128(),
             user_canister_code_hash: if cbsm_data.cycles_bank_canister_code.module().len() != 0 { Some(cbsm_data.cycles_bank_canister_code.module_hash().clone()) } else { None },

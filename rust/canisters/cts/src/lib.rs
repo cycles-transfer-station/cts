@@ -106,7 +106,7 @@ use cts_lib::{
         IcpTransferError,
         ICP_DEFAULT_SUBACCOUNT,
     },
-    global_allocator_counter::get_allocated_bytes_count
+    //global_allocator_counter::get_allocated_bytes_count
 };
 use candid::{
     Principal,
@@ -973,7 +973,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
             purchase_cycles_bank_data.cycles_bank_canister.as_ref().unwrap().clone(),
         ],
         compute_allocation : 0,
-        memory_allocation : NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128,
+        memory_allocation : 0, //NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128,
         freezing_threshold : NEW_CYCLES_BANK_FREEZING_THRESHOLD,
     };
     
@@ -2517,12 +2517,12 @@ pub struct CTSMetrics {
 
 
 #[query]
-pub fn controller_see_metrics() -> CTSMetrics {
+pub fn controller_view_metrics() -> CTSMetrics {
     caller_is_controller_gaurd(&caller());
     
     with(&CTS_DATA, |cts_data| {
         CTSMetrics {
-            global_allocator_counter: get_allocated_bytes_count() as u64,
+            global_allocator_counter: 0,//get_allocated_bytes_count() as u64, disable this for the now.
             stable_size: ic_cdk::api::stable::stable64_size(),
             cycles_balance: ic_cdk::api::canister_balance128(),
             cbsm_code_hash: if cts_data.cbs_map_canister_code.module().len() != 0 { Some(cts_data.cbs_map_canister_code.module_hash().clone()) } else { None },

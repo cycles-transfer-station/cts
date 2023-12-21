@@ -81,7 +81,6 @@ use cts_lib::{
     },
     icrc::{BlockId},
     management_canister::CanisterIdRecord,
-    global_allocator_counter::get_allocated_bytes_count,
 };
 use canister_tools::{self, MemoryId};
 use candid::{
@@ -1372,7 +1371,7 @@ pub fn metrics() { //-> UserCBMetrics {
     
     with(&CB_DATA, |cb_data| {
         reply::<(UserCBMetrics,)>((UserCBMetrics{
-            global_allocator_counter: get_allocated_bytes_count() as u64,
+            global_allocator_counter: 0, //disable for the now get_allocated_bytes_count() as u64,
             cycles_balance: cb_data.user_data.cycles_balance,
             ctsfuel_balance: ctsfuel_balance(cb_data),
             storage_size_mib: cb_data.storage_size_mib,

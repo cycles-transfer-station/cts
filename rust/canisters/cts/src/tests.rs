@@ -87,7 +87,7 @@ fn test_purchase_cycles_bank() {
         assert_eq!(
             metrics,
             UserCBMetrics{
-                global_allocator_counter: 3266,
+                global_allocator_counter: metrics.global_allocator_counter,
                 cycles_balance: 0,
                 ctsfuel_balance: metrics.ctsfuel_balance,
                 storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,
@@ -121,7 +121,7 @@ fn test_purchase_cycles_bank() {
                 settings: ManagementCanisterCanisterSettings{
                     controllers : {let mut v = vec![cts, latest_cbsm, cb]; v.sort(); v},
                     compute_allocation : 0,
-                    memory_allocation : NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB * MiB as u128,
+                    memory_allocation : 0, //NEW_CYCLES_BANK_NETWORK_MEMORY_ALLOCATION_MiB * MiB as u128,
                     freezing_threshold : NEW_CYCLES_BANK_FREEZING_THRESHOLD,
                 },
                 module_hash: Some(cb_module_hash),

@@ -22,7 +22,6 @@ use cts_lib::{
     consts::TRILLION,
     tools::principal_token_subaccount,
 };
-use bincode::Options;
 
 use icrc_ledger_types::icrc1::{
     account::Account,
@@ -576,7 +575,7 @@ fn t() {
 
 
 
-fn create_and_download_state_snapshot<T: Serialize + for<'a> Deserialize<'a>>(pic: &PocketIc, caller: Principal, canister: Principal, memory_id: u8) -> T {
+fn create_and_download_state_snapshot<T: candid::CandidType + for<'a> Deserialize<'a>>(pic: &PocketIc, caller: Principal, canister: Principal, memory_id: u8) -> T {
     let (snapshot_len,): (u64,) = call_candid_as(&pic, canister, RawEffectivePrincipal::None, caller, "controller_create_state_snapshot", (memory_id,)).unwrap();
     let mut v = Vec::<u8>::new();
     let mut i = 0;
@@ -589,7 +588,7 @@ fn create_and_download_state_snapshot<T: Serialize + for<'a> Deserialize<'a>>(pi
         v.extend(chunk);
     }  
     assert_eq!(v.len(), snapshot_len as usize);
-    bincode::DefaultOptions::new().deserialize(&v).unwrap()    
+    candid::decode_one(&v).unwrap()    
 }
 
 fn pl_backwards(b: &[u8]) -> PositionLog {

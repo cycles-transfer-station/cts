@@ -619,7 +619,6 @@ dependencies = [
 name = "cm_tc"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "candid",
  "canister-tools",
  "cm_storage_lib",
