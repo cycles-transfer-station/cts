@@ -119,7 +119,7 @@ mod tests;
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CMData {
     cts_id: Principal,
     cm_main_id: Principal,
@@ -162,7 +162,7 @@ impl CMData {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct LogStorageData {
     storage_canisters: Vec<StorageCanisterData>,
     #[serde(with = "serde_bytes")]
@@ -188,7 +188,7 @@ impl LogStorageData {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct StorageCanisterData {
     log_size: u32,
     first_log_id: u128,

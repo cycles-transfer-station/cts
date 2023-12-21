@@ -12,7 +12,6 @@ members = [
     "canisters/cycles_market/cm_storage_lib",
     "canisters/cycles_market/cm_trades_storage",
     "canisters/cycles_market/cm_positions_storage",
-    "canisters/temp_fid",
     "cts_lib/canister_authorizations",
     
 ]
@@ -39,17 +38,17 @@ strip = "debuginfo"
 
 [workspace.dependencies]
 ic-cdk = "0.10.0"
-ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "9c9a7cd55c77fcdd12330952cae95b484eeb3690" } 
+ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "4749f45a3f609dcf5dc1a32fe0d9131ddf02f495" } 
 ic-ledger-types = "0.7.0"
 candid = "0.9.10"
 sha2 = "0.9.1"
-serde = { version = "1.0.137", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"] }
 serde_bytes = "0.11.6"
 icrc-ledger-types = { git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
 ic-stable-structures = "0.5.3"
 futures = "0.3.23"
 num-traits = "0.2.15"
-canister-tools = "0.1.4"
+canister-tools = "0.2.0"
 ic0 = "0.18.11"
 ic-cdk-timers = "0.4"
 

@@ -165,7 +165,7 @@ struct CMMessageVoidTokenPositionPositorLog{
     cm_message_void_token_position_positor_quest: cm_icrc1token_trade_contract::CMVoidTokenPositionPositorMessageQuest
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CMMessageLogs{
     cm_message_cycles_position_purchase_positor_logs: Vec<CMMessageCyclesPositionPurchasePositorLog>,
     cm_message_cycles_position_purchase_purchaser_logs: Vec<CMMessageCyclesPositionPurchasePurchaserLog>,
@@ -187,7 +187,7 @@ impl CMMessageLogs {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CMTradeContractLogs {
     cm_message_logs: CMMessageLogs,
 }
@@ -204,7 +204,7 @@ impl Default for CMTradeContractLogs {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
@@ -225,7 +225,7 @@ impl UserData {
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CBData {
     user_canister_creation_timestamp_nanos: u128,
     cts_id: Principal,
@@ -816,7 +816,7 @@ use cts_lib::cmc::*;
 
 
 // options are for the memberance of the steps
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct BurnIcpMintCyclesData {
     start_time_nanos: u64,
     lock: bool,

@@ -58,7 +58,7 @@ use canister_tools::MemoryId;
 
 type UsersMap = HashMap<Principal, CBSMUserData>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CBSMData {
     cts_id: Principal,
     users_map: UsersMap,

@@ -62,7 +62,7 @@ struct TradeContractData {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
     trade_contracts: Vec<(TradeContractIdAndLedgerId, TradeContractData)>,
@@ -149,7 +149,7 @@ pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canis
 
 // --------
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(CandidType, Serialize, Deserialize, Clone)]
 pub struct ControllerCreateIcrc1TokenTradeContractMidCallData {
     start_time_nanos: u64,
     lock: bool,

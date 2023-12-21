@@ -40,10 +40,10 @@ use serde_bytes::Bytes;
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct OldStorageData {}
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct StorageData {
     log_size: u32, // set in the canister_init
     first_log_id: u128,

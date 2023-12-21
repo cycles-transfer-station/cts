@@ -21,7 +21,7 @@ struct Candle {
     close_rate: CyclesPerToken,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, CandidType, Serialize, Deserialize)]
 pub struct CandleCounter {
     latest_1_minute: Candle, 
     segments_1_minute: Vec<Candle>,

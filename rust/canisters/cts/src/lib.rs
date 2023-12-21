@@ -162,7 +162,7 @@ use certification::*;
 // -------
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct CTSData {
     cycles_market_main: Principal,
     cycles_bank_canister_code: CanisterCode,
@@ -200,7 +200,7 @@ impl CTSData {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct CBSMStatus {
     module_hash: [u8; 32],
 }

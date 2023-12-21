@@ -22,7 +22,7 @@ pub trait StorageLogTrait {
 
 
 // this one goes into the PositionLog storage and gets updated for the position-termination.
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PositionLog {
     pub id: PositionId,
     pub positor: Principal,
@@ -38,7 +38,7 @@ pub struct PositionLog {
     pub void_token_position_payout_ledger_transfer_fee: u64, // in the use for the token-positions.
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct CreatePositionQuestLog {
     pub quantity: u128,
     pub cycles_per_token_rate: CyclesPerToken
@@ -60,13 +60,13 @@ impl From<SellTokensQuest> for CreatePositionQuestLog {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct PositionTerminationData {
     pub timestamp_nanos: u128,
     pub cause: PositionTerminationCause
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum PositionTerminationCause {
     Fill, // the position is fill[ed]. position.amount < minimum_token_match()
     Bump, // the position got bumped
@@ -402,7 +402,7 @@ pub trait PayoutDataTrait {
     fn token_payout_ledger_transfer_fee(&self) -> Option<Tokens>; // Some(ledger_transfer_fee) if this is a TokenPayoutData and if the transfer is complete
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct CyclesPayoutData {
     pub cycles_payout: Option<bool>, // false means dust-collection.
 }
@@ -441,12 +441,12 @@ pub trait CyclesPayoutTrait {
 
 
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct TokenTransferData {
     pub did_transfer: bool, // if false that means it is dust-collection.
     pub ledger_transfer_fee: Tokens,
 }
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct TokenPayoutData {
     pub token_transfer: Option<TokenTransferData>,
 }
@@ -493,7 +493,7 @@ pub trait TokenPayoutTrait {
 // -----------------
 
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct TradeLog {
     pub position_id_matcher: PositionId,
     pub position_id_matchee: PositionId,
@@ -685,14 +685,14 @@ pub trait VoidPositionTrait: Clone {
     fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData;
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct VPUpdateStoragePositionData {
     pub lock: bool,
     pub status: bool,
     pub update_storage_position_log: PositionLog,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct VoidCyclesPosition {
     pub position_id: PositionId,
     pub positor: Principal,
@@ -765,7 +765,7 @@ impl CyclesPayoutTrait for VoidCyclesPosition {
 
 
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct VoidTokenPosition {
     pub position_id: PositionId,
     pub tokens: Tokens,

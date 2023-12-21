@@ -465,11 +465,10 @@ dependencies = [
 
 [[package]]
 name = "canister-tools"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66c4117468c52db098dbb98480d331c43eebf20418d9fbc853c6b561abf26688"
+checksum = "4b3047324ddb4f63e0af73db6e0f0e51095ade79cdde3a466bd2f11fbc6de998"
 dependencies = [
- "bincode",
  "candid",
  "ic-cdk",
  "ic-stable-structures",
@@ -1721,8 +1720,9 @@ dependencies = [
 [[package]]
 name = "ic-certified-map"
 version = "0.4.0"
-source = "git+https://github.com/levifeldman/cdk-rs.git?rev=9c9a7cd55c77fcdd12330952cae95b484eeb3690#9c9a7cd55c77fcdd12330952cae95b484eeb3690"
+source = "git+https://github.com/levifeldman/cdk-rs.git?rev=4749f45a3f609dcf5dc1a32fe0d9131ddf02f495#4749f45a3f609dcf5dc1a32fe0d9131ddf02f495"
 dependencies = [
+ "candid",
  "serde",
  "serde_bytes",
  "sha2 0.10.6",
@@ -3982,9 +3982,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.188"
+version = "1.0.193"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf9e0fcba69a370eed61bcf2b728575f726b50b55cba78064753d708ddc7549e"
+checksum = "25dd9975e68d0cb5aa1120c288333fc98731bd1dd12f561e468ea4728c042b89"
 dependencies = [
  "serde_derive",
 ]
@@ -4010,9 +4010,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.188"
+version = "1.0.193"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4eca7ac642d82aa35b60049a6eccb4be6be75e599bd2e9adb5f875a737654af2"
+checksum = "43576ca501357b9b071ac53cdc7da8ef0cbd9493d8df094cd821777ea6e894d3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4330,16 +4330,6 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
-
-[[package]]
-name = "temp_fid"
-version = "0.1.0"
-dependencies = [
- "candid",
- "cts_lib",
- "futures",
- "serde",
-]
 
 [[package]]
 name = "tempfile"

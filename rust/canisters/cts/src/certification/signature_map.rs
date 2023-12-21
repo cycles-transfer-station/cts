@@ -10,9 +10,10 @@
 use super::ic_certified_map::{leaf_hash, AsHashTree, Hash, HashTree, RbTree};
 use std::borrow::Cow;
 use std::collections::BinaryHeap;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize};
+use candid::{CandidType, Deserialize};
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, CandidType, Serialize, Deserialize)]
 struct Unit;
 
 impl AsHashTree for Unit {
@@ -24,7 +25,7 @@ impl AsHashTree for Unit {
     }
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, CandidType, Serialize, Deserialize)]
 struct SigExpiration {
     expires_at: u64,
     seed_hash: Hash,
@@ -45,7 +46,7 @@ impl PartialOrd for SigExpiration {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, CandidType, Serialize, Deserialize)]
 pub struct SignatureMap {
     certified_map: RbTree<Hash, RbTree<Hash, Unit>>,
     expiration_queue: BinaryHeap<SigExpiration>,

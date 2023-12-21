@@ -4,6 +4,9 @@
 !/rust/target/wasm32-unknown-unknown/release/
 /rust/target/wasm32-unknown-unknown/release/*
 !/rust/target/wasm32-unknown-unknown/release/*.wasm
+!/rust/target/wasm32-unknown-unknown/debug/
+/rust/target/wasm32-unknown-unknown/debug/*
+!/rust/target/wasm32-unknown-unknown/debug/*.wasm
 
 
 /rust/target__

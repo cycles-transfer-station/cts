@@ -26,9 +26,9 @@ use cts_lib::{
         }
     }
 };
-use serde::{Serialize, Deserialize};
+use serde::{Serialize};
 use serde_bytes::Bytes;
-use candid::{Principal, encode_one, decode_one};
+use candid::{Principal, CandidType, Deserialize, encode_one, decode_one};
 use std::{
     thread::LocalKey,
     cell::RefCell,
@@ -38,7 +38,7 @@ use std::{
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub enum FlushLogsStorageError {
     CreateStorageCanisterError(CreateStorageCanisterError),
     StorageCanisterCallError(CallError),
@@ -148,7 +148,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
 
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Debug)]
 pub enum CreateStorageCanisterError {
     CyclesBalanceTooLow{ cycles_balance: Cycles },
     CreateCanisterCallError(CallError),

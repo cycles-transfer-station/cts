@@ -98,7 +98,7 @@ pub mod cache {
     use std::collections::{HashMap};
     
     // private
-    #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+    #[derive(Clone, Copy, candid::CandidType, serde::Serialize, serde::Deserialize)]
     struct CacheData<T> {
         timestamp_nanos: u64,
         data: T,
@@ -108,7 +108,7 @@ pub mod cache {
     // on a new user, put/update insert the new user into this cache
     // on a user-contract-termination, void[remove/delete] the (user,user-canister)-log in this cache
     use core::hash::Hash;
-    #[derive(serde::Serialize, serde::Deserialize)]
+    #[derive(candid::CandidType, serde::Serialize, serde::Deserialize)]
     pub struct Cache<E: Eq + PartialEq + Hash + Clone, T> {
         hashmap: HashMap<E, CacheData<T>>,
         max_size: usize
