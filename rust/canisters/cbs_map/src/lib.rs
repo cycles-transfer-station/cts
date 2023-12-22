@@ -42,6 +42,7 @@ use cts_lib::{
             UpdateUserResult,
             CBSMUserDataUpdateFields,
         },
+        http_request::{HttpRequest, HttpResponse}
     },
 };
 
@@ -395,12 +396,21 @@ pub async fn cts_call_canister() {
 
 // ------------ Metrics ------------------------------------
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct UMCMetrics {
     stable_size: u64,
     cycles_balance: u128,
     user_canister_code_hash: Option<[u8; 32]>,
     users_map_len: u64,
+}
+
+fn create_umc_metrics(cbsm_data: &CBSMData) -> UMCMetrics {
+    UMCMetrics {
+        stable_size: ic_cdk::api::stable::stable64_size(),
+        cycles_balance: ic_cdk::api::canister_balance128(),
+        user_canister_code_hash: if cbsm_data.cycles_bank_canister_code.module().len() != 0 { Some(cbsm_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
+        users_map_len: cbsm_data.users_map.len() as u64,
+    }
 }
 
 #[query]
@@ -410,13 +420,38 @@ pub fn cts_view_metrics() -> UMCMetrics {
     }
 
     with(&CBSM_DATA, |cbsm_data| {
-        UMCMetrics {
-            stable_size: ic_cdk::api::stable::stable64_size(),
-            cycles_balance: ic_cdk::api::canister_balance128(),
-            user_canister_code_hash: if cbsm_data.cycles_bank_canister_code.module().len() != 0 { Some(cbsm_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
-            users_map_len: cbsm_data.users_map.len() as u64,
-        }
+        create_umc_metrics(cbsm_data)    
     })
+}
+
+#[export_name = "canister_query http_request"]
+pub fn http_request() {
+    
+    let (quest,): (HttpRequest,) = arg_data::<(HttpRequest,)>(); 
+    
+    let file_name: &str = quest.url.split("?").next().unwrap();
+    
+    if file_name == "/metrics" { 
+        with(&CBSM_DATA, |cbsm_data| {
+            reply::<(HttpResponse,)>((
+                HttpResponse {
+                    status_code: 200,
+                    headers: vec![("Content-Type", "text/plain")],
+                    body: &serde_bytes::ByteBuf::from(format!("{:?}", create_umc_metrics(cbsm_data)).as_bytes()),
+                    streaming_strategy: None
+                },
+            )); 
+        });
+    } else {
+        reply::<(HttpResponse,)>((
+            HttpResponse {
+                status_code: 404,
+                headers: vec![],
+                body: &serde_bytes::ByteBuf::from(vec![]),
+                streaming_strategy: None
+            },
+        ));       
+    }
 }
 
 
