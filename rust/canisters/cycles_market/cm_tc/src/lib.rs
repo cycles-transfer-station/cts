@@ -1603,6 +1603,33 @@ pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQues
 }
 
 
+
+// ----- CONTROLLER_CALL_CANISTER-METHOD --------------------------
+
+#[derive(CandidType, Deserialize)]
+pub struct ControllerCallCanisterQuest {
+    pub callee: Principal,
+    pub method_name: String,
+    pub arg_raw: Vec<u8>,
+    pub cycles: Cycles
+}
+
+#[update]
+pub async fn controller_call_canister(q: ControllerCallCanisterQuest) -> Result<Vec<u8>, CallError> {
+    caller_is_controller_gaurd(&caller());
+        
+    call_raw128(
+        q.callee,
+        &q.method_name,
+        &q.arg_raw,
+        q.cycles
+    )
+    .await
+    .map_err(call_error_as_u32_and_string)
+}
+
+
+
 /*
 #[query]
 pub fn http_request(q: HttpRequest) -> HttpResponse {
