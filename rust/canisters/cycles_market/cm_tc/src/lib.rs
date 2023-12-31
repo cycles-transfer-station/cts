@@ -35,7 +35,6 @@ use cts_lib::{
         KiB,
         MiB,
         NANOS_IN_A_SECOND,
-        SECONDS_IN_A_MINUTE,
         TRILLION,
     },
     types::{
@@ -366,11 +365,10 @@ mod token_transfer_memo_mod {
 use token_transfer_memo_mod::*;
     
 
-const TRANSFER_TOKEN_BALANCE_MEMO: &[u8; 29] = b"CTS-CM-TOKEN-BALANCE-TRANSFER";
 
 const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
 
-pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = SECONDS_IN_A_MINUTE * 5;
+pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = 0;
 
 #[cfg(not(debug_assertions))]
 pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
@@ -1051,7 +1049,7 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
     
     let token_transfer_result = token_transfer(
         TokenTransferArg {
-            memo: Some(IcrcMemo(ByteBuf::from(*TRANSFER_TOKEN_BALANCE_MEMO))),
+            memo: None,
             amount: q.tokens.into(),
             fee: Some(q.token_fee.into()),
             from_subaccount: Some(principal_token_subaccount(&user_id)),

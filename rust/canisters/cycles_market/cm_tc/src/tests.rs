@@ -65,6 +65,7 @@ fn t() {
                         storage_size_mib: 310,                         
                         lifetime_termination_timestamp_seconds: 60*60*24*365*100,
                         start_with_user_cycles_balance: CB_START_CYCLES_BALANCE,
+                        sns_control: false,
                     }
                 ).unwrap(), 
                 None
