@@ -198,15 +198,6 @@ pub mod cbs_map {
     }
     
     #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]    
-    pub struct OldCBSMUserData {
-        pub cycles_bank_canister_id: Principal,
-        pub first_membership_creation_timestamp_nanos: u128,
-        pub cycles_bank_latest_known_module_hash: [u8; 32],
-        pub cycles_bank_lifetime_termination_timestamp_seconds: u128,
-        pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData>,
-    }
-    
-    #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]    
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
         pub first_membership_creation_timestamp_nanos: u128,

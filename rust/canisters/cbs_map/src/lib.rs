@@ -37,7 +37,6 @@ use cts_lib::{
         cbs_map::{
             CBSMInit,
             CBSMUserData,
-            OldCBSMUserData,
             PutNewUserError,
             UpdateUserError,
             UpdateUserResult,
@@ -74,14 +73,6 @@ impl CBSMData {
     }
 }
 
-#[derive(CandidType, Deserialize)]
-struct OldCBSMData {
-    cts_id: Principal,
-    users_map: HashMap<Principal, OldCBSMUserData>,
-    cycles_bank_canister_code: CanisterCode,
-}
-
-
 
 
 const CBSM_DATA_UPGRADE_MEMORY_ID: MemoryId = MemoryId::new(0);
@@ -117,6 +108,8 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
+    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, None::<fn(CBSMData) -> CBSMData>);
+    /*
     canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, Some::<fn(OldCBSMData) -> CBSMData>(
         |old_cbsm_data| {
             CBSMData{
@@ -139,7 +132,8 @@ fn post_upgrade() {
                 cycles_bank_canister_code: old_cbsm_data.cycles_bank_canister_code,
             }
         }
-    ))
+    ));
+    */
 }
 
 #[no_mangle]

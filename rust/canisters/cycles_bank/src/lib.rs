@@ -220,20 +220,6 @@ impl UserData {
 }
 
 #[derive(CandidType, Deserialize)]
-struct OldCBData {
-    user_canister_creation_timestamp_nanos: u128,
-    cts_id: Principal,
-    cbsm_id: Principal,
-    user_id: Principal,
-    storage_size_mib: u128,
-    lifetime_termination_timestamp_seconds: u128,
-    user_data: UserData,
-    cycles_transfers_id_counter: u128,
-    cts_cb_authorization: Vec<u8>,
-    burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
-}
-
-#[derive(CandidType, Deserialize)]
 struct CBData {
     user_canister_creation_timestamp_nanos: u128,
     cts_id: Principal,
@@ -332,6 +318,8 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
+    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
+    /*
     canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, Some::<fn(OldCBData) -> CBData>(
         |old_cb_data| {
             CBData{
@@ -349,6 +337,7 @@ fn post_upgrade() {
             }
         }
     ));
+    */
 }
 
 // ---------------------------
