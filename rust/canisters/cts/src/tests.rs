@@ -73,7 +73,8 @@ fn test_purchase_cycles_bank() {
                 first_membership_creation_timestamp_nanos: cbsm_user_data.first_membership_creation_timestamp_nanos, 
                 cycles_bank_latest_known_module_hash: cb_module_hash,
                 cycles_bank_lifetime_termination_timestamp_seconds: cbsm_user_data.first_membership_creation_timestamp_nanos / NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
-                membership_termination_cb_uninstall_data: None
+                membership_termination_cb_uninstall_data: None,
+                sns_control: false,
             }
         );
         // check metrics
@@ -88,7 +89,6 @@ fn test_purchase_cycles_bank() {
         assert_eq!(
             metrics,
             UserCBMetrics{
-                global_allocator_counter: metrics.global_allocator_counter,
                 cycles_balance: 0,
                 ctsfuel_balance: metrics.ctsfuel_balance,
                 storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,
@@ -102,6 +102,7 @@ fn test_purchase_cycles_bank() {
                 cm_trade_contracts: Vec::new(),   
                 cts_cb_authorization: false,    
                 cbsm_id: latest_cbsm,
+                sns_control: false,
             }
         );
         assert_ge!(metrics.ctsfuel_balance, NEW_CYCLES_BANK_CTSFUEL - 10_000_000_000);
@@ -470,7 +471,8 @@ fn test_lengthen_lifetime_icp_payment() {
                 first_membership_creation_timestamp_nanos: pic_get_time_nanos(&pic), 
                 cycles_bank_latest_known_module_hash: cb_module_hash,
                 cycles_bank_lifetime_termination_timestamp_seconds: new_lifetime_termination_timestamp_seconds,
-                membership_termination_cb_uninstall_data: None
+                membership_termination_cb_uninstall_data: None,
+                sns_control: false,
             }
         );        
     }
@@ -482,7 +484,7 @@ fn test_lengthen_lifetime_cycles_payment() {
     let (pic, cts, _cm_main) = cts_setup();
     let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
     for i in 0..3 {
-        let user = Principal::from_slice(&(i+50000 as u64).to_be_bytes());
+        let user = Principal::from_slice(&(i+60000 as u64).to_be_bytes());
         let cb = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
         users_and_cbs.push((user, cb));
             
@@ -555,7 +557,8 @@ fn test_lengthen_lifetime_cycles_payment() {
                 first_membership_creation_timestamp_nanos: pic_get_time_nanos(&pic), 
                 cycles_bank_latest_known_module_hash: cb_module_hash,
                 cycles_bank_lifetime_termination_timestamp_seconds: new_lifetime_termination_timestamp_seconds,
-                membership_termination_cb_uninstall_data: None
+                membership_termination_cb_uninstall_data: None,
+                sns_control: false,
             }
         );
         assert_eq!(
@@ -570,11 +573,11 @@ fn test_burn_icp_mint_cycles() {
     let (pic, cts, _cm_main) = cts_setup();
     let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
     for i in 0..3 {
-        let user = Principal::from_slice(&(i+50000 as u64).to_be_bytes());
+        let user = Principal::from_slice(&(i+70000 as u64).to_be_bytes());
         let cb = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
         users_and_cbs.push((user, cb));        
     }
-   for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
+    for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
         let cb_system_cycles_balance_before = pic.cycle_balance(cb);
         let burn_icp = i as u128 + 1;
         mint_icp(&pic, Account{owner: cb, subaccount: None}, burn_icp + LEDGER_TRANSFER_FEE/*cmc-transfer-fee*/);
@@ -593,6 +596,46 @@ fn test_burn_icp_mint_cycles() {
         );  
    } 
 }
+
+#[test]
+fn test_cb_sns_control() {
+    let (pic, cts, _cm_main) = cts_setup();
+    let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
+    for i in 0..3 {
+        let user = Principal::from_slice(&(i+80000 as u64).to_be_bytes());
+        let cb = _mint_icp_and_purchase_cycles_bank(&pic, user, cts, Some(PurchaseCyclesBankQuest{ sns_control: Some(i % 2 == 0) }));
+        users_and_cbs.push((user, cb));        
+    }
+    let cbsm = controller_view_cbsms(&pic, cts).last().unwrap().clone();
+    for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
+        let find_sns_cb_call_result = query_candid::<_, (Option<Principal>,)>(
+            &pic,
+            cbsm,
+            "find_sns_cb",
+            (user,)
+        );
+        let cbsm_user_data = query_candid_as::<_, (Option<CBSMUserData>,)>(&pic, cbsm, cts, "find_user", (user,)).unwrap().0.unwrap();
+        if i % 2 == 0 {
+            assert_eq!(
+                find_sns_cb_call_result.unwrap().0.unwrap(),
+                cb
+            );
+            assert_eq!(cbsm_user_data.sns_control, true);
+            // call as anon
+            let _cycles = query_candid::<(), (Cycles,)>(&pic, cb, "cycles_balance", ()).unwrap().0;
+            let _metrics = query_candid::<(), (UserCBMetrics,)>(&pic, cb, "metrics", ()).unwrap().0;
+        } else {
+            let _ = find_sns_cb_call_result.unwrap_err(); // call traps without a correct authorization
+            assert_eq!(cbsm_user_data.sns_control, false);
+            let _ = query_candid::<(), (Cycles,)>(&pic, cb, "cycles_balance", ()).unwrap_err();
+            let _cycles = cb_cycles_balance(&pic, cb, user);
+            let _ = query_candid::<(), (UserCBMetrics,)>(&pic, cb, "metrics", ()).unwrap_err();
+            let _metrics = query_candid_as::<(), (UserCBMetrics,)>(&pic, cb, user, "metrics", ()).unwrap().0;
+        }
+    }
+}
+
+
 
 
 // --- tools ---
@@ -635,8 +678,11 @@ fn mint_icp(pic: &PocketIc, to: Account, amount: u128) {
     mint_icp_r.unwrap();
 }
 
-
 fn mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal) -> Principal {
+    _mint_icp_and_purchase_cycles_bank(pic, user, cts, None)
+} 
+
+fn _mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal, pcb_q: Option<PurchaseCyclesBankQuest>) -> Principal {
     mint_icp(
         &pic,
         Account{ owner: cts, subaccount: Some(principal_token_subaccount(&user)) },
@@ -648,7 +694,7 @@ fn mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Princ
         RawEffectivePrincipal::None,
         user,
         "purchase_cycles_bank",
-        (PurchaseCyclesBankQuest{},)
+        (pcb_q.unwrap_or(PurchaseCyclesBankQuest{ sns_control: None }),)
     ).unwrap();
     let cb = purchase_cb_result.unwrap().cycles_bank_canister_id;   
     cb

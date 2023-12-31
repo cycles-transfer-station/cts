@@ -37,6 +37,7 @@ use cts_lib::{
         cbs_map::{
             CBSMInit,
             CBSMUserData,
+            OldCBSMUserData,
             PutNewUserError,
             UpdateUserError,
             UpdateUserResult,
@@ -51,14 +52,13 @@ use candid::{
     CandidType,
     Deserialize,
 };
-use serde::{Serialize};
       
 use canister_tools::MemoryId;
 
 
 type UsersMap = HashMap<Principal, CBSMUserData>;
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CBSMData {
     cts_id: Principal,
     users_map: UsersMap,
@@ -73,6 +73,14 @@ impl CBSMData {
         }
     }
 }
+
+#[derive(CandidType, Deserialize)]
+struct OldCBSMData {
+    cts_id: Principal,
+    users_map: HashMap<Principal, OldCBSMUserData>,
+    cycles_bank_canister_code: CanisterCode,
+}
+
 
 
 
@@ -109,7 +117,29 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, None::<fn(CBSMData) -> CBSMData>)
+    canister_tools::post_upgrade(&CBSM_DATA, CBSM_DATA_UPGRADE_MEMORY_ID, Some::<fn(OldCBSMData) -> CBSMData>(
+        |old_cbsm_data| {
+            CBSMData{
+                cts_id: old_cbsm_data.cts_id,
+                users_map: old_cbsm_data.users_map.into_iter().map(
+                    |(k, v)| {
+                        (
+                            k, 
+                            CBSMUserData{
+                                cycles_bank_canister_id: v.cycles_bank_canister_id,
+                                first_membership_creation_timestamp_nanos: v.first_membership_creation_timestamp_nanos,
+                                cycles_bank_latest_known_module_hash: v.cycles_bank_latest_known_module_hash,
+                                cycles_bank_lifetime_termination_timestamp_seconds: v.cycles_bank_lifetime_termination_timestamp_seconds,
+                                membership_termination_cb_uninstall_data: v.membership_termination_cb_uninstall_data,
+                                sns_control: false, 
+                            }
+                        )
+                    }
+                ).collect(),
+                cycles_bank_canister_code: old_cbsm_data.cycles_bank_canister_code,
+            }
+        }
+    ))
 }
 
 #[no_mangle]
@@ -203,12 +233,6 @@ pub fn update_user(user_id: Principal, update_fields: CBSMUserDataUpdateFields) 
     with_mut(&CBSM_DATA, |cbsm_data| {
         match cbsm_data.users_map.get_mut(&user_id) {
             Some(found_user_data) => {
-                if let Some(change_cycles_bank_canister_id) = update_fields.cycles_bank_canister_id {
-                    found_user_data.cycles_bank_canister_id = change_cycles_bank_canister_id; 
-                }
-                if let Some(change_first_membership_creation_timestamp_nanos) = update_fields.first_membership_creation_timestamp_nanos {
-                    found_user_data.first_membership_creation_timestamp_nanos = change_first_membership_creation_timestamp_nanos; 
-                }
                 if let Some(change_cb_latest_known_module_hash) = update_fields.cycles_bank_latest_known_module_hash {
                     found_user_data.cycles_bank_latest_known_module_hash = change_cb_latest_known_module_hash; 
                 }
@@ -228,7 +252,20 @@ pub fn update_user(user_id: Principal, update_fields: CBSMUserDataUpdateFields) 
 }
 
 
-
+#[query]
+pub fn find_sns_cb(user_id: Principal) -> Option<Principal> { // None if not found.
+    with(&CBSM_DATA, |cbsm_data| {
+        match cbsm_data.users_map.get(&user_id) {
+            None => None,
+            Some(found_user_data) => {
+                if found_user_data.sns_control == false {
+                    trap("The cycles-bank must have been purchased with the sns_control flag set to true, to find the cycles-bank through this method.");
+                }
+                Some(found_user_data.cycles_bank_canister_id)
+            }             
+        }
+    })
+}
   
   
  

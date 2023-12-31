@@ -219,7 +219,19 @@ impl UserData {
     }
 }
 
-
+#[derive(CandidType, Deserialize)]
+struct OldCBData {
+    user_canister_creation_timestamp_nanos: u128,
+    cts_id: Principal,
+    cbsm_id: Principal,
+    user_id: Principal,
+    storage_size_mib: u128,
+    lifetime_termination_timestamp_seconds: u128,
+    user_data: UserData,
+    cycles_transfers_id_counter: u128,
+    cts_cb_authorization: Vec<u8>,
+    burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
+}
 
 #[derive(CandidType, Deserialize)]
 struct CBData {
@@ -233,6 +245,7 @@ struct CBData {
     cycles_transfers_id_counter: u128,
     cts_cb_authorization: Vec<u8>,
     burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
+    sns_control: bool,
 }
 
 impl CBData {
@@ -248,6 +261,7 @@ impl CBData {
             cycles_transfers_id_counter: 0,  
             cts_cb_authorization: Vec::new(),
             burn_icp_mint_cycles_mid_call_data: None,
+            sns_control: false,
         }
     }
 }
@@ -297,6 +311,7 @@ fn canister_init(user_canister_init: CyclesBankInit) {
             user_id:                                                user_canister_init.user_id,
             storage_size_mib:                                       user_canister_init.storage_size_mib,
             lifetime_termination_timestamp_seconds:                 user_canister_init.lifetime_termination_timestamp_seconds,
+            sns_control:                                            user_canister_init.sns_control,
             ..CBData::new()    
         };
         
@@ -317,7 +332,23 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
-    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
+    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, Some::<fn(OldCBData) -> CBData>(
+        |old_cb_data| {
+            CBData{
+                user_canister_creation_timestamp_nanos: old_cb_data.user_canister_creation_timestamp_nanos,
+                cts_id: old_cb_data.cts_id,
+                cbsm_id: old_cb_data.cbsm_id,
+                user_id: old_cb_data.user_id,
+                storage_size_mib: old_cb_data.storage_size_mib,
+                lifetime_termination_timestamp_seconds: old_cb_data.lifetime_termination_timestamp_seconds,
+                user_data: old_cb_data.user_data,
+                cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
+                cts_cb_authorization: old_cb_data.cts_cb_authorization,
+                burn_icp_mint_cycles_mid_call_data: old_cb_data.burn_icp_mint_cycles_mid_call_data,
+                sns_control: false,
+            }
+        }
+    ));
 }
 
 // ---------------------------
@@ -1330,14 +1361,14 @@ pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::C
 
 
 #[query(manual_reply = true)]
-pub fn metrics() { //-> UserCBMetrics {
-    if caller() != user_id() && caller() != cts_id() {
-        trap("Caller must be the user for this method.");
-    }
-    
+pub fn metrics() { //-> UserCBMetrics {    
     with(&CB_DATA, |cb_data| {
+        if cb_data.sns_control == false {
+            if [&cb_data.user_id, &cb_data.cts_id, &cb_data.cbsm_id].contains(&&caller()) == false {
+                trap("Caller must be the user for this method.");
+            }
+        }
         reply::<(UserCBMetrics,)>((UserCBMetrics{
-            global_allocator_counter: 0, //disable for the now get_allocated_bytes_count() as u64,
             cycles_balance: cb_data.user_data.cycles_balance,
             ctsfuel_balance: ctsfuel_balance(cb_data),
             storage_size_mib: cb_data.storage_size_mib,
@@ -1350,7 +1381,8 @@ pub fn metrics() { //-> UserCBMetrics {
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
             cm_trade_contracts: cb_data.user_data.cm_trade_contracts.keys().cloned().collect(),
             cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0,
-            cbsm_id: cb_data.cbsm_id
+            cbsm_id: cb_data.cbsm_id,
+            sns_control: cb_data.sns_control,
         },));
     });
 }
@@ -1359,10 +1391,14 @@ pub fn metrics() { //-> UserCBMetrics {
 
 #[query]
 pub fn cycles_balance() -> Cycles {
-    if caller() != user_id() && caller() != cts_id() {
-        trap("Caller must be the user for this method.");
-    }
-    with(&CB_DATA, |cb_data| cb_data.user_data.cycles_balance)
+    with(&CB_DATA, |cb_data| {
+        if cb_data.sns_control == false {
+            if [&cb_data.user_id, &cb_data.cts_id, &cb_data.cbsm_id].contains(&&caller()) == false {
+                trap("Caller must be the user for this method.");
+            }
+        }
+        cb_data.user_data.cycles_balance  
+    })    
 }
 
 

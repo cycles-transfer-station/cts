@@ -2,7 +2,6 @@ use std::{
     cell::{Cell, RefCell}, 
     collections::{HashMap},
 };
-use serde::Serialize;
 use serde_bytes::ByteBuf;
 use num_traits::cast::ToPrimitive;
 use sha2::Digest;
@@ -162,7 +161,7 @@ use certification::*;
 // -------
 
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 pub struct CTSData {
     cycles_market_main: Principal,
     cycles_bank_canister_code: CanisterCode,
@@ -200,7 +199,7 @@ impl CTSData {
     }
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 pub struct CBSMStatus {
     module_hash: [u8; 32],
 }
@@ -460,7 +459,7 @@ pub fn view_fees() -> Fees {
 
 // save the fees in the purchase_cycles_bank_data so the fees cant change while creating a new user
 
-#[derive(Clone, CandidType, Serialize, Deserialize)]
+#[derive(Clone, CandidType, Deserialize)]
 pub struct PurchaseCyclesBankData {
     start_time_nanos: u128,
     lock: bool,    
@@ -525,8 +524,10 @@ pub enum PurchaseCyclesBankError{
 }
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct PurchaseCyclesBankQuest {}
+#[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
+pub struct PurchaseCyclesBankQuest {
+    sns_control: Option<bool>,
+}
 
 
 #[derive(CandidType, Deserialize)]
@@ -837,6 +838,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                 cycles_bank_latest_known_module_hash: [0u8; 32],
                 cycles_bank_lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
                 membership_termination_cb_uninstall_data: None,
+                sns_control: purchase_cycles_bank_data.purchase_cycles_bank_quest.sns_control.unwrap_or(false),
             }
         ).await {
             Ok(cbsm_id) => cbsm_id,
@@ -892,7 +894,8 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
                             user_id: user_id,
                             storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                             lifetime_termination_timestamp_seconds: purchase_cycles_bank_data.start_time_nanos/NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS,
-                            start_with_user_cycles_balance: 0
+                            start_with_user_cycles_balance: 0,
+                            sns_control: purchase_cycles_bank_data.purchase_cycles_bank_quest.sns_control.unwrap_or(false),
                         }).unwrap()
                     }).unwrap(),
                     0
@@ -1217,7 +1220,7 @@ pub fn get_cb_auth(cb_id: Principal) -> Vec<u8> {
 
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct TransferIcpData{
     start_time_nanos: u64,
     lock: bool,
@@ -1227,7 +1230,7 @@ pub struct TransferIcpData{
     cts_fee_taken: bool,
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct TransferIcpQuest {
     memo: IcpMemo,
     icp: IcpTokens,
@@ -1473,7 +1476,7 @@ async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpDat
 
 // options are for the memberance of the steps
 
-#[derive(Serialize, CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct LengthenMembershipMidCallData {
     start_time_nanos: u64,
     lock: bool,
@@ -1772,7 +1775,8 @@ async fn finish_lengthen_membership_update_cycles_bank_and_update_cbsm_(
                                     cbsm_id: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().1,
                                     storage_size_mib: NEW_CYCLES_BANK_STORAGE_SIZE_MiB,                         
                                     lifetime_termination_timestamp_seconds: mid_call_data.new_lifetime_termination_timestamp_seconds().unwrap(),
-                                    start_with_user_cycles_balance: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.membership_termination_cb_uninstall_data.as_ref().unwrap().user_cycles_balance
+                                    start_with_user_cycles_balance: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.membership_termination_cb_uninstall_data.as_ref().unwrap().user_cycles_balance,
+                                    sns_control: mid_call_data.cbsm_user_data_and_cbsm_id.as_ref().unwrap().0.sns_control,
                                 }
                             ).unwrap(),
                         }       

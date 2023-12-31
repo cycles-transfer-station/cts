@@ -196,24 +196,32 @@ pub mod cbs_map {
     pub struct CBSMInit {
         pub cts_id: Principal
     }
-
-    #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]    
+    
+    #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]    
+    pub struct OldCBSMUserData {
+        pub cycles_bank_canister_id: Principal,
+        pub first_membership_creation_timestamp_nanos: u128,
+        pub cycles_bank_latest_known_module_hash: [u8; 32],
+        pub cycles_bank_lifetime_termination_timestamp_seconds: u128,
+        pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData>,
+    }
+    
+    #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]    
     pub struct CBSMUserData {
         pub cycles_bank_canister_id: Principal,
         pub first_membership_creation_timestamp_nanos: u128,
         pub cycles_bank_latest_known_module_hash: [u8; 32],
         pub cycles_bank_lifetime_termination_timestamp_seconds: u128,
-        pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData> // some if canister is uninstalled
+        pub membership_termination_cb_uninstall_data: Option<CyclesBankTerminationUninstallData>, // some if canister is uninstalled
+        pub sns_control: bool, // true if this cb is control by a sns.
     }
     
     // None means values are kept as they are. Some means change the field-values.
     #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, Default)]    
     pub struct CBSMUserDataUpdateFields {
-        pub cycles_bank_canister_id: Option<Principal>,
-        pub first_membership_creation_timestamp_nanos: Option<u128>,
         pub cycles_bank_latest_known_module_hash: Option<[u8; 32]>,
         pub cycles_bank_lifetime_termination_timestamp_seconds: Option<u128>,
-        pub membership_termination_cb_uninstall_data: Option<Option<CyclesBankTerminationUninstallData>>            
+        pub membership_termination_cb_uninstall_data: Option<Option<CyclesBankTerminationUninstallData>>,
     }
     
     #[derive(CandidType, serde::Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -254,11 +262,11 @@ pub mod cycles_bank {
         pub storage_size_mib: u128,                         
         pub lifetime_termination_timestamp_seconds: u128,
         pub start_with_user_cycles_balance: Cycles,
+        pub sns_control: bool,
     }
     
     #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
     pub struct UserCBMetrics {
-        pub global_allocator_counter: u64,
         pub cycles_balance: Cycles,
         pub ctsfuel_balance: CTSFuel,
         pub storage_size_mib: u128,
@@ -272,6 +280,7 @@ pub mod cycles_bank {
         pub cm_trade_contracts: Vec<TradeContractIdAndLedgerId>,   
         pub cts_cb_authorization: bool, 
         pub cbsm_id: Principal,
+        pub sns_control: bool,
     }    
     
 
@@ -391,12 +400,8 @@ pub mod http_request{
         pub body: &'a ByteBuf,
         pub token: Option<StreamCallbackToken<'a>>,
     }
-    
-    
-    
-        
-}
 
+}
 
 
 

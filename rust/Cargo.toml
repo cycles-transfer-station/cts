@@ -28,12 +28,19 @@ split-debuginfo= "packed"
 strip = "debuginfo"
 debug = false
 
-[profile.test]
+[profile.dev]
 lto = true
 opt-level = 'z'          
 codegen-units = 1 
 split-debuginfo= "packed"
 strip = "debuginfo"
+
+[profile.test]
+lto = false
+opt-level = 0
+codegen-units = 256
+split-debuginfo= "off"
+strip = "none"
 
 
 [workspace.dependencies]
