@@ -3,8 +3,8 @@ use candid::{Nat, Principal, CandidType, Deserialize};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
     consts::{TRILLION, MANAGEMENT_CANISTER_ID},
-    tools::{principal_token_subaccount, cycles_transform_tokens},
-    types::{CanisterCode, CallError, cycles_bank::UserCBMetrics, CyclesTransfer, CyclesTransferMemo},
+    tools::{principal_token_subaccount, cycles_transform_tokens, tokens_transform_cycles},
+    types::{CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}, CyclesTransfer, CyclesTransferMemo},
     management_canister::{
         *,
         ManagementCanisterCanisterStatusRecord,
@@ -15,6 +15,7 @@ use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, Transfe
 use crate::*;
 use ic_cdk::api::management_canister::main::{CanisterInfoRequest,CanisterInfoResponse,CanisterChange,CanisterChangeOrigin,CanisterChangeDetails,CanisterInstallMode,CodeDeploymentRecord,FromCanisterRecord,ControllersChangeRecord,CreationRecord};
 use more_asserts::*;
+use cts_lib::ic_ledger_types::IcpTokens;
 
 
 const LEDGER_TRANSFER_FEE: u128 = 10_000;
@@ -419,6 +420,7 @@ fn test_lengthen_lifetime_icp_payment() {
     for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
         let lengthen_years = (i as u128) + 1;
         let (metrics_before,): (UserCBMetrics,) = query_candid_as(&pic,cb,user,"metrics",()).unwrap();
+        let cts_icp_balance_before = icrc1_balance(&pic, ICP_LEDGER, &Account{ owner: cts, subaccount: None });
         assert_eq!(
             metrics_before.lifetime_termination_timestamp_seconds,
             pic_get_time_nanos(&pic) / NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS
@@ -428,15 +430,20 @@ fn test_lengthen_lifetime_icp_payment() {
             canister_cycles_balance_before,
             NEW_CYCLES_BANK_CREATION_CYCLES - NETWORK_CANISTER_CREATION_FEE_CYCLES - 5_000_000_000
         );
+        let cost_icp_without_ledger_fees = cycles_transform_tokens(MEMBERSHIP_COST_CYCLES*lengthen_years, CMC_RATE);
         mint_icp(
             &pic, 
             Account{owner: cts, subaccount: Some(principal_token_subaccount(&user))}, 
-            cycles_transform_tokens(MEMBERSHIP_COST_CYCLES*lengthen_years, CMC_RATE) + LEDGER_TRANSFER_FEE*2
+            cost_icp_without_ledger_fees + LEDGER_TRANSFER_FEE*2
         );
         let (r,) = call_candid_as::<_, (Result<LengthenMembershipSuccess, LengthenMembershipError>,)>(
             &pic, cts, RawEffectivePrincipal::None, user, "lengthen_membership", (LengthenMembershipQuest{ lengthen_years },)
         ).unwrap();
         let new_lifetime_termination_timestamp_seconds = r.unwrap().lifetime_termination_timestamp_seconds;
+        assert_eq!(
+            cts_icp_balance_before + cost_icp_without_ledger_fees - (cost_icp_without_ledger_fees / 2), 
+            icrc1_balance(&pic, ICP_LEDGER, &Account{ owner: cts, subaccount: None })
+        );
         assert_eq!(
             metrics_before.lifetime_termination_timestamp_seconds + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS*lengthen_years,
             new_lifetime_termination_timestamp_seconds, 
@@ -450,7 +457,7 @@ fn test_lengthen_lifetime_icp_payment() {
         assert_ge!(
             canister_cycles_balance_after,
             NEW_CYCLES_BANK_CREATION_CYCLES - NETWORK_CANISTER_CREATION_FEE_CYCLES - 5_000_000_000 
-            + cycles_transform_tokens(MEMBERSHIP_COST_CYCLES*lengthen_years, CMC_RATE) / 2 - 5_000_000_000
+            + MEMBERSHIP_COST_CYCLES*lengthen_years / 2 - 5_000_000_000
         );
         let (cts_find_user_sponse,): (Option<CBSMUserData>,) = query_candid_as(
             &pic, controller_view_cbsms(&pic, cts)[0], cts, "find_user", (user,)
@@ -465,8 +472,7 @@ fn test_lengthen_lifetime_icp_payment() {
                 cycles_bank_lifetime_termination_timestamp_seconds: new_lifetime_termination_timestamp_seconds,
                 membership_termination_cb_uninstall_data: None
             }
-        );
-        // check cts main and user-subaccount icp-balances
+        );        
     }
 }
 
@@ -486,6 +492,8 @@ fn test_lengthen_lifetime_cycles_payment() {
     for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
         let lengthen_years = (i as u128) + 1;
         let (metrics_before,): (UserCBMetrics,) = query_candid_as(&pic,cb,user,"metrics",()).unwrap();
+        let cts_cycle_balance_before = pic.cycle_balance(cts);
+        println!("cts_cycle_balance_before: {}", cts_cycle_balance_before);
         assert_eq!(
             metrics_before.lifetime_termination_timestamp_seconds,
             pic_get_time_nanos(&pic) / NANOS_IN_A_SECOND + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS
@@ -494,22 +502,11 @@ fn test_lengthen_lifetime_cycles_payment() {
             pic.cycle_balance(cb),
             NEW_CYCLES_BANK_CREATION_CYCLES - NETWORK_CANISTER_CREATION_FEE_CYCLES - 5_000_000_000
         );
-        // transfer some cycles onto the cycles-bank
-        let (call_canister_r,): (Result<Vec<u8>, CallError>,) = call_candid_as(
-            &pic,
-            cts, 
-            RawEffectivePrincipal::None,
-            CTS_CONTROLLER,
-            "controller_call_canister",
-            (ControllerCallCanisterQuest {
-                callee: cb,
-                method_name: "cycles_transfer".to_string(),
-                arg_raw: candid::encode_one(CyclesTransfer{memo: CyclesTransferMemo::Nat(5)}).unwrap(),
-                cycles: MEMBERSHIP_COST_CYCLES*lengthen_years
-            },)
-        ).unwrap();
-        let _: () = candid::decode_one(&call_canister_r.unwrap()).unwrap();
-        assert_eq!(
+        // mint some cycles onto the cycles-bank
+        let burn_icp = cycles_transform_tokens(MEMBERSHIP_COST_CYCLES*lengthen_years, CMC_RATE) + 1;
+        mint_icp(&pic, Account{owner: cb, subaccount: None}, burn_icp + LEDGER_TRANSFER_FEE/*cmc-transfer-fee*/);
+        cb_burn_icp_mint_cycles(&pic, cb, user, burn_icp);
+        assert_ge!(
             cb_cycles_balance(&pic, cb, user),
             MEMBERSHIP_COST_CYCLES*lengthen_years
         );
@@ -523,6 +520,10 @@ fn test_lengthen_lifetime_cycles_payment() {
         ).unwrap();
         let r = candid::decode_one::<Result<LengthenMembershipSuccess, LengthenMembershipError>>(&rr.unwrap()).unwrap();
         let new_lifetime_termination_timestamp_seconds = r.unwrap().lifetime_termination_timestamp_seconds;
+        assert_gt!(
+            pic.cycle_balance(cts),
+            cts_cycle_balance_before + lengthen_years*MEMBERSHIP_COST_CYCLES/2 - 1_000_000_000/*cycles use during the calls*/,
+        );
         assert_eq!(
             metrics_before.lifetime_termination_timestamp_seconds + NEW_CYCLES_BANK_LIFETIME_DURATION_SECONDS*lengthen_years,
             new_lifetime_termination_timestamp_seconds, 
@@ -559,18 +560,57 @@ fn test_lengthen_lifetime_cycles_payment() {
         );
         assert_eq!(
             cb_cycles_balance(&pic, cb, user),
-            0
+            tokens_transform_cycles(cycles_transform_tokens(MEMBERSHIP_COST_CYCLES*lengthen_years, CMC_RATE) + 1, CMC_RATE) - MEMBERSHIP_COST_CYCLES*lengthen_years
         );
     }
 }
 
 #[test]
 fn test_burn_icp_mint_cycles() {
-    
+    let (pic, cts, _cm_main) = cts_setup();
+    let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
+    for i in 0..3 {
+        let user = Principal::from_slice(&(i+50000 as u64).to_be_bytes());
+        let cb = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
+        users_and_cbs.push((user, cb));        
+    }
+   for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
+        let cb_system_cycles_balance_before = pic.cycle_balance(cb);
+        let burn_icp = i as u128 + 1;
+        mint_icp(&pic, Account{owner: cb, subaccount: None}, burn_icp + LEDGER_TRANSFER_FEE/*cmc-transfer-fee*/);
+        let mint_cycles = cb_burn_icp_mint_cycles(&pic, cb, user, burn_icp);
+        assert_eq!(
+            mint_cycles,
+            tokens_transform_cycles(burn_icp, CMC_RATE)
+        );
+        assert_ge!(
+            cb_cycles_balance(&pic, cb, user),
+            mint_cycles
+        );
+        assert_ge!(
+            pic.cycle_balance(cb),
+            cb_system_cycles_balance_before + mint_cycles - 1_000_000_000/*fuelcost for the call*/
+        );  
+   } 
 }
 
 
 // --- tools ---
+
+fn cb_burn_icp_mint_cycles(pic: &PocketIc, cb: Principal, user: Principal, burn_icp: u128) -> Cycles {
+    call_candid_as::<_, (cb::BurnIcpMintCyclesResult,)>(
+        pic,
+        cb,
+        RawEffectivePrincipal::None,
+        user,        
+        "burn_icp_mint_cycles",
+        (cb::BurnIcpMintCyclesQuest{
+            burn_icp: IcpTokens::from_e8s(burn_icp as u64),
+            burn_icp_transfer_fee: IcpTokens::from_e8s(LEDGER_TRANSFER_FEE as u64)
+        },)
+    ).unwrap().0.unwrap()
+    .mint_cycles
+}
 
 fn pic_get_time_nanos(pic: &PocketIc) -> u128 {
     pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()

@@ -243,7 +243,9 @@ pub mod cbs_map {
 pub mod cycles_bank {
     use super::*;
     use super::cycles_market::cm_main::TradeContractIdAndLedgerId;
-
+    use crate::cmc::*; 
+    use crate::ic_ledger_types::IcpTokens;
+    
     #[derive(CandidType, Deserialize)]
     pub struct CyclesBankInit {
         pub user_id: Principal,
@@ -272,6 +274,40 @@ pub mod cycles_bank {
         pub cbsm_id: Principal,
     }    
     
+
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum UserIsInTheMiddleOfADifferentCall {
+        BurnIcpMintCyclesCall{ must_call_complete: bool },
+    }
+    
+    // burn icp mint cycles
+    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+    pub struct BurnIcpMintCyclesQuest {
+        pub burn_icp: IcpTokens, 
+        pub burn_icp_transfer_fee: IcpTokens,   
+    }
+    
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum BurnIcpMintCyclesError {
+        UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
+        LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
+        LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
+        MidCallError(BurnIcpMintCyclesMidCallError)
+    }
+    
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum BurnIcpMintCyclesMidCallError {
+        LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+    }
+    
+    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+    pub struct BurnIcpMintCyclesSuccess {
+        pub mint_cycles: Cycles
+    }
+    
+    pub type BurnIcpMintCyclesResult = Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError>;
+    
+    // cm_methods
     #[derive(CandidType, Deserialize, Debug)]
     pub enum CBTradeCyclesError {
         MemoryIsFull,

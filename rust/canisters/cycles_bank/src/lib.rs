@@ -34,7 +34,6 @@ use cts_lib::{
     ic_ledger_types::{
         MAINNET_LEDGER_CANISTER_ID,
         IcpBlockHeight,
-        IcpTokens,
         MAINNET_CYCLES_MINTING_CANISTER_ID
     },
     types::{
@@ -94,15 +93,13 @@ use candid::{
     }
 };
 
-use serde::Serialize;
-
 use futures::{poll, task::Poll};
 
 
 // -------------------------------------------------------------------------
 
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CyclesTransferIn {
     id: u128,
     by_the_canister: Principal,
@@ -111,7 +108,7 @@ struct CyclesTransferIn {
     timestamp_nanos: u128
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CyclesTransferOut {
     id: u128,
     for_the_canister: Principal,
@@ -125,46 +122,46 @@ struct CyclesTransferOut {
 // --------
 
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePositorLog{
     timestamp_nanos: u128,
     cm_message_cycles_position_purchase_positor_quest: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePositorMessageQuest 
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePurchaserLog{
     timestamp_nanos: u128,
     cycles_purchase: Cycles,
     cm_message_cycles_position_purchase_purchaser_quest: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageTokenPositionPurchasePositorLog{
     timestamp_nanos: u128,
     cycles_payment: Cycles,
     cm_message_token_position_purchase_positor_quest: cm_icrc1token_trade_contract::CMTokenPositionPurchasePositorMessageQuest
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageTokenPositionPurchasePurchaserLog{
     timestamp_nanos: u128,
     cm_message_token_position_purchase_purchaser_quest: cm_icrc1token_trade_contract::CMTokenPositionPurchasePurchaserMessageQuest
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageVoidCyclesPositionPositorLog{
     timestamp_nanos: u128,
     void_cycles: Cycles,
     cm_message_void_cycles_position_positor_quest: cm_icrc1token_trade_contract::CMVoidCyclesPositionPositorMessageQuest
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageVoidTokenPositionPositorLog{
     timestamp_nanos: u128,
     cm_message_void_token_position_positor_quest: cm_icrc1token_trade_contract::CMVoidTokenPositionPositorMessageQuest
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMMessageLogs{
     cm_message_cycles_position_purchase_positor_logs: Vec<CMMessageCyclesPositionPurchasePositorLog>,
     cm_message_cycles_position_purchase_purchaser_logs: Vec<CMMessageCyclesPositionPurchasePurchaserLog>,
@@ -186,7 +183,7 @@ impl CMMessageLogs {
     }
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CMTradeContractLogs {
     cm_message_logs: CMMessageLogs,
 }
@@ -203,7 +200,7 @@ impl Default for CMTradeContractLogs {
     }
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
@@ -224,7 +221,7 @@ impl UserData {
 
 
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 struct CBData {
     user_canister_creation_timestamp_nanos: u128,
     cts_id: Principal,
@@ -793,11 +790,6 @@ pub async fn transfer_icp(transfer_arg_raw: Vec<u8>) {
 // ----------------------------------
 // user is in the middle of a different call
  
-#[derive(CandidType, Deserialize)]
-pub enum UserIsInTheMiddleOfADifferentCall {
-    BurnIcpMintCyclesCall{ must_call_complete: bool },
-}
-
 
 fn check_if_user_is_in_the_middle_of_a_different_call(cb_data: &CBData) -> Result<(), UserIsInTheMiddleOfADifferentCall> {
     if let Some(ref burn_icp_mint_cycles_data) = cb_data.burn_icp_mint_cycles_mid_call_data {
@@ -815,7 +807,7 @@ use cts_lib::cmc::*;
 
 
 // options are for the memberance of the steps
-#[derive(CandidType, Serialize, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct BurnIcpMintCyclesData {
     start_time_nanos: u64,
     lock: bool,
@@ -825,35 +817,9 @@ pub struct BurnIcpMintCyclesData {
 }
 
 
-#[derive(CandidType, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct BurnIcpMintCyclesQuest {
-    burn_icp: IcpTokens, 
-    burn_icp_transfer_fee: IcpTokens,   
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum BurnIcpMintCyclesError {
-    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
-    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
-    MidCallError(BurnIcpMintCyclesMidCallError)
-}
-
-
-#[derive(CandidType, Deserialize)]
-pub enum BurnIcpMintCyclesMidCallError {
-    LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-}
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-pub struct BurnIcpMintCyclesSuccess {
-    mint_cycles: Cycles
-}
-
-
 
 #[update]
-pub async fn burn_icp_mint_cycles(q: BurnIcpMintCyclesQuest) -> Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError> {
+pub async fn burn_icp_mint_cycles(q: BurnIcpMintCyclesQuest) -> BurnIcpMintCyclesResult {
     if caller() != user_id() { trap("Caller must be the user"); }
 
     if with(&CB_DATA, |cb_data| { calculate_free_storage(cb_data) }) < (std::mem::size_of::<CyclesTransferIn>() + CYCLES_TRANSFER_MEMO_MAX_SIZE) as u128 {
