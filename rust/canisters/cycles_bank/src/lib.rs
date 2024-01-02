@@ -1,6 +1,6 @@
 use std::{
     cell::{RefCell,Cell},
-    collections::{HashMap, HashSet}
+    collections::{HashSet}
 };
 use cts_lib::{
     self,
@@ -95,9 +95,7 @@ use candid::{
 
 use futures::{poll, task::Poll};
 
-
 // -------------------------------------------------------------------------
-
 
 #[derive(CandidType, Deserialize)]
 struct CyclesTransferIn {
@@ -121,15 +119,6 @@ struct CyclesTransferOut {
 
 // --------
 
-
-#[derive(CandidType, Deserialize)]
-struct OldUserData {
-    cycles_balance: Cycles,
-    cycles_transfers_in: Vec<CyclesTransferIn>,
-    cycles_transfers_out: Vec<CyclesTransferOut>,
-    cm_trade_contracts: HashMap<TradeContractIdAndLedgerId, Option<bool/*placeholder for candidsubtyping with the option*/>>,
-}
-
 #[derive(CandidType, Deserialize)]
 struct UserData {
     cycles_balance: Cycles,
@@ -147,21 +136,6 @@ impl UserData {
             cm_trade_contracts: HashSet::new(),
         }
     }
-}
-
-#[derive(CandidType, Deserialize)]
-struct OldCBData {
-    user_canister_creation_timestamp_nanos: u128,
-    cts_id: Principal,
-    cbsm_id: Principal,
-    user_id: Principal,
-    storage_size_mib: u128,
-    lifetime_termination_timestamp_seconds: u128,
-    user_data: OldUserData,
-    cycles_transfers_id_counter: u128,
-    cts_cb_authorization: Vec<u8>,
-    burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
-    sns_control: bool,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -263,8 +237,8 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
-    //canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
-    
+    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
+    /*
     canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, Some::<fn(OldCBData) -> CBData>(
         |old_cb_data| {
             CBData{
@@ -278,7 +252,7 @@ fn post_upgrade() {
                     cycles_balance: old_cb_data.user_data.cycles_balance,
                     cycles_transfers_in: old_cb_data.user_data.cycles_transfers_in,
                     cycles_transfers_out: old_cb_data.user_data.cycles_transfers_out,
-                    cm_trade_contracts: old_cb_data.user_data.cm_trade_contracts.into_iter().map(|(k,_)| k).collect(),                  
+                    cm_trade_contracts: old_cb_data.user_data.cm_trade_contracts,                  
                 },                    
                 cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
                 cts_cb_authorization: old_cb_data.cts_cb_authorization,
@@ -287,7 +261,7 @@ fn post_upgrade() {
             }
         }
     ));
-    
+    */
 }
 
 // ---------------------------
