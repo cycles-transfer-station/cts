@@ -147,6 +147,7 @@ pub struct CMCyclesPositionPurchasePositorMessageQuest {
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CMCyclesPositionPurchasePurchaserMessageQuest {
     pub cycles_position_id: PositionId,
+    pub token_position_id: PositionId,
     pub cycles_position_positor: Principal,
     pub cycles_position_cycles_per_token_rate: CyclesPerToken,
     pub purchase_id: PurchaseId,

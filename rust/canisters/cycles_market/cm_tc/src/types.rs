@@ -578,6 +578,7 @@ impl CyclesPayoutTrait for TradeLog {
                 encode_one(
                     CMCyclesPositionPurchasePurchaserMessageQuest {
                         cycles_position_id: self.position_id_matchee,
+                        token_position_id: self.position_id_matcher,
                         cycles_position_positor: self.matchee_position_positor,
                         cycles_position_cycles_per_token_rate: self.cycles_per_token_rate,
                         purchase_id: self.id,

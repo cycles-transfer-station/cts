@@ -874,6 +874,7 @@ dependencies = [
  "canister-tools",
  "cts_lib",
  "futures",
+ "leb128",
  "serde",
 ]
 

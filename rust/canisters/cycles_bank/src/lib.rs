@@ -46,7 +46,7 @@ use cts_lib::{
             *,
         },
         cycles_market::{
-            tc as cm_icrc1token_trade_contract,
+            tc as cm_tc,
             cm_main::TradeContractIdAndLedgerId,
         },
         cts::{
@@ -125,40 +125,40 @@ struct CyclesTransferOut {
 #[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePositorLog{
     timestamp_nanos: u128,
-    cm_message_cycles_position_purchase_positor_quest: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePositorMessageQuest 
+    cm_message_cycles_position_purchase_positor_quest: cm_tc::CMCyclesPositionPurchasePositorMessageQuest 
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageCyclesPositionPurchasePurchaserLog{
     timestamp_nanos: u128,
     cycles_purchase: Cycles,
-    cm_message_cycles_position_purchase_purchaser_quest: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest
+    cm_message_cycles_position_purchase_purchaser_quest: cm_tc::CMCyclesPositionPurchasePurchaserMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageTokenPositionPurchasePositorLog{
     timestamp_nanos: u128,
     cycles_payment: Cycles,
-    cm_message_token_position_purchase_positor_quest: cm_icrc1token_trade_contract::CMTokenPositionPurchasePositorMessageQuest
+    cm_message_token_position_purchase_positor_quest: cm_tc::CMTokenPositionPurchasePositorMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageTokenPositionPurchasePurchaserLog{
     timestamp_nanos: u128,
-    cm_message_token_position_purchase_purchaser_quest: cm_icrc1token_trade_contract::CMTokenPositionPurchasePurchaserMessageQuest
+    cm_message_token_position_purchase_purchaser_quest: cm_tc::CMTokenPositionPurchasePurchaserMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageVoidCyclesPositionPositorLog{
     timestamp_nanos: u128,
     void_cycles: Cycles,
-    cm_message_void_cycles_position_positor_quest: cm_icrc1token_trade_contract::CMVoidCyclesPositionPositorMessageQuest
+    cm_message_void_cycles_position_positor_quest: cm_tc::CMVoidCyclesPositionPositorMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
 struct CMMessageVoidTokenPositionPositorLog{
     timestamp_nanos: u128,
-    cm_message_void_token_position_positor_quest: cm_icrc1token_trade_contract::CMVoidTokenPositionPositorMessageQuest
+    cm_message_void_token_position_positor_quest: cm_tc::CMVoidTokenPositionPositorMessageQuest
 }
 
 #[derive(CandidType, Deserialize)]
@@ -963,7 +963,6 @@ async fn complete_burn_icp_mint_cycles_() -> Result<BurnIcpMintCyclesSuccess, Co
 // cycles-market methods
 
 
-use cts_lib::types::cycles_market::tc as cm_tc;
 
 #[update]
 pub async fn cm_trade_cycles(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_tc::BuyTokensQuest) -> CBTradeCyclesResult {
@@ -1102,12 +1101,12 @@ pub async fn cm_trade_tokens(icrc1token_trade_contract: TradeContractIdAndLedger
 pub enum UserCMVoidPositionError {
     CTSFuelTooLow,
     CyclesMarketVoidPositionCallError((u32, String)),
-    CyclesMarketVoidPositionError(cm_icrc1token_trade_contract::VoidPositionError)
+    CyclesMarketVoidPositionError(cm_tc::VoidPositionError)
 }
 
 
 #[update]
-pub async fn cm_void_position(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_icrc1token_trade_contract::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
+pub async fn cm_void_position(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_tc::VoidPositionQuest) -> Result<(), UserCMVoidPositionError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1116,7 +1115,7 @@ pub async fn cm_void_position(icrc1token_trade_contract: TradeContractIdAndLedge
         return Err(UserCMVoidPositionError::CTSFuelTooLow);
     }
     
-    match call::<(cm_icrc1token_trade_contract::VoidPositionQuest,), (Result<(), cm_icrc1token_trade_contract::VoidPositionError>,)>(
+    match call::<(cm_tc::VoidPositionQuest,), (Result<(), cm_tc::VoidPositionError>,)>(
         icrc1token_trade_contract.trade_contract_canister_id,
         "void_position",
         (q,)
@@ -1145,11 +1144,11 @@ pub enum UserCMTransferTokenBalanceError {
     MemoryIsFull,
     CyclesMarketTransferTokenBalanceCallError((u32, String)),
     CyclesMarketTransferTokenBalanceCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-    CyclesMarketTransferTokenBalanceError(cm_icrc1token_trade_contract::TransferTokenBalanceError)
+    CyclesMarketTransferTokenBalanceError(cm_tc::TransferTokenBalanceError)
 }
 
 #[update]
-pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_icrc1token_trade_contract::TransferTokenBalanceQuest) -> Result<BlockId, UserCMTransferTokenBalanceError> {
+pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractIdAndLedgerId, q: cm_tc::TransferTokenBalanceQuest) -> Result<BlockId, UserCMTransferTokenBalanceError> {
     if caller() != user_id() {
         trap("Caller must be the user for this method.");
     }
@@ -1178,7 +1177,7 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractI
 
 
     match call_result {
-        Ok(sponse_bytes) => match decode_one::<cm_icrc1token_trade_contract::TransferTokenBalanceResult>(&sponse_bytes) {
+        Ok(sponse_bytes) => match decode_one::<cm_tc::TransferTokenBalanceResult>(&sponse_bytes) {
             Ok(cm_transfer_token_balance_result) => match cm_transfer_token_balance_result {
                 Ok(block_height) => {
                     Ok(block_height)
@@ -1216,7 +1215,7 @@ fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData)
 }
 
 #[update]
-pub fn cm_message_cycles_position_purchase_positor(q: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePositorMessageQuest) {
+pub fn cm_message_cycles_position_purchase_positor(q: cm_tc::CMCyclesPositionPurchasePositorMessageQuest) {
     
     with_mut(&CB_DATA, |cb_data| {
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_cycles_position_purchase_positor_logs.push(
@@ -1230,16 +1229,25 @@ pub fn cm_message_cycles_position_purchase_positor(q: cm_icrc1token_trade_contra
 }
 
 pub const CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START: u16 = 1;
-fn create_cm_trade_tokens_cycles_payout_ct_memo(token_position_id: PositionId, purchase_id: PurchaseId) -> CyclesTransferMemo {
+pub const CM_VOID_CYCLES_POSITION_CT_MEMO_START: u16 = 2;
+
+fn create_cm_trade_tokens_cycles_payout_ct_memo(token_position_id: cm_tc::PositionId, purchase_id: cm_tc::PurchaseId) -> CyclesTransferMemo {
     let mut v = Vec::<u8>::new();
-    v.append(&mut CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START.to_be_bytes());
-    leb128 position-id
-    leb128 trade-id
-    return CyclesTransferMemo::Blob(v);
+    v.extend_from_slice(&mut CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START.to_be_bytes()[..]);
+    leb128::write::unsigned(&mut v, token_position_id as u64).unwrap(); // when positions start getting close to u64::max, change this to different leb128 crate that is compatible with u128.
+    leb128::write::unsigned(&mut v, purchase_id as u64).unwrap();
+    CyclesTransferMemo::Blob(v)
+}
+fn create_cm_void_cycles_position_ct_memo(cycles_position_id: cm_tc::PositionId) -> CyclesTransferMemo {
+    let mut v = Vec::<u8>::new();
+    v.extend_from_slice(&mut CM_VOID_CYCLES_POSITION_CT_MEMO_START.to_be_bytes()[..]);
+    leb128::write::unsigned(&mut v, cycles_position_id as u64).unwrap(); // when positions start getting close to u64::max, change this to different leb128 crate that is compatible with u128.
+    CyclesTransferMemo::Blob(v)
+    
 }
 
 #[update]
-pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest) {
+pub fn cm_message_cycles_position_purchase_purchaser(q: cm_tc::CMCyclesPositionPurchasePurchaserMessageQuest) {
     
     let cycles_purchase: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
@@ -1266,7 +1274,7 @@ pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_cont
 }
 
 #[update]
-pub fn cm_message_token_position_purchase_positor(q: cm_icrc1token_trade_contract::CMTokenPositionPurchasePositorMessageQuest) {
+pub fn cm_message_token_position_purchase_positor(q: cm_tc::CMTokenPositionPurchasePositorMessageQuest) {
     
     let cycles_payment: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
@@ -1293,7 +1301,7 @@ pub fn cm_message_token_position_purchase_positor(q: cm_icrc1token_trade_contrac
 }
 
 #[update]
-pub fn cm_message_token_position_purchase_purchaser(q: cm_icrc1token_trade_contract::CMTokenPositionPurchasePurchaserMessageQuest) {
+pub fn cm_message_token_position_purchase_purchaser(q: cm_tc::CMTokenPositionPurchasePurchaserMessageQuest) {
     
     with_mut(&CB_DATA, |cb_data| {
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_token_position_purchase_purchaser_logs.push(
@@ -1307,7 +1315,7 @@ pub fn cm_message_token_position_purchase_purchaser(q: cm_icrc1token_trade_contr
 }
 
 #[update]
-pub fn cm_message_void_cycles_position_positor(q: cm_icrc1token_trade_contract::CMVoidCyclesPositionPositorMessageQuest) {
+pub fn cm_message_void_cycles_position_positor(q: cm_tc::CMVoidCyclesPositionPositorMessageQuest) {
     
     let void_cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
         
@@ -1318,7 +1326,7 @@ pub fn cm_message_void_cycles_position_positor(q: cm_icrc1token_trade_contract::
                 id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
                 by_the_canister: caller(),
                 cycles: void_cycles,
-                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-buy-void-{}", q.position_id)),
+                cycles_transfer_memo: create_cm_void_cycles_position_ct_memo(q.position_id),
                 timestamp_nanos: time_nanos()
             }
         );
@@ -1334,7 +1342,7 @@ pub fn cm_message_void_cycles_position_positor(q: cm_icrc1token_trade_contract::
 }
 
 #[update]
-pub fn cm_message_void_token_position_positor(q: cm_icrc1token_trade_contract::CMVoidTokenPositionPositorMessageQuest) {
+pub fn cm_message_void_token_position_positor(q: cm_tc::CMVoidTokenPositionPositorMessageQuest) {
 
     with_mut(&CB_DATA, |cb_data| {
         get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_void_token_position_positor_logs.push(
