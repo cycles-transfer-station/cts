@@ -1298,9 +1298,6 @@ pub fn cts_update_lifetime_termination_timestamp_seconds(new_lifetime_terminatio
 // make pub fn for the user for the upload of the cb-auth. check the auth validity before cepting it. if valid auth is in the cb, no need to accept a new one.
 #[update]
 pub fn user_upload_cts_cb_authorization(auth: Vec<u8>) {
-    if caller() != with(&CB_DATA, |cb_data| cb_data.user_id) {
-        trap("caller not authorized");
-    }
     // if current auth, trap,
     with_mut(&CB_DATA, |cb_data| {
         if cb_data.cts_cb_authorization.len() != 0 {

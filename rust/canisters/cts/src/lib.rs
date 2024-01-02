@@ -1187,8 +1187,8 @@ pub enum SetCBAuthError {
 
 
 #[update]
-pub async fn set_cb_auth() -> Result<(), SetCBAuthError> {
-    let user_id: Principal = caller();
+pub async fn set_cb_auth(opt_user_id: Option<Principal>) -> Result<(), SetCBAuthError> {
+    let user_id: Principal = opt_user_id.unwrap_or(caller());
     
     match find_cycles_bank_(&user_id).await.map_err(
         |find_user_in_the_cbsms_error| { 
@@ -1213,6 +1213,13 @@ pub async fn set_cb_auth() -> Result<(), SetCBAuthError> {
 pub fn get_cb_auth(cb_id: Principal) -> Vec<u8> {
     get_cb_auth_(UserAndCB{user_id: caller(), cb_id })
 }
+
+#[query]
+pub fn get_cb_auth_of_an_sns_control(user_id: Principal, cb_id: Principal) -> Vec<u8> {
+    get_cb_auth_(UserAndCB{user_id, cb_id })
+}
+
+
 
 
 
