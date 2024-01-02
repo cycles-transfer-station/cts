@@ -1229,6 +1229,15 @@ pub fn cm_message_cycles_position_purchase_positor(q: cm_icrc1token_trade_contra
 
 }
 
+pub const CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START: u16 = 1;
+fn create_cm_trade_tokens_cycles_payout_ct_memo(token_position_id: PositionId, purchase_id: PurchaseId) -> CyclesTransferMemo {
+    let mut v = Vec::<u8>::new();
+    v.append(&mut CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START.to_be_bytes());
+    leb128 position-id
+    leb128 trade-id
+    return CyclesTransferMemo::Blob(v);
+}
+
 #[update]
 pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_contract::CMCyclesPositionPurchasePurchaserMessageQuest) {
     
@@ -1241,7 +1250,7 @@ pub fn cm_message_cycles_position_purchase_purchaser(q: cm_icrc1token_trade_cont
                 id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
                 by_the_canister: caller(),
                 cycles: cycles_purchase,
-                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-sell-{}-{}", q.cycles_position_id, q.purchase_id)),
+                cycles_transfer_memo: create_cm_trade_tokens_cycles_payout_ct_memo(q.token_position_id, q.purchase_id),
                 timestamp_nanos: time_nanos()
             }
         );
@@ -1268,7 +1277,7 @@ pub fn cm_message_token_position_purchase_positor(q: cm_icrc1token_trade_contrac
                 id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
                 by_the_canister: caller(),
                 cycles: cycles_payment,
-                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-sell-{}-{}", q.token_position_id, q.purchase_id)),
+                cycles_transfer_memo: create_cm_trade_tokens_cycles_payout_ct_memo(q.token_position_id, q.purchase_id),
                 timestamp_nanos: time_nanos()
             }
         );
