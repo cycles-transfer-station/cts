@@ -124,60 +124,11 @@ pub struct CMVoidCyclesPositionPositorMessageQuest {
     pub timestamp_nanos: u128
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMVoidTokenPositionPositorMessageQuest {
-    pub position_id: PositionId,
-    pub void_tokens: Tokens,
-    pub timestamp_nanos: u128
-}
 
 #[derive(CandidType, Serialize, Deserialize)]
-pub struct CMCyclesPositionPurchasePositorMessageQuest {
-    pub cycles_position_id: PositionId,
-    pub purchase_id: PurchaseId,
-    pub purchaser: Principal,
-    pub purchase_timestamp_nanos: u128,
-    pub cycles_purchase: Cycles,
-    pub cycles_position_cycles_per_token_rate: CyclesPerToken,
-    pub token_payment: Tokens,
-    pub token_transfer_dust_collection: bool,
-    pub token_ledger_transfer_fee: Tokens,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMCyclesPositionPurchasePurchaserMessageQuest {
-    pub cycles_position_id: PositionId,
+pub struct CMTradeTokensCyclesPayoutMessageQuest {
     pub token_position_id: PositionId,
-    pub cycles_position_positor: Principal,
-    pub cycles_position_cycles_per_token_rate: CyclesPerToken,
     pub purchase_id: PurchaseId,
-    pub purchase_timestamp_nanos: u128,
-    // cycles in the call
-    pub token_payment: Tokens,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMTokenPositionPurchasePositorMessageQuest {
-    pub token_position_id: PositionId,
-    pub token_position_cycles_per_token_rate: CyclesPerToken,
-    pub purchaser: Principal,
-    pub purchase_id: PurchaseId,
-    pub token_purchase: Tokens,
-    pub purchase_timestamp_nanos: u128,
-    // cycles in the call
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMTokenPositionPurchasePurchaserMessageQuest {
-    pub token_position_id: PositionId,
-    pub purchase_id: PurchaseId, 
-    pub positor: Principal,
-    pub purchase_timestamp_nanos: u128,
-    pub cycles_payment: Cycles,
-    pub token_position_cycles_per_token_rate: CyclesPerToken,
-    pub token_purchase: Tokens,
-    pub token_transfer_dust_collection: bool,
-    pub token_ledger_transfer_fee: Tokens,
 }
 
 

@@ -1,6 +1,6 @@
 use std::{
     cell::{RefCell,Cell},
-    collections::{HashMap}
+    collections::{HashMap, HashSet}
 };
 use cts_lib::{
     self,
@@ -123,81 +123,11 @@ struct CyclesTransferOut {
 
 
 #[derive(CandidType, Deserialize)]
-struct CMMessageCyclesPositionPurchasePositorLog{
-    timestamp_nanos: u128,
-    cm_message_cycles_position_purchase_positor_quest: cm_tc::CMCyclesPositionPurchasePositorMessageQuest 
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageCyclesPositionPurchasePurchaserLog{
-    timestamp_nanos: u128,
-    cycles_purchase: Cycles,
-    cm_message_cycles_position_purchase_purchaser_quest: cm_tc::CMCyclesPositionPurchasePurchaserMessageQuest
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageTokenPositionPurchasePositorLog{
-    timestamp_nanos: u128,
-    cycles_payment: Cycles,
-    cm_message_token_position_purchase_positor_quest: cm_tc::CMTokenPositionPurchasePositorMessageQuest
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageTokenPositionPurchasePurchaserLog{
-    timestamp_nanos: u128,
-    cm_message_token_position_purchase_purchaser_quest: cm_tc::CMTokenPositionPurchasePurchaserMessageQuest
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageVoidCyclesPositionPositorLog{
-    timestamp_nanos: u128,
-    void_cycles: Cycles,
-    cm_message_void_cycles_position_positor_quest: cm_tc::CMVoidCyclesPositionPositorMessageQuest
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageVoidTokenPositionPositorLog{
-    timestamp_nanos: u128,
-    cm_message_void_token_position_positor_quest: cm_tc::CMVoidTokenPositionPositorMessageQuest
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMMessageLogs{
-    cm_message_cycles_position_purchase_positor_logs: Vec<CMMessageCyclesPositionPurchasePositorLog>,
-    cm_message_cycles_position_purchase_purchaser_logs: Vec<CMMessageCyclesPositionPurchasePurchaserLog>,
-    cm_message_token_position_purchase_positor_logs: Vec<CMMessageTokenPositionPurchasePositorLog>,
-    cm_message_token_position_purchase_purchaser_logs: Vec<CMMessageTokenPositionPurchasePurchaserLog>,
-    cm_message_void_cycles_position_positor_logs: Vec<CMMessageVoidCyclesPositionPositorLog>,
-    cm_message_void_token_position_positor_logs: Vec<CMMessageVoidTokenPositionPositorLog>,    
-}
-impl CMMessageLogs {
-    fn new() -> Self {
-        Self{
-            cm_message_cycles_position_purchase_positor_logs: Vec::new(),
-            cm_message_cycles_position_purchase_purchaser_logs: Vec::new(),
-            cm_message_token_position_purchase_positor_logs: Vec::new(),
-            cm_message_token_position_purchase_purchaser_logs: Vec::new(),
-            cm_message_void_cycles_position_positor_logs: Vec::new(),
-            cm_message_void_token_position_positor_logs: Vec::new(),                
-        }
-    }
-}
-
-#[derive(CandidType, Deserialize)]
-struct CMTradeContractLogs {
-    cm_message_logs: CMMessageLogs,
-}
-impl CMTradeContractLogs {
-    fn new() -> Self {
-        Self {
-            cm_message_logs: CMMessageLogs::new(),
-        }
-    }
-}
-impl Default for CMTradeContractLogs {
-    fn default() -> Self {
-        Self::new()
-    }
+struct OldUserData {
+    cycles_balance: Cycles,
+    cycles_transfers_in: Vec<CyclesTransferIn>,
+    cycles_transfers_out: Vec<CyclesTransferOut>,
+    cm_trade_contracts: HashMap<TradeContractIdAndLedgerId, Option<bool/*placeholder for candidsubtyping with the option*/>>,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -205,7 +135,7 @@ struct UserData {
     cycles_balance: Cycles,
     cycles_transfers_in: Vec<CyclesTransferIn>,
     cycles_transfers_out: Vec<CyclesTransferOut>,
-    cm_trade_contracts: HashMap<TradeContractIdAndLedgerId, CMTradeContractLogs>,
+    cm_trade_contracts: HashSet<TradeContractIdAndLedgerId>,
 }
 
 impl UserData {
@@ -214,9 +144,24 @@ impl UserData {
             cycles_balance: 0u128,
             cycles_transfers_in: Vec::new(),
             cycles_transfers_out: Vec::new(),
-            cm_trade_contracts: HashMap::new(),
+            cm_trade_contracts: HashSet::new(),
         }
     }
+}
+
+#[derive(CandidType, Deserialize)]
+struct OldCBData {
+    user_canister_creation_timestamp_nanos: u128,
+    cts_id: Principal,
+    cbsm_id: Principal,
+    user_id: Principal,
+    storage_size_mib: u128,
+    lifetime_termination_timestamp_seconds: u128,
+    user_data: OldUserData,
+    cycles_transfers_id_counter: u128,
+    cts_cb_authorization: Vec<u8>,
+    burn_icp_mint_cycles_mid_call_data: Option<BurnIcpMintCyclesData>,
+    sns_control: bool,
 }
 
 #[derive(CandidType, Deserialize)]
@@ -318,8 +263,8 @@ fn post_upgrade() {
     
     localkey::cell::set(&MEMORY_SIZE_AT_THE_START, wasm32_main_memory_size()*WASM_PAGE_SIZE_BYTES);
     
-    canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
-    /*
+    //canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, None::<fn(CBData) -> CBData>);
+    
     canister_tools::post_upgrade(&CB_DATA, STABLE_MEMORY_ID_CB_DATA_SERIALIZATION, Some::<fn(OldCBData) -> CBData>(
         |old_cb_data| {
             CBData{
@@ -329,15 +274,20 @@ fn post_upgrade() {
                 user_id: old_cb_data.user_id,
                 storage_size_mib: old_cb_data.storage_size_mib,
                 lifetime_termination_timestamp_seconds: old_cb_data.lifetime_termination_timestamp_seconds,
-                user_data: old_cb_data.user_data,
+                user_data: UserData{
+                    cycles_balance: old_cb_data.user_data.cycles_balance,
+                    cycles_transfers_in: old_cb_data.user_data.cycles_transfers_in,
+                    cycles_transfers_out: old_cb_data.user_data.cycles_transfers_out,
+                    cm_trade_contracts: old_cb_data.user_data.cm_trade_contracts.into_iter().map(|(k,_)| k).collect(),                  
+                },                    
                 cycles_transfers_id_counter: old_cb_data.cycles_transfers_id_counter,
                 cts_cb_authorization: old_cb_data.cts_cb_authorization,
                 burn_icp_mint_cycles_mid_call_data: old_cb_data.burn_icp_mint_cycles_mid_call_data,
-                sns_control: false,
+                sns_control: old_cb_data.sns_control,
             }
         }
     ));
-    */
+    
 }
 
 // ---------------------------
@@ -387,25 +337,7 @@ fn calculate_current_storage_usage(cb_data: &CBData) -> u128 {
         + 
         cb_data.user_data.cycles_transfers_out.len() * ( std::mem::size_of::<CyclesTransferOut>() + CYCLES_TRANSFER_MEMO_MAX_SIZE/*for the cycles-transfer-memo-heap-size*/ + CYCLES_TRANSFER_OUT_ERROR_STRING_MAX_LENGTH/*for the possible-call-error-string-heap-size*/ )
         +
-        cb_data.user_data.cm_trade_contracts.len() * std::mem::size_of::<TradeContractIdAndLedgerId>()
-        +
-        cb_data.user_data.cm_trade_contracts
-            .values()
-            .fold(0, |c, cm_trade_contract_logs| { 
-                c
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePositorLog>()            
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageCyclesPositionPurchasePurchaserLog>()
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_token_position_purchase_positor_logs.len() * std::mem::size_of::<CMMessageTokenPositionPurchasePositorLog>()
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_token_position_purchase_purchaser_logs.len() * std::mem::size_of::<CMMessageTokenPositionPurchasePurchaserLog>()
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_void_cycles_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidCyclesPositionPositorLog>()
-                +
-                cm_trade_contract_logs.cm_message_logs.cm_message_void_token_position_positor_logs.len() * std::mem::size_of::<CMMessageVoidTokenPositionPositorLog>()
-            })          
+        cb_data.user_data.cm_trade_contracts.len() * std::mem::size_of::<TradeContractIdAndLedgerId>()          
     ) as u128;
     if cb_data.burn_icp_mint_cycles_mid_call_data.is_some() {
         count += (std::mem::size_of::<CyclesTransferIn>() + CYCLES_TRANSFER_MEMO_MAX_SIZE) as u128;
@@ -998,7 +930,7 @@ pub async fn cm_trade_cycles(icrc1token_trade_contract: TradeContractIdAndLedger
     
     with_mut(&CB_DATA, |cb_data| {
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_sub(put_call_cycles);
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
+        cb_data.user_data.cm_trade_contracts.insert(icrc1token_trade_contract);
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -1017,8 +949,14 @@ pub async fn cm_trade_cycles(icrc1token_trade_contract: TradeContractIdAndLedger
                                 id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
                                 for_the_canister: icrc1token_trade_contract.trade_contract_canister_id,
                                 cycles_sent: put_call_cycles,
-                                cycles_refunded: Some(msg_cycles_refunded128()),   // None means the cycles_transfer-call-callback did not come back yet(did not give-back a reply-or-reject-sponse) 
-                                cycles_transfer_memo: CyclesTransferMemo::Text(format!("cm-cycles-position-id: {}", cm_buy_tokens_ok.position_id)),
+                                cycles_refunded: Some(msg_cycles_refunded128()), 
+                                cycles_transfer_memo: CyclesTransferMemo::Blob({
+                                    const CM_TRADE_CYCLES_CT_OUT_MEMO_START: u16 = 1;
+                                    let mut v = Vec::<u8>::new();
+                                    v.extend_from_slice(&CM_TRADE_CYCLES_CT_OUT_MEMO_START.to_be_bytes()[..]);
+                                    leb128::write::unsigned(&mut v, cm_buy_tokens_ok.position_id as u64).unwrap(); // when position ids get close to u64::max, change for a different library compatible with a u128.
+                                    v
+                                }),
                                 timestamp_nanos: time_nanos(),
                                 opt_cycles_transfer_call_error: None,
                             }
@@ -1068,7 +1006,7 @@ pub async fn cm_trade_tokens(icrc1token_trade_contract: TradeContractIdAndLedger
     }
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
+        cb_data.user_data.cm_trade_contracts.insert(icrc1token_trade_contract);
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -1170,7 +1108,7 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractI
     }
     
     with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cm_trade_contracts.entry(icrc1token_trade_contract).or_default();
+        cb_data.user_data.cm_trade_contracts.insert(icrc1token_trade_contract);
     });
     
     let call_result: CallResult<Vec<u8>> = call_future.await;
@@ -1201,35 +1139,19 @@ pub async fn cm_transfer_token_balance(icrc1token_trade_contract: TradeContractI
 
 // -------------------------------
 
-fn get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data: &mut CBData) -> &mut CMTradeContractLogs {
+fn cm_caller_or_trap(cb_data: &mut CBData) -> &TradeContractIdAndLedgerId {
     let caller: Principal = caller();
     cb_data.user_data.cm_trade_contracts
-        .iter_mut()
-        .find(|(k,_v): &(&TradeContractIdAndLedgerId, &mut CMTradeContractLogs)| {
+        .iter()
+        .find(|k: &&TradeContractIdAndLedgerId| {
             k.trade_contract_canister_id == caller
-        })
-        .map(|(_k,v): (&TradeContractIdAndLedgerId, &mut CMTradeContractLogs)| {
-            v
         })
         .unwrap_or_else(|| trap("Unknown caller"))
 }
 
-#[update]
-pub fn cm_message_cycles_position_purchase_positor(q: cm_tc::CMCyclesPositionPurchasePositorMessageQuest) {
-    
-    with_mut(&CB_DATA, |cb_data| {
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_cycles_position_purchase_positor_logs.push(
-            CMMessageCyclesPositionPurchasePositorLog{
-                timestamp_nanos: time_nanos(),
-                cm_message_cycles_position_purchase_positor_quest: q
-            }
-        );
-    });
 
-}
-
-pub const CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START: u16 = 1;
-pub const CM_VOID_CYCLES_POSITION_CT_MEMO_START: u16 = 2;
+pub const CM_TRADE_TOKENS_CYCLES_PAYOUT_MEMO_START: u16 = 2;
+pub const CM_VOID_CYCLES_POSITION_CT_MEMO_START: u16 = 3;
 
 fn create_cm_trade_tokens_cycles_payout_ct_memo(token_position_id: cm_tc::PositionId, purchase_id: cm_tc::PurchaseId) -> CyclesTransferMemo {
     let mut v = Vec::<u8>::new();
@@ -1246,39 +1168,14 @@ fn create_cm_void_cycles_position_ct_memo(cycles_position_id: cm_tc::PositionId)
     
 }
 
-#[update]
-pub fn cm_message_cycles_position_purchase_purchaser(q: cm_tc::CMCyclesPositionPurchasePurchaserMessageQuest) {
-    
-    let cycles_purchase: Cycles = msg_cycles_accept128(msg_cycles_available128());
-    
-    with_mut(&CB_DATA, |cb_data| {
-        cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_purchase); 
-        cb_data.user_data.cycles_transfers_in.push(
-            CyclesTransferIn{
-                id: new_cycles_transfer_id(&mut cb_data.cycles_transfers_id_counter),
-                by_the_canister: caller(),
-                cycles: cycles_purchase,
-                cycles_transfer_memo: create_cm_trade_tokens_cycles_payout_ct_memo(q.token_position_id, q.purchase_id),
-                timestamp_nanos: time_nanos()
-            }
-        );
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_cycles_position_purchase_purchaser_logs.push(
-            CMMessageCyclesPositionPurchasePurchaserLog{
-                timestamp_nanos: time_nanos(),
-                cycles_purchase,
-                cm_message_cycles_position_purchase_purchaser_quest: q
-            }
-        );
-    });    
-
-}
 
 #[update]
-pub fn cm_message_token_position_purchase_positor(q: cm_tc::CMTokenPositionPurchasePositorMessageQuest) {
+pub fn cm_message_trade_tokens_cycles_payout(q: cm_tc::CMTradeTokensCyclesPayoutMessageQuest) {
     
     let cycles_payment: Cycles = msg_cycles_accept128(msg_cycles_available128());
     
     with_mut(&CB_DATA, |cb_data| {
+        let _ = cm_caller_or_trap(cb_data);
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(cycles_payment); 
         cb_data.user_data.cycles_transfers_in.push(
             CyclesTransferIn{
@@ -1289,30 +1186,10 @@ pub fn cm_message_token_position_purchase_positor(q: cm_tc::CMTokenPositionPurch
                 timestamp_nanos: time_nanos()
             }
         );
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_token_position_purchase_positor_logs.push(
-            CMMessageTokenPositionPurchasePositorLog{
-                timestamp_nanos: time_nanos(),
-                cycles_payment,
-                cm_message_token_position_purchase_positor_quest: q
-            }
-        );
     });
     
 }
 
-#[update]
-pub fn cm_message_token_position_purchase_purchaser(q: cm_tc::CMTokenPositionPurchasePurchaserMessageQuest) {
-    
-    with_mut(&CB_DATA, |cb_data| {
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_token_position_purchase_purchaser_logs.push(
-            CMMessageTokenPositionPurchasePurchaserLog{
-                timestamp_nanos: time_nanos(),
-                cm_message_token_position_purchase_purchaser_quest: q
-            }
-        );
-    });
-    
-}
 
 #[update]
 pub fn cm_message_void_cycles_position_positor(q: cm_tc::CMVoidCyclesPositionPositorMessageQuest) {
@@ -1320,6 +1197,7 @@ pub fn cm_message_void_cycles_position_positor(q: cm_tc::CMVoidCyclesPositionPos
     let void_cycles: Cycles = msg_cycles_accept128(msg_cycles_available128());
         
     with_mut(&CB_DATA, |cb_data| {
+        let _ = cm_caller_or_trap(cb_data);
         cb_data.user_data.cycles_balance = cb_data.user_data.cycles_balance.saturating_add(void_cycles); 
         cb_data.user_data.cycles_transfers_in.push(
             CyclesTransferIn{
@@ -1330,34 +1208,9 @@ pub fn cm_message_void_cycles_position_positor(q: cm_tc::CMVoidCyclesPositionPos
                 timestamp_nanos: time_nanos()
             }
         );
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_void_cycles_position_positor_logs.push(
-            CMMessageVoidCyclesPositionPositorLog{
-                timestamp_nanos: time_nanos(),
-                void_cycles,
-                cm_message_void_cycles_position_positor_quest: q
-            }
-        );
     });
 
 }
-
-#[update]
-pub fn cm_message_void_token_position_positor(q: cm_tc::CMVoidTokenPositionPositorMessageQuest) {
-
-    with_mut(&CB_DATA, |cb_data| {
-        get_mut_cm_trade_contract_logs_of_the_cm_caller_or_trap(cb_data).cm_message_logs.cm_message_void_token_position_positor_logs.push(
-            CMMessageVoidTokenPositionPositorLog{
-                timestamp_nanos: time_nanos(),
-                cm_message_void_token_position_positor_quest: q
-            }
-        );
-    });
-
-
-}
-
-
-
 
 
 
@@ -1385,7 +1238,7 @@ pub fn metrics() { //-> UserCBMetrics {
             cycles_transfers_id_counter: cb_data.cycles_transfers_id_counter,
             cycles_transfers_in_len: cb_data.user_data.cycles_transfers_in.len() as u128,
             cycles_transfers_out_len: cb_data.user_data.cycles_transfers_out.len() as u128,
-            cm_trade_contracts: cb_data.user_data.cm_trade_contracts.keys().cloned().collect(),
+            cm_trade_contracts: cb_data.user_data.cm_trade_contracts.iter().cloned().collect(),
             cts_cb_authorization: cb_data.cts_cb_authorization.len() != 0,
             cbsm_id: cb_data.cbsm_id,
             sns_control: cb_data.sns_control,
