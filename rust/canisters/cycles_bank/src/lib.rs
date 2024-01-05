@@ -271,10 +271,16 @@ fn post_upgrade() {
 fn canister_inspect_message() {
     use cts_lib::ic_cdk::api::call::{method_name, accept_message};
     
-    let public_methods = [
+    let mut public_methods = vec![
         "get_cts_cb_auth",
         "local_put_ic_root_key"
     ];
+    if with(&CB_DATA, |cb_data| { cb_data.sns_control == true }) {
+        public_methods.extend([
+            "cycles_balance",
+            "metrics",
+        ]);
+    }
     if public_methods.contains(&&method_name()[..]) == false {
         if caller() != user_id() {
             trap("caller must be the owner");
