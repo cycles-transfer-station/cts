@@ -547,7 +547,7 @@ fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_dat
 
 // for the now a user must pay with the icp.
 #[update]
-pub async fn purchase_cycles_bank(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
+pub async fn create_membership(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
 
     let user_id: Principal = caller();
     
@@ -591,7 +591,7 @@ pub enum CompletePurchaseCyclesBankError {
 
 
 #[update]
-pub async fn complete_purchase_cycles_bank() -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
+pub async fn complete_create_membership() -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
 
     let user_id: Principal = caller();
     

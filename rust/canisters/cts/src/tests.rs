@@ -693,7 +693,7 @@ fn _mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Prin
         cts,
         RawEffectivePrincipal::None,
         user,
-        "purchase_cycles_bank",
+        "create_membership",
         (pcb_q.unwrap_or(PurchaseCyclesBankQuest{ sns_control: None }),)
     ).unwrap();
     let cb = purchase_cb_result.unwrap().cycles_bank_canister_id;   
