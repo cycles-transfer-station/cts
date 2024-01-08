@@ -603,7 +603,7 @@ fn test_cb_sns_control() {
     let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
     for i in 0..3 {
         let user = Principal::from_slice(&(i+80000 as u64).to_be_bytes());
-        let cb = _mint_icp_and_purchase_cycles_bank(&pic, user, cts, Some(PurchaseCyclesBankQuest{ sns_control: Some(i % 2 == 0) }));
+        let cb = _mint_icp_and_purchase_cycles_bank(&pic, user, cts, PurchaseCyclesBankQuest{ sns_control: Some(i % 2 == 0), ..Default::default() });
         users_and_cbs.push((user, cb));        
     }
     let cbsm = controller_view_cbsms(&pic, cts).last().unwrap().clone();
@@ -635,7 +635,36 @@ fn test_cb_sns_control() {
     }
 }
 
-
+#[test]
+fn test_create_membership_for_user() {
+    let (pic, cts, _cm_main) = cts_setup();
+    let for_user = Principal::from_slice(&(80000 as u64).to_be_bytes());
+    let caller = Principal::from_slice(&(90000 as u64).to_be_bytes());
+    assert_ne!(caller, for_user);
+    mint_icp(
+        &pic,
+        Account{ owner: cts, subaccount: Some(principal_token_subaccount(&for_user)) },
+        MEMBERSHIP_COST_CYCLES / CMC_RATE + LEDGER_TRANSFER_FEE*2,
+    );
+    assert_eq!(
+        icrc1_balance(&pic, ICP_LEDGER, &Account{ owner: cts, subaccount: Some(principal_token_subaccount(&for_user)) }),
+        MEMBERSHIP_COST_CYCLES / CMC_RATE + LEDGER_TRANSFER_FEE*2,
+    );
+    assert_eq!(
+        icrc1_balance(&pic, ICP_LEDGER, &Account{ owner: cts, subaccount: Some(principal_token_subaccount(&caller)) }),
+        0,
+    );
+    let cb = call_candid_as::<_, (Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError>,)>(
+        &pic,
+        cts,
+        RawEffectivePrincipal::None,
+        caller,
+        "create_membership",
+        (PurchaseCyclesBankQuest{ for_user: Some(for_user), ..Default::default() },)
+    ).unwrap().0.unwrap().cycles_bank_canister_id;
+    pic.query_call(cb, caller, "cycles_balance", candid::encode_args(()).unwrap()).unwrap_err(); 
+    let _cycles_balance = call_candid_as::<_, (Cycles,)>(&pic, cb, RawEffectivePrincipal::None, for_user, "cycles_balance", ()).unwrap().0;
+}
 
 
 // --- tools ---
@@ -679,10 +708,10 @@ fn mint_icp(pic: &PocketIc, to: Account, amount: u128) {
 }
 
 fn mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal) -> Principal {
-    _mint_icp_and_purchase_cycles_bank(pic, user, cts, None)
+    _mint_icp_and_purchase_cycles_bank(pic, user, cts, PurchaseCyclesBankQuest::default())
 } 
 
-fn _mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal, pcb_q: Option<PurchaseCyclesBankQuest>) -> Principal {
+fn _mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Principal, pcb_q: PurchaseCyclesBankQuest) -> Principal {
     mint_icp(
         &pic,
         Account{ owner: cts, subaccount: Some(principal_token_subaccount(&user)) },
@@ -694,7 +723,7 @@ fn _mint_icp_and_purchase_cycles_bank(pic: &PocketIc, user: Principal, cts: Prin
         RawEffectivePrincipal::None,
         user,
         "create_membership",
-        (pcb_q.unwrap_or(PurchaseCyclesBankQuest{ sns_control: None }),)
+        (pcb_q,)
     ).unwrap();
     let cb = purchase_cb_result.unwrap().cycles_bank_canister_id;   
     cb

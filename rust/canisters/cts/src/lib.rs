@@ -326,7 +326,7 @@ pub fn canister_inspect_message() {
     use ic_cdk::api::call::{method_name,accept_message};
     
     if caller() == Principal::anonymous() 
-        && !["view_fees", "local_put_ic_root_key"].contains(&&method_name()[..])
+        && !["view_fees", "local_put_ic_root_key", "create_membership", "complete_create_membership"].contains(&&method_name()[..])
         {
         trap("caller cannot be anonymous for this method.");
     }
@@ -524,8 +524,9 @@ pub enum PurchaseCyclesBankError{
 }
 
 
-#[derive(CandidType, Deserialize, Clone, PartialEq, Eq)]
+#[derive(CandidType, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct PurchaseCyclesBankQuest {
+    for_user: Option<Principal>, // otherwise the caller is the user.
     sns_control: Option<bool>,
 }
 
@@ -549,7 +550,7 @@ fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_dat
 #[update]
 pub async fn create_membership(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
 
-    let user_id: Principal = caller();
+    let user_id: Principal = q.for_user.unwrap_or(caller());
     
     let purchase_cycles_bank_data: PurchaseCyclesBankData = with_mut(&CTS_DATA, |cts_data| {
         check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| PurchaseCyclesBankError::UserIsInTheMiddleOfADifferentCall(e))?;
