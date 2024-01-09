@@ -1,0 +1,129 @@
+type CTSInit = record { cycles_market_main : principal };
+type CBSMUserData = record {
+  cycles_bank_latest_known_module_hash : vec nat8;
+  cycles_bank_canister_id : principal;
+  membership_termination_cb_uninstall_data : opt CyclesBankTerminationUninstallData;
+  cycles_bank_lifetime_termination_timestamp_seconds : nat;
+  sns_control : bool;
+  first_membership_creation_timestamp_nanos : nat;
+};
+type CyclesBankTerminationUninstallData = record {
+  user_cycles_balance : nat;
+  uninstall_timestamp_nanos : nat64;
+};
+type CheckCurrentXdrPerMyriadPerIcpCmcRateError = variant {
+  CmcGetRateCallError : record { nat32; text };
+  CmcGetRateCallSponseCandidError : text;
+};
+type CmcNotifyError = variant {
+  Refunded : record { block_index : opt nat64; reason : text };
+  InvalidTransaction : text;
+  Other : record { error_message : text; error_code : nat64 };
+  Processing;
+  TransactionTooOld : nat64;
+};
+type CreateCanisterError = variant {
+  CreateCanisterManagementCallSponseCandidError : record {
+    candid_error : text;
+    candid_bytes : vec nat8;
+  };
+  CreateCanisterManagementCallQuestCandidError : text;
+  CreateCanisterManagementCallError : record { nat32; text };
+};
+type CreateNewCBSMError = variant {
+  InstallCodeCallError : text;
+  GetNewCanisterError : CreateCanisterError;
+  CreateNewCBSMapLockIsOn;
+  CBSMapCanisterCodeNotFound;
+  MaxCBSMapCanisters;
+  CTSCyclesBalanceTooLow : record { cycles_balance : nat };
+};
+type FindUserInTheCBSMapsError = variant {
+  CBSMapsFindUserCallFails : vec record { principal; record { nat32; text } };
+};
+type LedgerTopupCyclesCmcIcpTransferError = variant {
+  IcpTransferCallError : record { nat32; text };
+  IcpTransferError : IcpTransferError;
+};
+type LedgerTopupCyclesCmcNotifyError = variant {
+  CmcNotifyTopUpQuestCandidEncodeError : text;
+  CmcNotifySponseCandidDecodeError : record {
+    candid_error : text;
+    candid_bytes : vec nat8;
+  };
+  CmcNotifyError : CmcNotifyError;
+  CmcNotifyCallError : record { nat32; text };
+};
+type CreateMembershipError = variant {
+  CTSIsBusy;
+  FoundCyclesBank : principal;
+  CheckCurrentXdrPerMyriadPerIcpCmcRateError : CheckCurrentXdrPerMyriadPerIcpCmcRateError;
+  CreateCyclesBankCanisterCmcNotifyError : CmcNotifyError;
+  MidCallError : CreateMembershipMidCallError;
+  UserIsInTheMiddleOfADifferentCall : UserIsInTheMiddleOfADifferentCall;
+  UserIcpLedgerBalanceTooLow : record {
+    user_icp_ledger_balance : IcpTokens;
+    membership_cost_icp : IcpTokens;
+    icp_ledger_transfer_fee : IcpTokens;
+  };
+  CheckIcpBalanceCallError : record { nat32; text };
+};
+type CreateMembershipMidCallError = variant {
+  UpdateCBSMUserDataWithTheCBModuleHashError : UpdateUserError;
+  CyclesBankInstallCodeCallError : record { nat32; text };
+  CreateCyclesBankCanisterLedgerTopupCyclesCmcNotifyError : LedgerTopupCyclesCmcNotifyError;
+  CreateCyclesBankCanisterLedgerTopupCyclesCmcIcpTransferError : LedgerTopupCyclesCmcIcpTransferError;
+  CollectIcpTransferCallError : record { nat32; text };
+  CyclesBankUpdateSettingsCallError : record { nat32; text };
+  PutNewUserIntoACBSMError : PutNewUserIntoACBSMError;
+  CBSMapsFindUserCallFails : vec record { principal; record { nat32; text } };
+  CreateCyclesBankManagementCallError : record { nat32; text };
+  CyclesBankUninstallCodeCallError : record { nat32; text };
+  CyclesBankStartCanisterCallError : record { nat32; text };
+  CollectIcpTransferError : IcpTransferError;
+  TransferMainderUserCTSICPTransferCallError : record { nat32; text };
+  CyclesBankCodeNotFound;
+  UpdateCBSMUserDataWithTheCBModuleHashCallError : record { nat32; text };
+  CyclesBankModuleVerificationError;
+  TransferMainderUserCTSICPTransferError : IcpTransferError;
+  CyclesBankCanisterStatusCallError : record { nat32; text };
+};
+type CreateMembershipQuest = record {
+  for_user : opt principal;
+  sns_control : opt bool;
+};
+type CreateMembershipSuccess = record { cycles_bank_canister_id : principal };
+type PutNewUserError = variant { CanisterIsFull; FoundUser : CBSMUserData };
+type PutNewUserIntoACBSMError = variant {
+  CreateNewCBSMError : CreateNewCBSMError;
+  CBSMPutNewUserError : PutNewUserError;
+  CBSMPutNewUserCallFail : record { principal; text };
+};
+type CreateMembershipResult = variant {
+  Ok : CreateMembershipSuccess;
+  Err : CreateMembershipError;
+};
+type IcpTokens = record { e8s : nat64 };
+type IcpTransferError = variant {
+  TxTooOld : record { allowed_window_nanos : nat64 };
+  BadFee : record { expected_fee : IcpTokens };
+  TxDuplicate : record { duplicate_of : nat64 };
+  TxCreatedInFuture;
+  InsufficientFunds : record { balance : IcpTokens };
+};
+type UpdateUserError = variant { UserNotFound };
+type UserIsInTheMiddleOfADifferentCall = variant {
+  PurchaseCyclesBankCall : record { must_call_complete : bool };
+};
+type CompleteCreateMembershipResult = variant {
+  Ok : CreateMembershipSuccess;
+  Err : CompleteCreateMembershipError;
+};
+type CompleteCreateMembershipError = variant {
+  PurchaseCyclesBankError : CreateMembershipError;
+  UserIsNotInTheMiddleOfAPurchaseCyclesBankCall;
+};
+service : (CTSInit) -> {
+  create_membership : (CreateMembershipQuest) -> (CreateMembershipResult);
+  complete_create_membership : (opt principal) -> (CompleteCreateMembershipResult);
+}

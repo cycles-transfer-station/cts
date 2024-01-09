@@ -44,7 +44,7 @@ strip = "none"
 
 
 [workspace.dependencies]
-ic-cdk = "0.10.0"
+ic-cdk = "0.11.0"
 ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "4749f45a3f609dcf5dc1a32fe0d9131ddf02f495" } 
 ic-ledger-types = "0.7.0"
 candid = "0.9.10"

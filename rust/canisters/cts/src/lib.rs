@@ -325,12 +325,6 @@ pub fn canister_inspect_message() {
     // caution: this function is only called for ingress messages 
     use ic_cdk::api::call::{method_name,accept_message};
     
-    if caller() == Principal::anonymous() 
-        && !["view_fees", "local_put_ic_root_key", "create_membership", "complete_create_membership"].contains(&&method_name()[..])
-        {
-        trap("caller cannot be anonymous for this method.");
-    }
-    
     // check the size of the arg_data_raw_size()
 
     if &method_name()[..] == "cycles_transfer" {
@@ -592,9 +586,9 @@ pub enum CompletePurchaseCyclesBankError {
 
 
 #[update]
-pub async fn complete_create_membership() -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
+pub async fn complete_create_membership(for_user: Option<Principal>) -> Result<PurchaseCyclesBankSuccess, CompletePurchaseCyclesBankError> {
 
-    let user_id: Principal = caller();
+    let user_id: Principal = for_user.unwrap_or(caller());
     
     complete_purchase_cycles_bank_(user_id).await
     
@@ -2748,7 +2742,7 @@ fn http_request_stream_callback() {
 
 
 
-
+cts_lib::ic_cdk::export_candid!();
 
 
 
