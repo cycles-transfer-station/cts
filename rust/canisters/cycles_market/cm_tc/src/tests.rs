@@ -560,19 +560,24 @@ fn t() {
         assert_eq!(cm_data.token_positions.len(), 0);
         assert_eq!(cm_data.cycles_positions.len(), 0);
         assert_eq!(cm_data.void_token_positions.len(), 1);
-        assert_eq!(cm_data.void_cycles_positions.len(), 1);
-        
-        
-        
-    }
-    
-    
-    
-    
-    // test with the flush-storage-buffer-at-size const set as the 500-bytes
+        assert_eq!(cm_data.void_cycles_positions.len(), 1);   
+    }    
+}
+
+
+
+#[test]
+fn test_cts_user_trade() {
     
     
 }
+
+
+
+
+// ------ tools ------
+
+
 
 
 

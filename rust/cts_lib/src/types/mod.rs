@@ -183,6 +183,10 @@ pub mod cts {
         pub lengthen_years: u128,
     }
         
+    #[derive(CandidType, Deserialize)]
+    pub struct CMTCUserPayoutCyclesQuest{
+        pub user_id: Principal
+    }
     
 }
 

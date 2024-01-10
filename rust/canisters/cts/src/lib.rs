@@ -24,7 +24,10 @@ use cts_lib::{
         cycles_bank::{
             CyclesBankInit,
         },
-        cts::{LengthenMembershipQuest, UserAndCB},
+        cycles_market::{
+            tc as cm_tc,
+        },
+        cts::{LengthenMembershipQuest, UserAndCB, CMTCUserPayoutCyclesQuest},
         http_request::*,
     },
     management_canister::{
@@ -546,10 +549,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     }
         
     with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
-        user_cycles_balances.insert(
-            candid_principal_as_ic_principal(user_id),
-            user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0).saturating_add(mid_call_data.cmc_cycles.unwrap())
-        );
+        add_user_cycles_balance(user_cycles_balances, user_id, mid_call_data.cmc_cycles.unwrap());
     });
     
     with_mut(&CTS_DATA, |cts_data| { 
@@ -600,8 +600,80 @@ async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, 
 pub fn caller_cycles_balance() -> Cycles {
     let user_id: Principal = caller();
     with(&USER_CYCLES_BALANCES, |user_cycles_balances| {
-        user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0)
+        user_cycles_balance(user_cycles_balances, user_id)
     })
+}
+
+
+fn add_user_cycles_balance(user_cycles_balances: &mut StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal, add_cycles: Cycles) {
+    let user_id = candid_principal_as_ic_principal(user_id);
+    user_cycles_balances.insert(
+        user_id,
+        user_cycles_balances.get(&user_id).unwrap_or(0).saturating_add(add_cycles)
+    );
+}
+
+fn subtract_user_cycles_balance(user_cycles_balances: &mut StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal, sub_cycles: Cycles) {
+    let user_id = candid_principal_as_ic_principal(user_id);
+    user_cycles_balances.insert(
+        user_id,
+        user_cycles_balances.get(&user_id).unwrap_or(0).saturating_sub(sub_cycles)
+    );
+}
+
+fn user_cycles_balance(user_cycles_balances: &StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal) -> Cycles {
+    user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0)    
+}
+
+#[update]
+pub fn cm_tc_user_payout_cycles(q: CMTCUserPayoutCyclesQuest) {
+    with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
+        add_user_cycles_balance(user_cycles_balances, q.user_id, msg_cycles_accept128(msg_cycles_available128()));
+    });
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+pub enum CTSCMTradeCyclesError {
+    CyclesBalanceTooLow{ cycles_balance: Cycles },
+    CMTradeCyclesCallError(CallError),
+    CMTradeCyclesError(cm_tc::TradeCyclesError),
+}
+
+#[update]
+pub async fn cm_trade_cycles(tc_id: Principal, q: cm_tc::TradeCyclesQuest) -> Result<cm_tc::TradeCyclesSuccess, CTSCMTradeCyclesError> {
+    let user_id: Principal = caller();
+    
+    with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
+        let current_user_cycles_balance: Cycles = user_cycles_balance(user_cycles_balances, user_id); 
+        if current_user_cycles_balance < q.cycles {
+            return Err(CTSCMTradeCyclesError::CyclesBalanceTooLow{ cycles_balance: current_user_cycles_balance });
+        }
+        subtract_user_cycles_balance(user_cycles_balances, user_id, q.cycles);
+        Ok(())
+    })?;
+    
+    let call_result = call_with_payment128::<(Principal, cm_tc::TradeCyclesQuest), (cm_tc::TradeCyclesResult,)>(
+        tc_id,
+        "trade_cycles",
+        (user_id, q.clone()),
+        q.cycles
+    ).await;
+        
+    let r = match call_result {
+        Ok((cm_trade_cycles_result,)) => match cm_trade_cycles_result {
+            Ok(cm_trade_cycles_success) => Ok(cm_trade_cycles_success),
+            Err(cm_trade_cycles_error) => Err(CTSCMTradeCyclesError::CMTradeCyclesError(cm_trade_cycles_error)),
+        }
+        Err(call_error) => Err(CTSCMTradeCyclesError::CMTradeCyclesCallError(call_error_as_u32_and_string(call_error))),
+    };    
+    
+    if r.is_err() {
+        with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
+            add_user_cycles_balance(user_cycles_balances, user_id, q.cycles);
+        });
+    }
+    
+    r
 }
 
 

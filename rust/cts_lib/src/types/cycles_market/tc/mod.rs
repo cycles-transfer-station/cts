@@ -28,6 +28,8 @@ pub struct BuyTokensQuest {
     pub cycles_per_token_rate: CyclesPerToken,
 }
 
+pub type TradeCyclesQuest = BuyTokensQuest;
+
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct SellTokensQuest {
     pub tokens: Tokens,
@@ -44,14 +46,17 @@ pub enum BuyTokensError {
     MsgCyclesTooLow,
     CyclesMarketIsBusy,
 }
+pub type TradeCyclesError = BuyTokensError;
 
 #[derive(CandidType, Deserialize)]
 pub struct BuyTokensSuccess {
     pub position_id: PositionId,
 }
+pub type TradeCyclesSuccess = BuyTokensSuccess;
 
 pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
 
+pub type TradeCyclesResult = BuyTokensResult;
 
 
 

@@ -4,7 +4,8 @@ use futures::task::Poll;
 use crate::*;
 
 use cts_lib::{
-    ic_cdk::api::call::CallResult
+    ic_cdk::api::call::CallResult,
+    types::cts::CMTCUserPayoutCyclesQuest,
 };
 
 
@@ -19,13 +20,32 @@ pub async fn do_cycles_payout<T: CyclesPayoutTrait>(q: T) -> CyclesPayoutData {
         
         if q.cycles() >= CYCLES_DUST_COLLECTION_THRESHOLD {
             
+            let (canister, method, quest_bytes) = {
+                if q.cycles_payout_payee().as_slice().len() == 29 { // call the cts, this is a user without a cb.
+                    (
+                        localkey::cell::get(&CTS_ID), 
+                        "cm_tc_user_payout_cycles", 
+                        match candid::encode_one(CMTCUserPayoutCyclesQuest{user_id: q.cycles_payout_payee()}) {
+                            Ok(b) => b,
+                            Err(_) => return cycles_payout_data,
+                        }
+                    )                    
+                } else { // this is a cb
+                    (
+                        q.cycles_payout_payee(),
+                        q.cycles_payout_payee_method(),
+                        match q.cycles_payout_payee_method_quest_bytes() {
+                            Ok(b) => b,
+                            Err(_e) => return cycles_payout_data,
+                        }
+                    )    
+                }
+            };
+            
             let mut call_future = call_raw128(
-                q.cycles_payout_payee(),
-                q.cycles_payout_payee_method(),
-                match q.cycles_payout_payee_method_quest_bytes() {
-                    Ok(b) => b,
-                    Err(_e) => return cycles_payout_data,
-                },
+                canister,
+                method,
+                quest_bytes,
                 q.cycles().saturating_sub(q.cycles_payout_fee())
             );
                     

@@ -69,6 +69,7 @@ use cts_lib::{
                 reply_raw,
                 msg_cycles_available128,
                 msg_cycles_accept128,
+                arg_data,
             },
             canister_balance128,
             is_controller,
@@ -559,26 +560,34 @@ fn minus_one_ongoing_buy_call(cm_data: &mut CMData) {
 }
 
 
-#[update(manual_reply = true)]
-pub fn trade_cycles(q: BuyTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> BuyTokensResult
-    ic_cdk::print("trade_cycles start");
+
+#[export_name = "canister_update trade_cycles"]
+extern "C" fn trade_cycles() {
     let caller: Principal = caller();
     
-    #[cfg(not(debug_assertions))]
-    if is_cts_cb_authorization_valid(
-        localkey::cell::get(&CTS_ID),        
-        UserAndCB{
-            user_id: user_of_the_cb,
-            cb_id: caller,
-        },
-        cts_cb_authorization
-    ) == false {
-        trap("Caller must be a CTS-CYCLES-BANK.");
-    }
+    let (positor, q): (Principal, BuyTokensQuest) = {
+        if caller == with(&CM_DATA, |cm_data| cm_data.cts_id) {
+            arg_data()
+        } else {
+            let (q, (user_of_the_cb, cts_cb_authorization)): (BuyTokensQuest, (Principal, Vec<u8>)) = arg_data();
+            #[cfg(not(debug_assertions))]
+            if is_cts_cb_authorization_valid(
+                localkey::cell::get(&CTS_ID),        
+                UserAndCB{
+                    user_id: user_of_the_cb,
+                    cb_id: caller,
+                },
+                cts_cb_authorization
+            ) == false {
+                trap("Caller must be a CTS-CYCLES-BANK.");
+            }
+            (caller, q)
+        }
+    };
     
     with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_buy_call(cm_data); });
     
-    let buy_tokens_result: BuyTokensResult = buy_tokens_(caller, q);
+    let buy_tokens_result: BuyTokensResult = buy_tokens_(positor, q);
     
     with_mut(&CM_DATA, |cm_data| { minus_one_ongoing_buy_call(cm_data); });
     
