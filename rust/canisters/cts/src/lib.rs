@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell}, 
-    collections::{HashMap},
+    collections::{HashMap, HashSet},
 };
 use serde_bytes::ByteBuf;
 use num_traits::cast::ToPrimitive;
@@ -45,7 +45,6 @@ use cts_lib::{
         MANAGEMENT_CANISTER_ID,
         NETWORK_CANISTER_CREATION_FEE_CYCLES,
         NETWORK_GiB_STORAGE_PER_SECOND_FEE_CYCLES,
-        CTS_TRANSFER_ICP_FEE_ICP_MEMO,
         CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO,
         NANOS_IN_A_SECOND,
         SECONDS_IN_A_DAY,
@@ -64,6 +63,9 @@ use cts_lib::{
         caller_is_controller_gaurd,
         call_error_as_u32_and_string,
         upgrade_canisters::*,
+        time_nanos_u64,
+        candid_principal_as_ic_principal,
+        //ic_principal_as_candid_principal,
     },
     ic_cdk::{
         self,
@@ -97,7 +99,6 @@ use cts_lib::{
         IcpId,
         IcpTokens,
         IcpBlockHeight,
-        IcpTimestamp,
         ICP_LEDGER_TRANSFER_DEFAULT_FEE,
         MAINNET_LEDGER_CANISTER_ID, 
         icp_transfer,
@@ -116,10 +117,11 @@ use candid::{
         encode_one, 
     }
 };
-
+use ic_stable_structures::{StableBTreeMap, memory_manager::VirtualMemory, DefaultMemoryImpl};
 use canister_tools::{
     self,
     MemoryId,
+    get_virtual_memory,
 };
 
 
@@ -172,8 +174,9 @@ pub struct CTSData {
     cbs_maps: HashMap<Principal, CBSMStatus>,
     create_new_cbs_map_lock: bool,
     temp_create_new_cbsmap_holder: Option<Principal>,
+    users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
-    users_transfer_icp: HashMap<Principal, TransferIcpData>,
+    users_transfer_icp: HashSet<Principal>,
     users_lengthen_membership: HashMap<Principal, LengthenMembershipMidCallData>,
     users_lengthen_membership_cb_cycles_payment: HashMap<Principal, LengthenMembershipMidCallData>,
     cb_cache: Cache<Principal/*user-id*/, Option<Principal/*cycles-bank*/>>,
@@ -190,8 +193,9 @@ impl CTSData {
             cbs_maps: HashMap::new(),
             create_new_cbs_map_lock: false,
             temp_create_new_cbsmap_holder: None,
+            users_mint_cycles: HashMap::new(),    
             users_purchase_cycles_bank: HashMap::new(),
-            users_transfer_icp: HashMap::new(),
+            users_transfer_icp: HashSet::new(),
             users_lengthen_membership: HashMap::new(),
             users_lengthen_membership_cb_cycles_payment: HashMap::new(),
             cb_cache: Cache::<Principal, Option<Principal>>::new(CB_CACHE_SIZE),
@@ -203,11 +207,10 @@ impl CTSData {
 pub struct CBSMStatus {
     module_hash: [u8; 32],
 }
-    
-    
+       
 type ModuleHash = [u8; 32];
  
- 
+//type PrincipalAndCyclesTransferIdConcatenation = []
  
 
 pub const MEMBERSHIP_COST_CYCLES: Cycles = 15 * TRILLION;
@@ -238,7 +241,6 @@ pub const CREATE_CBS_MAP_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 pub const CREATE_CBS_MAP_CANISTER_NETWORK_MEMORY_ALLOCATION: u128 = 100 * MiB as u128;
 
 pub const MAX_USERS_TRANSFER_ICP: usize = 170;
-pub const CTS_TRANSFER_ICP_FEE: Cycles = 30_000_000_000; // taken as the icptokens by the conversion-rate
 
 const MAX_USERS_LENGTHEN_MEMBERSHIP: usize = 170;
 const MAX_USERS_LENGTHEN_MEMBERSHIP_CB_CYCLES_PAYMENT: usize = 170; 
@@ -255,16 +257,23 @@ pub const CB_CACHE_SIZE: usize = {
 pub const CB_AUTHS_MAX_SIZE: usize = CB_CACHE_SIZE;
 pub const MINIMUM_CB_AUTH_DURATION_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
 
-
+const MAX_USERS_MINT_CYCLES: usize = 170;
 
 const STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID: MemoryId = MemoryId::new(0);
-
+const USER_CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
+//const USER_CYCLES_TRANSFERS_LOGS: MemoryId = MemoryId::new(2);
 
 
 thread_local! {
     
     pub static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
+    pub static USER_CYCLES_BALANCES: RefCell<StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>> 
+        = RefCell::new(StableBTreeMap::init(get_virtual_memory(USER_CYCLES_BALANCES_MEMORY_ID)));
+    /*
+    pub static USER_CYCLES_TRANSFERS: RefCell<StableBTreeMap<ic_principal::Principal, Vec<CyclesTransferLog>, VirtualMemory<DefaultMemoryImpl>>> 
+        = RefCell::new(StableBTreeMap::init(get_virtual_memory(USER_CYCLES_TRANSFERS_LOGS)));
+    */
     // not save through the upgrades
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
@@ -285,7 +294,7 @@ struct CTSInit {
 fn init(cts_init: CTSInit) {
     canister_tools::init(&CTS_DATA, STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID);
 
-    with_mut(&CTS_DATA, |cts_data| { 
+    with_mut(&CTS_DATA, |cts_data| {
         cts_data.cycles_market_main = cts_init.cycles_market_main; 
     });
     
@@ -322,7 +331,7 @@ fn post_upgrade() {
 // test this!
 #[no_mangle]
 pub fn canister_inspect_message() {
-    // caution: this function is only called for ingress messages 
+    // caution: this function is only called for ingress update messages 
     use ic_cdk::api::call::{method_name,accept_message};
     
     // check the size of the arg_data_raw_size()
@@ -351,19 +360,22 @@ pub fn canister_inspect_message() {
 #[derive(CandidType, Deserialize, Debug)]
 pub enum UserIsInTheMiddleOfADifferentCall {
     PurchaseCyclesBankCall{ must_call_complete: bool },
-    BurnIcpMintCyclesCall{ must_call_complete: bool },
-    TransferIcpCall{ must_call_complete: bool },
+    MintCyclesCall{ must_call_complete: bool },
+    TransferIcpCall,
     LengthenMembershipCall{ must_call_complete: bool },
     LengthenMembershipCBCyclesPaymentCall{ must_call_complete: bool },
 }
 
 
 fn check_if_user_is_in_the_middle_of_a_different_call(cts_data: &CTSData, user_id: &Principal) -> Result<(), UserIsInTheMiddleOfADifferentCall> {
+    if let Some(mint_cycles_mid_call_data) = cts_data.users_mint_cycles.get(user_id) {
+        return Err(UserIsInTheMiddleOfADifferentCall::MintCyclesCall{ must_call_complete: !mint_cycles_mid_call_data.lock });
+    }
+    if cts_data.users_transfer_icp.contains(user_id) == true {
+        return Err(UserIsInTheMiddleOfADifferentCall::TransferIcpCall);
+    }
     if let Some(purchase_cycles_bank_data) = cts_data.users_purchase_cycles_bank.get(user_id) {
         return Err(UserIsInTheMiddleOfADifferentCall::PurchaseCyclesBankCall{ must_call_complete: !purchase_cycles_bank_data.lock });
-    }
-    if let Some(transfer_icp_data) = cts_data.users_transfer_icp.get(user_id) {
-        return Err(UserIsInTheMiddleOfADifferentCall::TransferIcpCall{ must_call_complete: !transfer_icp_data.lock });
     }
     if let Some(lengthen_membership_mid_call_data) = cts_data.users_lengthen_membership.get(user_id) {
         return Err(UserIsInTheMiddleOfADifferentCall::LengthenMembershipCall{ must_call_complete: !lengthen_membership_mid_call_data.lock });
@@ -371,7 +383,6 @@ fn check_if_user_is_in_the_middle_of_a_different_call(cts_data: &CTSData, user_i
     if let Some(lengthen_membership_mid_call_data) = cts_data.users_lengthen_membership_cb_cycles_payment.get(user_id) {
         return Err(UserIsInTheMiddleOfADifferentCall::LengthenMembershipCBCyclesPaymentCall{ must_call_complete: !lengthen_membership_mid_call_data.lock });
     }
-    
     Ok(())           
 }
 
@@ -418,41 +429,246 @@ pub fn cycles_transfer() {
 
 
 
-
-
-
-
-
-
 #[derive(CandidType, Deserialize)]
 pub struct Fees {
     membership_cost_per_year_cycles: Cycles,
-    cts_transfer_icp_fee: Cycles,
-    
-    
-    
 }
 
 #[query]
 pub fn view_fees() -> Fees {
     Fees {
         membership_cost_per_year_cycles: MEMBERSHIP_COST_CYCLES,
-        cts_transfer_icp_fee: CTS_TRANSFER_ICP_FEE,
     }
 }
 
 
 
 
+// ---------------
+// user mint cycles
+
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+pub struct MintCyclesQuest {
+    pub burn_icp: IcpTokens, 
+    pub burn_icp_transfer_fee: IcpTokens,   
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+pub enum MintCyclesError {
+    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
+    CTSIsBusy,
+    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
+    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
+    MidCallError(MintCyclesMidCallError)
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+pub enum MintCyclesMidCallError {
+    LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+}
+
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct MintCyclesSuccess {
+    pub mint_cycles: Cycles
+}
+
+pub type MintCyclesResult = Result<MintCyclesSuccess, MintCyclesError>;
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct MintCyclesMidCallData {
+    start_time_nanos: u64,
+    lock: bool,
+    quest: MintCyclesQuest,
+    cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
+    cmc_cycles: Option<Cycles>,
+}
+
+
+#[update]
+pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
+    
+    let user_id: Principal = caller();
+    
+    let mid_call_data: MintCyclesMidCallData = with_mut(&CTS_DATA, |cts_data| {
+        check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| MintCyclesError::UserIsInTheMiddleOfADifferentCall(e))?;
+        if cts_data.users_mint_cycles.len() >= MAX_USERS_MINT_CYCLES {
+            return Err(MintCyclesError::CTSIsBusy);
+        }
+        let mid_call_data = MintCyclesMidCallData{
+            start_time_nanos: time_nanos_u64(),
+            lock: true,
+            quest: q, 
+            cmc_icp_transfer_block_height: None,
+            cmc_cycles: None,
+        };
+        cts_data.users_mint_cycles.insert(user_id.clone(), mid_call_data.clone());
+        Ok(mid_call_data)
+    })?;
+
+    mint_cycles_(user_id, mid_call_data).await
+}
+
+async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallData) -> MintCyclesResult {   
+    
+    if mid_call_data.cmc_icp_transfer_block_height.is_none() {
+        match ledger_topup_cycles_cmc_icp_transfer(
+            mid_call_data.quest.burn_icp, 
+            mid_call_data.quest.burn_icp_transfer_fee,
+            Some(principal_icp_subaccount(&user_id)),
+            ic_cdk::api::id()
+        ).await {
+            Ok(block_height) => { 
+                mid_call_data.cmc_icp_transfer_block_height = Some(block_height); 
+            },
+            Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
+                with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.remove(&user_id); });
+                return Err(MintCyclesError::LedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error));
+            }
+        }
+    }
+    
+    if mid_call_data.cmc_cycles.is_none() {
+        match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
+            Ok(cmc_cycles) => { 
+                mid_call_data.cmc_cycles = Some(cmc_cycles); 
+            },
+            Err(ledger_topup_cycles_cmc_notify_error) => {
+                if let LedgerTopupCyclesCmcNotifyError::CmcNotifyError(CmcNotifyError::Refunded{ block_index: Some(b), reason: r }) = ledger_topup_cycles_cmc_notify_error {
+                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.remove(&user_id); });
+                    return Err(MintCyclesError::LedgerTopupCyclesCmcNotifyRefund{ block_index: b, reason: r});
+                } else {
+                    mid_call_data.lock = false;
+                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.insert(user_id, mid_call_data); });
+                    return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
+                }
+            }
+        }
+    }
+        
+    with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
+        user_cycles_balances.insert(
+            candid_principal_as_ic_principal(user_id),
+            user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0).saturating_add(mid_call_data.cmc_cycles.unwrap())
+        );
+    });
+    
+    with_mut(&CTS_DATA, |cts_data| { 
+        cts_data.users_mint_cycles.remove(&user_id);        
+    });
+    
+    Ok(MintCyclesSuccess{
+        mint_cycles: mid_call_data.cmc_cycles.unwrap(),
+    })
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum CompleteMintCyclesError{
+    UserIsNotInTheMiddleOfAMintCyclesCall,
+    MintCyclesError(MintCyclesError)
+}
+
+#[update]
+pub async fn complete_mint_cycles(for_user: Option<Principal>) -> Result<MintCyclesSuccess, CompleteMintCyclesError> {
+    complete_mint_cycles_(for_user.unwrap_or(caller())).await
+}
+
+async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, CompleteMintCyclesError> {
+    
+    let mid_call_data: MintCyclesMidCallData = with_mut(&CTS_DATA, |cts_data| {
+        match cts_data.users_mint_cycles.get_mut(&user_id) {
+            Some(mid_call_data) => {
+                if mid_call_data.lock == true {
+                    return Err(CompleteMintCyclesError::MintCyclesError(MintCyclesError::UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall::MintCyclesCall{ must_call_complete: false })));
+                }
+                mid_call_data.lock = true;
+                Ok(mid_call_data.clone())
+            },
+            None => {
+                return Err(CompleteMintCyclesError::UserIsNotInTheMiddleOfAMintCyclesCall);
+            }
+        }
+    })?;
+
+    mint_cycles_(user_id, mid_call_data).await
+        .map_err(|mint_cycles_error| { 
+            CompleteMintCyclesError::MintCyclesError(mint_cycles_error) 
+        })
+}
+
+
+#[query]
+pub fn caller_cycles_balance() -> Cycles {
+    let user_id: Principal = caller();
+    with(&USER_CYCLES_BALANCES, |user_cycles_balances| {
+        user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0)
+    })
+}
+
+
+
+// -----------------------------------------
+// TRANSFER-ICP
+
+#[derive(CandidType, Deserialize, Clone)]
+pub struct TransferIcpQuest {
+    memo: IcpMemo,
+    icp: IcpTokens,
+    icp_fee: IcpTokens,
+    to: IcpId,
+}
+
+#[derive(CandidType, Deserialize)]
+pub enum TransferIcpError{
+    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
+    CTSIsBusy,
+    IcpTransferCallError(CallError),
+    IcpTransferError(IcpTransferError),
+}
+
+#[update]
+pub async fn transfer_icp(q: TransferIcpQuest) -> Result<IcpBlockHeight, TransferIcpError> {
+
+    let user_id: Principal = caller();
+        
+    with_mut(&CTS_DATA, |cts_data| {
+        check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| TransferIcpError::UserIsInTheMiddleOfADifferentCall(e))?;
+        if cts_data.users_transfer_icp.len() >= MAX_USERS_TRANSFER_ICP {
+            return Err(TransferIcpError::CTSIsBusy);
+        }
+        cts_data.users_transfer_icp.insert(user_id);
+        Ok(())
+    })?;
+        
+    let r = match icp_transfer(
+        MAINNET_LEDGER_CANISTER_ID,
+        IcpTransferArgs {
+            memo: q.memo,
+            amount: q.icp,
+            fee: q.icp_fee,
+            from_subaccount: Some(principal_icp_subaccount(&user_id)),
+            to: q.to,
+            created_at_time: None
+        }
+    ).await {
+        Ok(transfer_result) => match transfer_result {
+            Ok(block_height) => Ok(block_height),
+            Err(icp_transfer_error) => Err(TransferIcpError::IcpTransferError(icp_transfer_error)),                    
+        },
+        Err(icp_transfer_call_error) => Err(TransferIcpError::IcpTransferCallError(call_error_as_u32_and_string(icp_transfer_call_error))),
+    };
+    
+    with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
+    
+    r            
+        
+}
 
 
 
 
-
-
-
+// ------------
+// create_membership
 // save the fees in the purchase_cycles_bank_data so the fees cant change while creating a new user
-
 #[derive(Clone, CandidType, Deserialize)]
 pub struct PurchaseCyclesBankData {
     start_time_nanos: u128,
@@ -1213,251 +1429,6 @@ pub fn get_cb_auth(cb_id: Principal) -> Vec<u8> {
 pub fn get_cb_auth_of_an_sns_control(user_id: Principal, cb_id: Principal) -> Vec<u8> {
     get_cb_auth_(UserAndCB{user_id, cb_id })
 }
-
-
-
-
-
-// ----------------------------------------------------------------------------------------------------
-
-
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct TransferIcpData{
-    start_time_nanos: u64,
-    lock: bool,
-    transfer_icp_quest: TransferIcpQuest, 
-    cts_transfer_icp_fee: Option<IcpTokens>, //:0.05-xdr with the base on the current-rate.
-    icp_transfer_block_height: Option<IcpBlockHeight>,
-    cts_fee_taken: bool,
-}
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct TransferIcpQuest {
-    memo: IcpMemo,
-    icp: IcpTokens,
-    icp_fee: IcpTokens,
-    to: IcpId,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct TransferIcpSuccess {
-    block_height: IcpBlockHeight,
-}
-
-
-
-
-#[derive(CandidType, Deserialize)]
-pub enum TransferIcpError{
-    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
-    CheckIcpBalanceCallError((u32, String)),
-    CTSIsBusy,
-    CheckCurrentXdrPerMyriadPerIcpCmcRateError(CheckCurrentXdrPerMyriadPerIcpCmcRateError),
-    MaxTransfer{ cts_transfer_icp_fee: IcpTokens },
-    UserIcpLedgerBalanceTooLow{
-        user_icp_ledger_balance: IcpTokens,
-        cts_transfer_icp_fee: IcpTokens, // calculate by the current xdr-icp rate 
-    },
-    IcpTransferCallError((u32, String)),
-    IcpTransferError(IcpTransferError),
-    MidCallError(TransferIcpMidCallError)
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum TransferIcpMidCallError{
-    CollectCTSFeeIcpTransferCallError((u32, String)),
-    CollectCTSFeeIcpTransferError(IcpTransferError)
-}
-
-#[update]
-pub async fn transfer_icp(q: TransferIcpQuest) -> Result<TransferIcpSuccess, TransferIcpError> {
-
-    let user_id: Principal = caller();
-        
-    let transfer_icp_data = with_mut(&CTS_DATA, |cts_data| {
-        check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| TransferIcpError::UserIsInTheMiddleOfADifferentCall(e))?;
-        if cts_data.users_transfer_icp.len() >= MAX_USERS_TRANSFER_ICP {
-            return Err(TransferIcpError::CTSIsBusy);
-        }
-        let transfer_icp_data: TransferIcpData = TransferIcpData{
-            start_time_nanos: time(),
-            lock: true,
-            transfer_icp_quest: q,
-            cts_transfer_icp_fee: None,
-            icp_transfer_block_height: None,
-            cts_fee_taken: false,
-        };
-        cts_data.users_transfer_icp.insert(user_id, transfer_icp_data.clone());
-        Ok(transfer_icp_data)
-    })?;
-        
-    transfer_icp_(user_id, transfer_icp_data).await
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum CompleteTransferIcpError{
-    UserIsNotInTheMiddleOfATransferIcpCall,
-    TransferIcpError(TransferIcpError)
-}
-
-#[update]
-pub async fn complete_transfer_icp() -> Result<TransferIcpSuccess, CompleteTransferIcpError> {
-    
-    let user_id: Principal = caller();
-    
-    complete_transfer_icp_(user_id).await
-
-}
-
-async fn complete_transfer_icp_(user_id: Principal) -> Result<TransferIcpSuccess, CompleteTransferIcpError> {
-    
-    let transfer_icp_data: TransferIcpData = with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.users_transfer_icp.get_mut(&user_id) {
-            Some(transfer_icp_data) => {
-                if transfer_icp_data.lock == true {
-                    return Err(CompleteTransferIcpError::TransferIcpError(TransferIcpError::UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall::TransferIcpCall{ must_call_complete: false })));
-                }
-                transfer_icp_data.lock = true;
-                Ok(transfer_icp_data.clone())
-            },
-            None => {
-                return Err(CompleteTransferIcpError::UserIsNotInTheMiddleOfATransferIcpCall);
-            }
-        }
-    })?;
-
-    transfer_icp_(user_id, transfer_icp_data).await
-        .map_err(|transfer_icp_error| { 
-            CompleteTransferIcpError::TransferIcpError(transfer_icp_error) 
-        })
-    
-}
-
-
-async fn transfer_icp_(user_id: Principal, mut transfer_icp_data: TransferIcpData) -> Result<TransferIcpSuccess, TransferIcpError> {
-
-    if transfer_icp_data.cts_transfer_icp_fee.is_none() {
-
-        let (
-            check_user_icp_ledger_balance_sponse,
-            check_current_xdr_permyriad_per_icp_cmc_rate_sponse,
-        ): (
-            CallResult<IcpTokens>,
-            CheckCurrentXdrPerMyriadPerIcpCmcRateSponse
-        ) = futures::future::join(
-            check_user_icp_ledger_balance(&user_id), 
-            check_current_xdr_permyriad_per_icp_cmc_rate()
-        ).await; 
-        
-        let user_icp_ledger_balance: IcpTokens = match check_user_icp_ledger_balance_sponse {
-            Ok(tokens) => tokens,
-            Err(check_balance_call_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-                return Err(TransferIcpError::CheckIcpBalanceCallError((check_balance_call_error.0 as u32, check_balance_call_error.1)));
-            }
-        };
-                
-        let current_xdr_icp_rate: u64 = match check_current_xdr_permyriad_per_icp_cmc_rate_sponse {
-            Ok(rate) => rate,
-            Err(check_xdr_icp_rate_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-                return Err(TransferIcpError::CheckCurrentXdrPerMyriadPerIcpCmcRateError(check_xdr_icp_rate_error));
-            }
-        };
-        
-        let cts_transfer_icp_fee: IcpTokens = cycles_to_icptokens(CTS_TRANSFER_ICP_FEE, current_xdr_icp_rate);
-        
-        let icp_balance_quirement: IcpTokens = {
-            match transfer_icp_data.transfer_icp_quest.icp.e8s().checked_add(cts_transfer_icp_fee.e8s()) {
-                None => return Err(TransferIcpError::MaxTransfer{ cts_transfer_icp_fee }),
-                Some(t_e8s) => {
-                    match t_e8s.checked_add(transfer_icp_data.transfer_icp_quest.icp_fee.e8s() * 2) {
-                        None => return Err(TransferIcpError::MaxTransfer{ cts_transfer_icp_fee }),
-                        Some(final_e8s) => {
-                            IcpTokens::from_e8s(final_e8s)
-                        }
-                    }
-                }
-            }
-        };
-        
-        if user_icp_ledger_balance < icp_balance_quirement  {
-            with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-            return Err(TransferIcpError::UserIcpLedgerBalanceTooLow{
-                user_icp_ledger_balance,
-                cts_transfer_icp_fee,
-            });
-        }
-        
-        transfer_icp_data.cts_transfer_icp_fee = Some(cts_transfer_icp_fee);
-    }
-    
-    if transfer_icp_data.icp_transfer_block_height.is_none() {
-        
-        match icp_transfer(
-            MAINNET_LEDGER_CANISTER_ID,
-            IcpTransferArgs {
-                memo: transfer_icp_data.transfer_icp_quest.memo,
-                amount: transfer_icp_data.transfer_icp_quest.icp,
-                fee: transfer_icp_data.transfer_icp_quest.icp_fee,
-                from_subaccount: Some(principal_icp_subaccount(&user_id)),
-                to: transfer_icp_data.transfer_icp_quest.to,
-                created_at_time: Some(IcpTimestamp { timestamp_nanos: time() - 1_000_000_000 })
-            }
-        ).await {
-            Ok(transfer_result) => match transfer_result {
-                Ok(block_height) => {
-                    transfer_icp_data.icp_transfer_block_height = Some(block_height);
-                },
-                Err(icp_transfer_error) => {
-                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-                    return Err(TransferIcpError::IcpTransferError(icp_transfer_error));                    
-                }
-            },
-            Err(icp_transfer_call_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-                return Err(TransferIcpError::IcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1)));
-            }
-        }
-        
-    }
-    
-    if transfer_icp_data.cts_fee_taken == false {
-        match transfer_user_icp_ledger(&user_id, transfer_icp_data.cts_transfer_icp_fee.unwrap(), transfer_icp_data.transfer_icp_quest.icp_fee, CTS_TRANSFER_ICP_FEE_ICP_MEMO).await {
-            Ok(icp_transfer_result) => match icp_transfer_result {
-                Ok(_block_height) => {
-                    transfer_icp_data.cts_fee_taken = true;
-                },
-                Err(icp_transfer_error) => {
-                    transfer_icp_data.lock = false;
-                    with_mut(&CTS_DATA, |cts_data| {
-                        if let Some(data) = cts_data.users_transfer_icp.get_mut(&user_id) {
-                            *data = transfer_icp_data;
-                        }
-                    });
-                    return Err(TransferIcpError::MidCallError(TransferIcpMidCallError::CollectCTSFeeIcpTransferError(icp_transfer_error)));          
-                }
-            }, 
-            Err(icp_transfer_call_error) => {
-                transfer_icp_data.lock = false;
-                with_mut(&CTS_DATA, |cts_data| {
-                    if let Some(data) = cts_data.users_transfer_icp.get_mut(&user_id) {
-                        *data = transfer_icp_data;
-                    }
-                });
-                return Err(TransferIcpError::MidCallError(TransferIcpMidCallError::CollectCTSFeeIcpTransferCallError((icp_transfer_call_error.0 as u32, icp_transfer_call_error.1))));                
-            }               
-        }
-    }
-    
-    
-    with_mut(&CTS_DATA, |cts_data| { cts_data.users_transfer_icp.remove(&user_id); });
-    Ok(TransferIcpSuccess {
-        block_height: transfer_icp_data.icp_transfer_block_height.unwrap(),
-    })
-}
-
 
 
 
@@ -2355,88 +2326,6 @@ pub async fn controller_complete_users_purchase_cycles_bank(opt_complete_users_p
     complete_users_purchase_cycles_bank_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<PurchaseCyclesBankSuccess,CompletePurchaseCyclesBankError>)>>()
     
 }
-
-
-
-
-// ------ UsersTransferIcp-METHODS -----------------
-
-
-#[export_name = "canister_query controller_view_users_transfer_icp"]
-pub fn controller_view_users_transfer_icp() {
-    caller_is_controller_gaurd(&caller());
-    with(&CTS_DATA, |cts_data| {
-        ic_cdk::api::call::reply::<(Vec<(&Principal, &TransferIcpData)>,)>((cts_data.users_transfer_icp.iter().collect::<Vec<(&Principal, &TransferIcpData)>>(),));
-    });
-}
-
-#[update]
-pub fn controller_put_transfer_icp_data(user_id: Principal, put_data: TransferIcpData, override_lock: bool) {
-    caller_is_controller_gaurd(&caller());
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        if let Some(transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
-            if transfer_icp_data.lock == true {
-                if override_lock == false {
-                    trap("user is with the lock == true in the users_transfer_icp. set the override_lock flag if want override.")
-                }
-            }
-        }
-        cts_data.users_transfer_icp.insert(user_id, put_data);
-    });
-
-}
-
-#[update]
-pub fn controller_remove_transfer_icp(user_id: Principal, override_lock: bool) {
-    caller_is_controller_gaurd(&caller());
-    
-    with_mut(&CTS_DATA, |cts_data| {
-        if let Some(transfer_icp_data) = cts_data.users_transfer_icp.get(&user_id) {
-            if transfer_icp_data.lock == true {
-                if override_lock == false {
-                    trap("user is with the lock == true in the users_transfer_icp. set the override_lock flag if want override.")
-                }
-            }
-        }
-        cts_data.users_transfer_icp.remove(&user_id);
-    });
-}
-
-
-#[update]
-pub async fn controller_complete_users_transfer_icp(opt_complete_users_ids: Option<Vec<Principal>>) -> Vec<(Principal, Result<TransferIcpSuccess, CompleteTransferIcpError>)> {
-    caller_is_controller_gaurd(&caller());
-
-    let complete_users_ids: Vec<Principal> = match opt_complete_users_ids {
-        Some(complete_users_ids) => complete_users_ids,
-        None => {
-            with(&CTS_DATA, |cts_data| { 
-                cts_data.users_transfer_icp.iter()
-                .filter(|&(_user_id, transfer_icp_data): &(&Principal, &TransferIcpData)| {
-                    transfer_icp_data.lock == false
-                })
-                .map(|(user_id, _transfer_icp_data): (&Principal, &TransferIcpData)| {
-                    user_id.clone()
-                })
-                .collect::<Vec<Principal>>()
-            })
-        }
-    };
-    
-    let rs: Vec<Result<TransferIcpSuccess, CompleteTransferIcpError>> = futures::future::join_all(
-        complete_users_ids.iter().map(
-            |complete_user_id: &Principal| {
-                complete_transfer_icp_(complete_user_id.clone())
-            }
-        ).collect::<Vec<_>>()
-    ).await;
-    
-    complete_users_ids.into_iter().zip(rs.into_iter()).collect::<Vec<(Principal, Result<TransferIcpSuccess, CompleteTransferIcpError>)>>()
-
-}
-
-
 
 
 

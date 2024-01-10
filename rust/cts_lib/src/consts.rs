@@ -70,7 +70,6 @@ pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 
 
 
 
-pub const CTS_TRANSFER_ICP_FEE_ICP_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-TRIF"));
 pub const CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-PCBC"));
 
 

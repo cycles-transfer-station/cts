@@ -52,10 +52,11 @@ sha2 = "0.9.1"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_bytes = "0.11.6"
 icrc-ledger-types = { git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
-ic-stable-structures = "0.5.3"
+ic-stable-structures = "0.6.1"
 futures = "0.3.23"
 num-traits = "0.2.15"
-canister-tools = "0.2.0"
+canister-tools = "0.2.1"
 ic0 = "0.18.11"
 ic-cdk-timers = "0.4"
+ic_principal = "0.1.1"
 

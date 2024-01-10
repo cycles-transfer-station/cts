@@ -17,5 +17,5 @@ icrc-ledger-types = { workspace = true }
 ic-stable-structures = { workspace = true }
 canister_authorizations = { path = "./canister_authorizations" }
 futures = { workspace = true }
-
+ic_principal = { workspace = true }
 

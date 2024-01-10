@@ -4,7 +4,7 @@ use std::collections::{HashSet, HashMap};
 use cts_lib::{
     consts::{TRILLION, MANAGEMENT_CANISTER_ID},
     tools::{principal_token_subaccount, cycles_transform_tokens, tokens_transform_cycles},
-    types::{CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}, CyclesTransfer, CyclesTransferMemo},
+    types::{CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}},
     management_canister::{
         *,
         ManagementCanisterCanisterStatusRecord,
@@ -665,6 +665,72 @@ fn test_create_membership_for_user() {
     pic.query_call(cb, caller, "cycles_balance", candid::encode_args(()).unwrap()).unwrap_err(); 
     let _cycles_balance = call_candid_as::<_, (Cycles,)>(&pic, cb, RawEffectivePrincipal::None, for_user, "cycles_balance", ()).unwrap().0;
 }
+
+#[test]
+fn test_cts_user_mint_cycles() {
+    let (pic, cts, _cm_main) = cts_setup();
+    
+    let cts_cycles_balance_before = pic.cycle_balance(cts);
+    
+    let user = Principal::from_slice(&(800 as u64).to_be_bytes());
+    let user2 = Principal::from_slice(&(900 as u64).to_be_bytes());
+    
+    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    assert_eq!(user_cycles_balance, 0);
+    
+    let burn_icp: u128 = 500000000; 
+    let mint_cycles_quest = MintCyclesQuest{ 
+        burn_icp: IcpTokens::from_e8s(burn_icp as u64),
+        burn_icp_transfer_fee: IcpTokens::from_e8s(LEDGER_TRANSFER_FEE as u64), 
+    };
+    
+    let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user, "mint_cycles", (mint_cycles_quest.clone(),)).unwrap().0;
+    mint_cycles_result.unwrap_err();
+            
+    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    assert_eq!(user_cycles_balance, 0);
+    
+    mint_icp(&pic, Account{owner: cts, subaccount: Some(principal_token_subaccount(&user))}, burn_icp + LEDGER_TRANSFER_FEE);
+    
+    let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user, "mint_cycles", (mint_cycles_quest,)).unwrap().0;
+    let mint_cycles = mint_cycles_result.unwrap().mint_cycles;
+    
+    assert_eq!(mint_cycles, tokens_transform_cycles(burn_icp, CMC_RATE));
+    
+    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    assert_eq!(user_cycles_balance, mint_cycles);
+    
+    let user2_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user2, "caller_cycles_balance", ()).unwrap().0;
+    assert_eq!(user2_cycles_balance, 0);
+    
+    let user2_burn_icp: u128 = 400000000; 
+    let user2_mint_cycles_quest = MintCyclesQuest{ 
+        burn_icp: IcpTokens::from_e8s(user2_burn_icp as u64),
+        burn_icp_transfer_fee: IcpTokens::from_e8s(LEDGER_TRANSFER_FEE as u64), 
+    }; 
+    mint_icp(&pic, Account{owner: cts, subaccount: Some(principal_token_subaccount(&user2))}, user2_burn_icp + LEDGER_TRANSFER_FEE);
+    
+    let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user, "mint_cycles", (user2_mint_cycles_quest.clone(),)).unwrap().0;
+    mint_cycles_result.unwrap_err();
+    
+    let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user2, "mint_cycles", (user2_mint_cycles_quest,)).unwrap().0;
+    let user2_mint_cycles = mint_cycles_result.unwrap().mint_cycles;
+    
+    assert_eq!(user2_mint_cycles, tokens_transform_cycles(user2_burn_icp, CMC_RATE));
+    
+    let user2_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user2, "caller_cycles_balance", ()).unwrap().0;
+    assert_eq!(user2_cycles_balance, user2_mint_cycles);    
+    
+    assert_ge!(pic.cycle_balance(cts), cts_cycles_balance_before + mint_cycles + user2_mint_cycles - 500_000_000/*for the standard call cycles usage*/);
+}
+
+
+
+
+
+
+
+
 
 
 // --- tools ---

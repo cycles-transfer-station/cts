@@ -326,6 +326,13 @@ pub mod upgrade_canisters {
 }
 
 
+pub fn candid_principal_as_ic_principal(p: candid::Principal) -> ic_principal::Principal {
+    ic_principal::Principal::from_slice(p.as_slice())
+}
+
+pub fn ic_principal_as_candid_principal(p: ic_principal::Principal) -> candid::Principal {
+    candid::Principal::from_slice(p.as_slice())
+}
 
 
 
