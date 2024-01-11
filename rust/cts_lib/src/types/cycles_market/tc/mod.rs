@@ -136,13 +136,21 @@ pub struct CMTradeTokensCyclesPayoutMessageQuest {
     pub purchase_id: PurchaseId,
 }
 
-
 // ---------------
 
+#[derive(CandidType, Deserialize)]
+pub struct ViewPositionBookQuest {
+    pub opt_start_greater_than_rate: Option<CyclesPerToken>
+}
+#[derive(CandidType, Deserialize)]
+pub struct ViewPositionBookSponse {
+    pub positions_quantities: Vec<(CyclesPerToken, u128)>, 
+    pub is_last_chunk: bool,
+}
 
 
 
-
+// ------
 pub mod trade_log; 
 pub mod position_log;
 

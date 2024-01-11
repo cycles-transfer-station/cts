@@ -188,6 +188,13 @@ pub mod cts {
         pub user_id: Principal
     }
     
+    #[derive(CandidType, Deserialize, Debug)]
+    pub enum CTSCMTradeCyclesError {
+        CyclesBalanceTooLow{ cycles_balance: Cycles },
+        CMTradeCyclesCallError(CallError),
+        CMTradeCyclesError(super::cycles_market::tc::TradeCyclesError),
+    }
+    
 }
 
 

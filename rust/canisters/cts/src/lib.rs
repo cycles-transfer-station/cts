@@ -27,7 +27,7 @@ use cts_lib::{
         cycles_market::{
             tc as cm_tc,
         },
-        cts::{LengthenMembershipQuest, UserAndCB, CMTCUserPayoutCyclesQuest},
+        cts::{LengthenMembershipQuest, UserAndCB, CMTCUserPayoutCyclesQuest, CTSCMTradeCyclesError},
         http_request::*,
     },
     management_canister::{
@@ -630,13 +630,6 @@ pub fn cm_tc_user_payout_cycles(q: CMTCUserPayoutCyclesQuest) {
     with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
         add_user_cycles_balance(user_cycles_balances, q.user_id, msg_cycles_accept128(msg_cycles_available128()));
     });
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum CTSCMTradeCyclesError {
-    CyclesBalanceTooLow{ cycles_balance: Cycles },
-    CMTradeCyclesCallError(CallError),
-    CMTradeCyclesError(cm_tc::TradeCyclesError),
 }
 
 #[update]

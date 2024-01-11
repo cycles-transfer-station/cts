@@ -469,14 +469,16 @@ fn canister_inspect_message() {
     use cts_lib::ic_cdk::api::call::{method_name, accept_message};
     
     if [
-        "",
-        "local_put_ic_root_key",        
+        "trade_tokens",
+        "local_put_ic_root_key",
+        "transfer_token_balance",
+        "void_position",
     ].contains(&&method_name()[..]) {
         accept_message();
     } else if method_name().starts_with("controller_") && is_controller(&caller()) == true {
         accept_message();
     } else {
-        trap(&format!("this method {} must be call by a canister or a query call.", method_name()));
+        trap(&format!("this method {} must be call by a canister or query call.", method_name()));
     }
     
 }
@@ -678,22 +680,30 @@ fn minus_one_ongoing_sell_call(cm_data: &mut CMData) {
     cm_data.ongoing_sell_calls = cm_data.ongoing_sell_calls.saturating_sub(1);
 }
 
-#[update(manual_reply = true)]
-pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorization): (Principal, Vec<u8>)) { // -> SellTokensResult
-    ic_cdk::print("trade_tokens start");
+
+
+#[export_name = "canister_update trade_tokens"]
+extern "C" fn trade_tokens() {
     let caller: Principal = caller();
     
-    #[cfg(not(debug_assertions))]
-    if is_cts_cb_authorization_valid(
-        localkey::cell::get(&CTS_ID),
-        UserAndCB{
-            user_id: user_of_the_cb,
-            cb_id: caller,
-        },
-        cts_cb_authorization
-    ) == false {
-        trap("Caller must be a CTS-CYCLES-BANK.");
-    }
+    let q: SellTokensQuest = if caller.as_slice().len() != 29 {
+        let (q, (user_of_the_cb, cts_cb_authorization)): (SellTokensQuest, (Principal, Vec<u8>)) = arg_data();
+        
+        #[cfg(not(debug_assertions))]
+        if is_cts_cb_authorization_valid(
+            localkey::cell::get(&CTS_ID),
+            UserAndCB{
+                user_id: user_of_the_cb,
+                cb_id: caller,
+            },
+            cts_cb_authorization
+        ) == false {
+            trap("Caller must be a CTS-CYCLES-BANK.");
+        }
+        q
+    } else {
+        arg_data::<(SellTokensQuest,)>().0
+    };
     
     let m = with_mut(&CM_DATA, |cm_data| { 
         put_user_token_balance_lock(cm_data, caller)?;
@@ -705,17 +715,18 @@ pub async fn trade_tokens(q: SellTokensQuest, (user_of_the_cb, cts_cb_authorizat
         return;
     };
     
-    let sell_tokens_result: SellTokensResult = sell_tokens_(caller, q).await;
+    ic_cdk::spawn(async move {
+        let sell_tokens_result: SellTokensResult = sell_tokens_(caller, q).await;
+        
+        with_mut(&CM_DATA, |cm_data| {
+            remove_user_token_balance_lock(cm_data, caller);
+            minus_one_ongoing_sell_call(cm_data); 
+        });
+        
+        reply::<(SellTokensResult,)>((sell_tokens_result,));
     
-    with_mut(&CM_DATA, |cm_data| {
-        remove_user_token_balance_lock(cm_data, caller);
-        minus_one_ongoing_sell_call(cm_data); 
+        do_payouts().await;
     });
-    
-    reply::<(SellTokensResult,)>((sell_tokens_result,));
-
-    ic_cdk::spawn(do_payouts());
-    return;   
 }
 
 
@@ -1088,15 +1099,6 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
 // --------------- VIEW-POSITONS -----------------
 
 
-#[derive(CandidType, Deserialize)]
-pub struct ViewPositionBookQuest {
-    opt_start_greater_than_rate: Option<CyclesPerToken>
-}
-#[derive(CandidType, Deserialize)]
-pub struct ViewPositionBookSponse {
-    positions_quantities: Vec<(CyclesPerToken, u128)>, 
-    is_last_chunk: bool,
-}
 
 const MAX_POSITIONS_QUANTITIES: usize = 512*KiB*3 / std::mem::size_of::<(CyclesPerToken, u128)>();
 

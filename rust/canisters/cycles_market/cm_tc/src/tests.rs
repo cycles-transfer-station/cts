@@ -566,14 +566,6 @@ fn t() {
 
 
 
-#[test]
-fn test_cts_user_trade() {
-    
-    
-}
-
-
-
 
 // ------ tools ------
 

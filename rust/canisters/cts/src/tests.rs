@@ -4,7 +4,11 @@ use std::collections::{HashSet, HashMap};
 use cts_lib::{
     consts::{TRILLION, MANAGEMENT_CANISTER_ID},
     tools::{principal_token_subaccount, cycles_transform_tokens, tokens_transform_cycles},
-    types::{CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}},
+    types::{
+        CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}, 
+        cycles_market::{cm_main::*, tc as cm_tc} ,
+        cts::*,
+    },
     management_canister::{
         *,
         ManagementCanisterCanisterStatusRecord,
@@ -25,6 +29,7 @@ const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
 const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
+const WASMS_DIR: &str = "../../target/wasm32-unknown-unknown/debug/";
 
 
 
@@ -32,7 +37,7 @@ const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
 fn test_purchase_cycles_bank() {
     let (pic, cts, _cm_main) = cts_setup();
     let mut users_and_cbs: Vec<(Principal, Principal)> = Vec::new();
-    let cb_module_hash: [u8; 32] = sha256(&std::fs::read("../../target/wasm32-unknown-unknown/debug/cycles_bank.wasm").unwrap());
+    let cb_module_hash: [u8; 32] = sha256(&std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap());
     for i in 0..100/*(CB_CACHE_SIZE * 3)*/ {
         println!("i: {i}");
         pic.advance_time(core::time::Duration::from_secs(60*100));
@@ -236,7 +241,7 @@ fn test_upgrade_cbs() {
     }
     
     let cbsms = controller_view_cbsms(&pic, cts);
-    let cb_module: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/debug/cycles_bank.wasm").unwrap();
+    let cb_module: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap();
     let cb_module_hash: [u8; 32] = sha256(&cb_module);
     let (upgrade_r,): (Result<Vec<(Principal, UpgradeOutcome)>, CallError>,) = call_candid_as(
         &pic,
@@ -332,7 +337,7 @@ fn test_upgrade_cbsms() {
     }
     //println!("1234 p: {}", Principal::from_slice(&[1,2,3,4]));
     let cbsms = controller_view_cbsms(&pic, cts);
-    let cbsm_module: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/debug/cbs_map.wasm").unwrap();
+    let cbsm_module: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cbs_map.wasm").unwrap();
     let cbsm_module_hash = sha256(&cbsm_module);
     
     let (uos,): (Vec<(Principal, UpgradeOutcome)>,) = call_candid_as(
@@ -416,7 +421,7 @@ fn test_lengthen_lifetime_icp_payment() {
         let cb = mint_icp_and_purchase_cycles_bank(&pic, user, cts);
         users_and_cbs.push((user, cb));
     }
-    let cb_module: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/debug/cycles_bank.wasm").unwrap();
+    let cb_module: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap();
     let cb_module_hash: [u8; 32] = sha256(&cb_module);
     for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
         let lengthen_years = (i as u128) + 1;
@@ -489,7 +494,7 @@ fn test_lengthen_lifetime_cycles_payment() {
         users_and_cbs.push((user, cb));
             
     }
-    let cb_module: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/debug/cycles_bank.wasm").unwrap();
+    let cb_module: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap();
     let cb_module_hash: [u8; 32] = sha256(&cb_module);
     for (i, (user, cb)) in users_and_cbs.into_iter().enumerate() {
         let lengthen_years = (i as u128) + 1;
@@ -672,10 +677,10 @@ fn test_cts_user_mint_cycles() {
     
     let cts_cycles_balance_before = pic.cycle_balance(cts);
     
-    let user = Principal::from_slice(&(800 as u64).to_be_bytes());
-    let user2 = Principal::from_slice(&(900 as u64).to_be_bytes());
+    let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let user2 = Principal::self_authenticating(&(900 as u64).to_be_bytes());
     
-    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    let user_cycles_balance: Cycles = cts_user_cycles_balance(&pic, cts, user);
     assert_eq!(user_cycles_balance, 0);
     
     let burn_icp: u128 = 500000000; 
@@ -687,7 +692,7 @@ fn test_cts_user_mint_cycles() {
     let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user, "mint_cycles", (mint_cycles_quest.clone(),)).unwrap().0;
     mint_cycles_result.unwrap_err();
             
-    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    let user_cycles_balance: Cycles = cts_user_cycles_balance(&pic, cts, user);
     assert_eq!(user_cycles_balance, 0);
     
     mint_icp(&pic, Account{owner: cts, subaccount: Some(principal_token_subaccount(&user))}, burn_icp + LEDGER_TRANSFER_FEE);
@@ -697,10 +702,10 @@ fn test_cts_user_mint_cycles() {
     
     assert_eq!(mint_cycles, tokens_transform_cycles(burn_icp, CMC_RATE));
     
-    let user_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0;
+    let user_cycles_balance: Cycles = cts_user_cycles_balance(&pic, cts, user);
     assert_eq!(user_cycles_balance, mint_cycles);
     
-    let user2_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user2, "caller_cycles_balance", ()).unwrap().0;
+    let user2_cycles_balance: Cycles = cts_user_cycles_balance(&pic, cts, user2);
     assert_eq!(user2_cycles_balance, 0);
     
     let user2_burn_icp: u128 = 400000000; 
@@ -718,10 +723,69 @@ fn test_cts_user_mint_cycles() {
     
     assert_eq!(user2_mint_cycles, tokens_transform_cycles(user2_burn_icp, CMC_RATE));
     
-    let user2_cycles_balance: Cycles = query_candid_as::<_, (Cycles,)>(&pic, cts, user2, "caller_cycles_balance", ()).unwrap().0;
+    let user2_cycles_balance: Cycles = cts_user_cycles_balance(&pic, cts, user2);
     assert_eq!(user2_cycles_balance, user2_mint_cycles);    
     
     assert_ge!(pic.cycle_balance(cts), cts_cycles_balance_before + mint_cycles + user2_mint_cycles - 500_000_000/*for the standard call cycles usage*/);
+}
+
+#[test]
+fn test_cts_user_trade() {
+    let (pic, cts, cm_main) = cts_setup();
+    let tc = view_trade_contracts(&pic, cm_main)[0].trade_contract_canister_id;
+    let user1 = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let user2 = Principal::self_authenticating(&(900 as u64).to_be_bytes());
+    
+    // user1 mint cycles 
+    let burn_icp: u128 = 500000000; 
+    let mint_cycles_quest = MintCyclesQuest{ 
+        burn_icp: IcpTokens::from_e8s(burn_icp as u64),
+        burn_icp_transfer_fee: IcpTokens::from_e8s(LEDGER_TRANSFER_FEE as u64), 
+    };
+    mint_icp(&pic, Account{owner: cts, subaccount: Some(principal_token_subaccount(&user1))}, burn_icp + LEDGER_TRANSFER_FEE);
+    let user1_mint_cycles = call_candid_as::<_, (MintCyclesResult,)>(&pic, cts, RawEffectivePrincipal::None, user1, "mint_cycles", (mint_cycles_quest,))
+        .unwrap().0
+        .unwrap().mint_cycles;
+    assert_eq!(user1_mint_cycles, cts_user_cycles_balance(&pic, cts, user1));
+    assert_eq!(user1_mint_cycles, tokens_transform_cycles(burn_icp, CMC_RATE));
+    
+    // user1 create cycles position 
+    let trade_cycles_mount: Cycles = user1_mint_cycles - 1;
+    let trade_rate = CMC_RATE - 5; 
+    let _user1_cycles_position_id = call_candid_as::<_, (Result<cm_tc::TradeCyclesSuccess, CTSCMTradeCyclesError>,)>(&pic, cts, RawEffectivePrincipal::None, user1, "cm_trade_cycles", (tc, cm_tc::TradeCyclesQuest{ cycles: trade_cycles_mount, cycles_per_token_rate: trade_rate }))
+        .unwrap().0
+        .unwrap().position_id;
+    assert_eq!(1, cts_user_cycles_balance(&pic, cts, user1));
+    
+    let cycles_positions_book = query_candid::<_, (cm_tc::ViewPositionBookSponse,)>(&pic, tc, "view_cycles_position_book", (cm_tc::ViewPositionBookQuest{ opt_start_greater_than_rate: None },)).unwrap().0.positions_quantities;
+    assert_eq!(cycles_positions_book[0].0, trade_rate);
+    assert_eq!(cycles_positions_book[0].1, trade_cycles_mount);    
+    
+    // user2 create token position
+    let trade_tokens_mount = 5500000000;
+    mint_icp(&pic, Account{owner: tc, subaccount: Some(principal_token_subaccount(&user2))}, trade_tokens_mount + LEDGER_TRANSFER_FEE);
+    let _user2_token_position_id = call_candid_as::<_, (Result<cm_tc::SellTokensSuccess, cm_tc::SellTokensError>,)>(&pic, tc, RawEffectivePrincipal::None, user2, "trade_tokens", (cm_tc::SellTokensQuest{ tokens: trade_tokens_mount, cycles_per_token_rate: trade_rate, posit_transfer_ledger_fee: Some(LEDGER_TRANSFER_FEE) },))
+        .unwrap().0
+        .unwrap().position_id;
+    pic.tick();
+    
+    let match_tokens_mount = cycles_transform_tokens(trade_cycles_mount, trade_rate);    
+    let match_cycles_mount = tokens_transform_cycles(match_tokens_mount, trade_rate);
+    println!("cycles dust collection: {}", trade_cycles_mount - match_cycles_mount);    
+    
+    let cycles_positions_book = query_candid::<_, (cm_tc::ViewPositionBookSponse,)>(&pic, tc, "view_cycles_position_book", (cm_tc::ViewPositionBookQuest{ opt_start_greater_than_rate: None },)).unwrap().0.positions_quantities;
+    assert_eq!(cycles_positions_book.len(), 0);
+    let token_positions_book = query_candid::<_, (cm_tc::ViewPositionBookSponse,)>(&pic, tc, "view_tokens_position_book", (cm_tc::ViewPositionBookQuest{ opt_start_greater_than_rate: None },)).unwrap().0.positions_quantities;
+    assert_eq!(token_positions_book[0].0, trade_rate);
+    assert_eq!(token_positions_book[0].1, trade_tokens_mount - match_tokens_mount);
+    
+    assert_eq!(cts_user_cycles_balance(&pic, cts, user2), match_cycles_mount - (match_cycles_mount / 10_000 * 50));
+    assert_eq!(
+        icrc1_balance(&pic, ICP_LEDGER, &Account{owner: user1, subaccount : None}), 
+        match_tokens_mount - cycles_transform_tokens(tokens_transform_cycles(match_tokens_mount, trade_rate) / 10_000 * 50, trade_rate) - LEDGER_TRANSFER_FEE
+    );
+    
+            
 }
 
 
@@ -731,9 +795,11 @@ fn test_cts_user_mint_cycles() {
 
 
 
-
-
 // --- tools ---
+
+fn cts_user_cycles_balance(pic: &PocketIc, cts: Principal, user: Principal) -> Cycles {
+    query_candid_as::<_, (Cycles,)>(&pic, cts, user, "caller_cycles_balance", ()).unwrap().0
+}
 
 fn cb_burn_icp_mint_cycles(pic: &PocketIc, cb: Principal, user: Principal, burn_icp: u128) -> Cycles {
     call_candid_as::<_, (cb::BurnIcpMintCyclesResult,)>(
@@ -822,6 +888,12 @@ fn local_put_ic_root_key(pic: &PocketIc, cb: Principal) {
 
 fn controller_view_cbsms(pic: &PocketIc, cts: Principal) -> Vec<Principal> {
     query_candid_as::<(), (Vec<Principal>,)>(pic, cts, CTS_CONTROLLER, "controller_view_cbsms", ()).unwrap().0
+}
+
+fn view_trade_contracts(pic: &PocketIc, cm_main: Principal) -> Vec<TradeContractIdAndLedgerId> {
+    call_candid::<(), (Vec<(TradeContractIdAndLedgerId, Option<bool>/*placeholder. not the actual type*/)>,)>(
+        pic, cm_main, RawEffectivePrincipal::None, "view_icrc1_token_trade_contracts", ()
+    ).unwrap().0.into_iter().map(|i| i.0).collect()
 }
 
 
@@ -927,10 +999,10 @@ fn cts_setup() -> (PocketIc, Principal/*CTS*/, Principal/*CM_MAIN*/) {
     //r.unwrap();
     */
     
-    let cts_controller = CTS_CONTROLLER;
-    let cm_main: Principal = pic.create_canister_on_subnet(Some(cts_controller), None, fid_subnet);
-    let cts_wasm: Vec<u8> = std::fs::read("../../target/wasm32-unknown-unknown/debug/cts.wasm").unwrap();
-    let cts: Principal = pic.create_canister_on_subnet(Some(cts_controller), None, fid_subnet);
+    let cm_main: Principal = pic.create_canister_on_subnet(Some(CTS_CONTROLLER), None, fid_subnet);
+    let cts: Principal = pic.create_canister_on_subnet(Some(CTS_CONTROLLER), None, fid_subnet);
+    
+    let cts_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cts.wasm").unwrap();
     println!("cts: {cts}");    
     pic.add_cycles(cts, 1_000 * TRILLION);
     pic.install_canister(
@@ -941,25 +1013,63 @@ fn cts_setup() -> (PocketIc, Principal/*CTS*/, Principal/*CM_MAIN*/) {
                 cycles_market_main: cm_main,
             }
         ).unwrap(), 
-        Some(cts_controller),
+        Some(CTS_CONTROLLER),
     );
     
     let _: () = call_candid_as(
         &pic,
         cts,
         RawEffectivePrincipal::None,
-        cts_controller,
+        CTS_CONTROLLER,
         "controller_put_cycles_bank_canister_code",
-        (CanisterCode::new(std::fs::read("../../target/wasm32-unknown-unknown/debug/cycles_bank.wasm").unwrap()),)
+        (CanisterCode::new(std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap()),)
     ).unwrap();
     let _: () = call_candid_as(
         &pic,
         cts,
         RawEffectivePrincipal::None,
-        cts_controller,
+        CTS_CONTROLLER,
         "controller_put_umc_code",
-        (CanisterCode::new(std::fs::read("../../target/wasm32-unknown-unknown/debug/cbs_map.wasm").unwrap()),)
+        (CanisterCode::new(std::fs::read(WASMS_DIR.to_owned() + "cbs_map.wasm").unwrap()),)
     ).unwrap();
+    
+    let cm_main_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cm_main.wasm").unwrap();
+    println!("cm_main: {cm_main}");    
+    pic.add_cycles(cm_main, 1_000 * TRILLION);
+    pic.install_canister(
+        cm_main, 
+        cm_main_wasm, 
+        candid::encode_one(
+            CMMainInit{
+                cts_id: cts,
+            }
+        ).unwrap(), 
+        Some(CTS_CONTROLLER)
+    );
+    
+    // upload wasms onto the cm-main
+    for (p, mct) in [
+        ("cm_tc.wasm", MarketCanisterType::TradeContract),
+        ("cm_trades_storage.wasm", MarketCanisterType::TradesStorage),
+        ("cm_positions_storage.wasm", MarketCanisterType::PositionsStorage)
+    ] {
+        let wasm = std::fs::read(WASMS_DIR.to_owned() + p).unwrap();
+        let _: () = call_candid_as(&pic, cm_main, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_upload_canister_code", (
+            CanisterCode::new(wasm),
+            mct
+        )).unwrap();
+    } 
+    
+    // create tc
+    let (create_tc_result,): (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,) 
+    = call_candid_as(&pic, cm_main, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_create_trade_contract", (
+        ControllerCreateIcrc1TokenTradeContractQuest{
+            icrc1_ledger_id: icp_ledger,
+            icrc1_ledger_transfer_fee: LEDGER_TRANSFER_FEE
+        }
+    ,)).unwrap();
+    let tc = create_tc_result.unwrap().trade_contract_canister_id;
+    println!("tc: {tc}");
     
     (pic, cts, cm_main)
 }
