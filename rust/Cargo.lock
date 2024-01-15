@@ -118,6 +118,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "bank"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "candid",
+ "canister-tools",
+ "cts_lib",
+ "cycles-minting-canister",
+ "ic-base-types 0.9.0 (git+https://github.com/dfinity/ic?rev=d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a)",
+ "ic-cdk 0.11.3",
+ "ic-nns-common",
+ "ic-stable-structures 0.6.1",
+ "ic_principal",
+ "icp-ledger",
+ "icrc-ledger-types 0.1.4 (git+https://github.com/dfinity/ic?rev=d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a)",
+ "more-asserts",
+ "pocket-ic",
+ "serde",
+]
+
+[[package]]
 name = "base32"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -486,6 +507,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "canister_caller"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "ic-cdk 0.11.3",
+]
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -814,7 +844,7 @@ dependencies = [
  "ic-ledger-types",
  "ic-stable-structures 0.6.1",
  "ic_principal",
- "icrc-ledger-types 0.1.1",
+ "icrc-ledger-types 0.1.4 (git+https://github.com/dfinity/ic?rev=d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a)",
  "serde",
  "serde_bytes",
  "sha2 0.9.9",
@@ -2784,21 +2814,6 @@ dependencies = [
  "candid",
  "icrc-ledger-types 0.1.4 (git+https://github.com/dfinity/ic?rev=1131bd8d04cc57447e4ef1fd143ddaad4e06a811)",
  "serde",
-]
-
-[[package]]
-name = "icrc-ledger-types"
-version = "0.1.1"
-source = "git+https://github.com/cycles-transfer-station/ic.git?rev=c74ce7317761e540d722d01fa6c26a046707f372#c74ce7317761e540d722d01fa6c26a046707f372"
-dependencies = [
- "base32",
- "candid",
- "crc32fast",
- "hex",
- "num-traits",
- "serde",
- "serde_bytes",
- "sha2 0.10.6",
 ]
 
 [[package]]
