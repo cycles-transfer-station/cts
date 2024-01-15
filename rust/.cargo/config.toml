@@ -1,4 +1,5 @@
-
-
 [build]
 target = "wasm32-unknown-unknown"
+
+[alias]
+test_pic = "test --target=x86_64-unknown-linux-gnu -- --show-output --test-threads=1"
