@@ -14,7 +14,7 @@ members = [
     "canisters/cycles_market/cm_positions_storage",
     "cts_lib/canister_authorizations",
     "canisters/bank",
-    
+    "pic_tests/canister_caller"
 ]
 
 exclude = [
@@ -52,7 +52,7 @@ candid = "0.9.10"
 sha2 = "0.9.1"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_bytes = "0.11.6"
-icrc-ledger-types = { git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
+icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } #icrc-ledger-types = #"0.1.4" #{ git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
 ic-stable-structures = "0.6.1"
 futures = "0.3.23"
 num-traits = "0.2.15"

@@ -9,6 +9,7 @@ use cts_lib::{
         CanisterCode, CallError, cycles_bank::{self as cb, UserCBMetrics}, 
         cycles_market::{cm_main::*, tc as cm_tc} ,
         cts::*,
+        CallCanisterQuest,
     },
     management_canister::{
         *,
@@ -20,7 +21,6 @@ use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, Transfe
 use crate::*;
 use ic_cdk::api::management_canister::main::{CanisterInfoRequest,CanisterInfoResponse,CanisterChange,CanisterChangeOrigin,CanisterChangeDetails,CanisterInstallMode,CodeDeploymentRecord,FromCanisterRecord,ControllersChangeRecord,CreationRecord};
 use more_asserts::*;
-use cts_lib::ic_ledger_types::IcpTokens;
 
 
 
@@ -37,7 +37,7 @@ fn test_mint_cycles() {
     let mint_cycles_quest = MintCyclesQuest{ 
         burn_icp,
         burn_icp_transfer_fee: LEDGER_TRANSFER_FEE, 
-        for_subaccount: None,
+        for_account: Account{owner: user, subaccount: None},
     };
     
     let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, bank, RawEffectivePrincipal::None, user, "mint_cycles", (mint_cycles_quest.clone(),)).unwrap().0;
@@ -92,7 +92,7 @@ fn test_transfer() {
 
 #[test]
 fn test_transfer_fails_when_wrong_fee_is_set() {
-let (pic, bank) = set_up();
+    let (pic, bank) = set_up();
     let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
     let user2 = Principal::self_authenticating(&(900 as u64).to_be_bytes());
     let burn_icp = 500000000;
@@ -114,7 +114,7 @@ let (pic, bank) = set_up();
 
 #[test]
 fn test_transfer_fails_when_insufficient_funds() {
-let (pic, bank) = set_up();
+    let (pic, bank) = set_up();
     let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
     let user2 = Principal::self_authenticating(&(900 as u64).to_be_bytes());
     let burn_icp = 500000000;
@@ -133,6 +133,108 @@ let (pic, bank) = set_up();
     assert_eq!(icrc1_balance(&pic, bank, &Account{owner: user, subaccount: None}), tokens_transform_cycles(burn_icp, CMC_RATE));
     assert_eq!(icrc1_balance(&pic, bank, &Account{owner: user2, subaccount: None}), 0);    
 }
+
+#[test]
+fn test_cycles_in() {
+    let (pic, bank) = set_up();    
+    let canister_caller = set_up_canister_caller(&pic);
+    let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let cycles = 444*TRILLION;
+    let for_account = Account{owner: user, subaccount: Some([5u8; 32])};
+    let bank_cycles_balance_before = pic.cycle_balance(bank);    
+    for i in 0..2 {
+        let r = call_candid::<_, (Result<Vec<u8>, CallError>,)>(&pic, canister_caller, RawEffectivePrincipal::None, "call_canister", (CallCanisterQuest{
+            callee: bank,
+            method_name: "cycles_in".to_string(),
+            arg_raw: candid::encode_one(CyclesInQuest{
+                cycles,
+                fee: Some(BANK_TRANSFER_FEE),
+                for_account,
+            }).unwrap(),
+            cycles: if i == 0 { 
+                cycles + BANK_TRANSFER_FEE - 1// wrong amount of cycles in the call
+            } else {
+                cycles + BANK_TRANSFER_FEE  
+            }
+        },)).unwrap().0;
+        let cycles_in_result = candid::decode_one::<Result<BlockId, CyclesInError>>(&r.unwrap()).unwrap();
+        if i == 0 { 
+            let cycles_in_error = cycles_in_result.unwrap_err();
+            assert_eq!(cycles_in_error, CyclesInError::MsgCyclesTooLow);
+            assert_eq!(icrc1_balance(&pic, bank, &for_account), 0);
+        } else {
+            let block = cycles_in_result.unwrap();
+            assert_eq!(block, 0);
+            assert_eq!(icrc1_balance(&pic, bank, &for_account), cycles);
+        }
+    }
+    assert_ge!(pic.cycle_balance(bank), bank_cycles_balance_before + cycles - 100_000_000);    
+}
+
+#[test]
+fn test_cycles_out() {
+    let (pic, bank) = set_up();    
+    let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let subaccount = [7u8; 32];
+    let receiving_canister = pic.create_canister();
+    let receiving_canister_cycles_balance_before = pic.cycle_balance(receiving_canister);
+    let bank_cycles_balance_before = pic.cycle_balance(bank);    
+    let burn_icp = 500000000;
+    mint_cycles(&pic, bank, &Account{owner: user, subaccount: Some(subaccount)}, burn_icp);    
+    assert_eq!(icrc1_balance(&pic, bank, &Account{owner:user, subaccount:Some(subaccount)}), tokens_transform_cycles(burn_icp, CMC_RATE));
+    assert_ge!(pic.cycle_balance(bank), bank_cycles_balance_before + tokens_transform_cycles(burn_icp, CMC_RATE) - 100_000_000);
+    let bank_cycles_balance_after_mint = pic.cycle_balance(bank);
+    let block = call_candid_as::<_, (Result<BlockId, CyclesOutError>,)>(&pic, bank, RawEffectivePrincipal::None, user, "cycles_out", (CyclesOutQuest{
+        cycles: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
+        fee: Some(BANK_TRANSFER_FEE),
+        from_subaccount: Some(subaccount),
+        for_canister: receiving_canister,
+    },)).unwrap().0.unwrap();
+    assert_eq!(block, 0);
+    assert_le!(pic.cycle_balance(bank), bank_cycles_balance_after_mint - (tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE));
+    assert_ge!(pic.cycle_balance(receiving_canister), receiving_canister_cycles_balance_before + (tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE) - 100_000_000);        
+    assert_eq!(icrc1_balance(&pic, bank, &Account{owner:user, subaccount:Some(subaccount)}), 0);    
+}
+
+#[test]
+fn test_cycles_out_fails_when_not_enough_balance() {
+    let (pic, bank) = set_up();    
+    let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let burn_icp = 500000000;
+    let receiving_canister = pic.create_canister();
+    let receiving_canister_cycles_balance_before = pic.cycle_balance(receiving_canister);
+    mint_cycles(&pic, bank, &Account{owner: user, subaccount: None}, burn_icp);    
+    let bank_cycles_balance_after_mint = pic.cycle_balance(bank);
+    let cycles_out_error = call_candid_as::<_, (Result<BlockId, CyclesOutError>,)>(&pic, bank, RawEffectivePrincipal::None, user, "cycles_out", (CyclesOutQuest{
+        cycles: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE + 1,
+        fee: Some(BANK_TRANSFER_FEE),
+        from_subaccount: None,
+        for_canister: receiving_canister,
+    },)).unwrap().0.unwrap_err();
+    assert_eq!(cycles_out_error, CyclesOutError::InsufficientFunds{balance: tokens_transform_cycles(burn_icp, CMC_RATE)});
+    assert_ge!(pic.cycle_balance(bank), bank_cycles_balance_after_mint - 100_000_000);
+    assert_ge!(pic.cycle_balance(receiving_canister), receiving_canister_cycles_balance_before);        
+    assert_eq!(icrc1_balance(&pic, bank, &Account{owner:user, subaccount:None}), tokens_transform_cycles(burn_icp, CMC_RATE));    
+}
+
+#[test]
+fn test_cycles_out_fails_when_invalid_for_canister() {
+    let (pic, bank) = set_up();    
+    let user = Principal::self_authenticating(&(800 as u64).to_be_bytes());
+    let burn_icp = 500000000;
+    mint_cycles(&pic, bank, &Account{owner: user, subaccount: None}, burn_icp);    
+    let bank_cycles_balance_after_mint = pic.cycle_balance(bank);
+    let cycles_out_error = call_candid_as::<_, (Result<BlockId, CyclesOutError>,)>(&pic, bank, RawEffectivePrincipal::None, user, "cycles_out", (CyclesOutQuest{
+        cycles: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
+        fee: Some(BANK_TRANSFER_FEE),
+        from_subaccount: None,
+        for_canister: Principal::management_canister(),
+    },)).unwrap().0.unwrap_err();
+    if let CyclesOutError::DepositCyclesCallError(_) = cycles_out_error {} else { panic!("must be CyclesOutError::DepositCyclesCallError") }
+    assert_ge!(pic.cycle_balance(bank), bank_cycles_balance_after_mint - 100_000_000);
+    assert_eq!(icrc1_balance(&pic, bank, &Account{owner:user, subaccount:None}), tokens_transform_cycles(burn_icp, CMC_RATE));    
+}
+
 
 
 
@@ -154,14 +256,14 @@ fn icrc1_transfer(pic: &PocketIc, ledger: Principal, owner: Principal, q: Transf
     call_candid_as::<_, (Result<BlockIndex, TransferError>,)>(pic, ledger, RawEffectivePrincipal::None, owner, "icrc1_transfer", (q,)).unwrap().0
 }
 
-fn mint_cycles(pic: &PocketIc, bank: Principal, count: &Account, burn_icp: u128) -> Cycles {
+fn mint_cycles(pic: &PocketIc, bank: Principal, countid: &Account, burn_icp: u128) -> Cycles {
     let mint_cycles_quest = MintCyclesQuest{ 
         burn_icp,
         burn_icp_transfer_fee: LEDGER_TRANSFER_FEE, 
-        for_subaccount: count.subaccount,
+        for_account: countid.clone(),
     };
-    mint_icp(&pic, &Account{owner: bank, subaccount: Some(principal_token_subaccount(&count.owner))}, burn_icp + LEDGER_TRANSFER_FEE);
-    call_candid_as::<_, (MintCyclesResult,)>(&pic, bank, RawEffectivePrincipal::None, count.owner, "mint_cycles", (mint_cycles_quest,)).unwrap().0
+    mint_icp(&pic, &Account{owner: bank, subaccount: Some(principal_token_subaccount(&countid.owner))}, burn_icp + LEDGER_TRANSFER_FEE);
+    call_candid_as::<_, (MintCyclesResult,)>(&pic, bank, RawEffectivePrincipal::None, countid.owner, "mint_cycles", (mint_cycles_quest,)).unwrap().0
     .unwrap().mint_cycles
 }
 
@@ -291,7 +393,19 @@ fn set_up() -> (PocketIc, Principal/*bank*/) {
     (pic, bank)
 }
 
-
+fn set_up_canister_caller(pic: &PocketIc) -> Principal {
+    let canister_caller: Principal = pic.create_canister();
+    let canister_caller_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "canister_caller.wasm").unwrap();
+    println!("canister_caller: {canister_caller}");    
+    pic.add_cycles(canister_caller, 1_000_000_000 * TRILLION);
+    pic.install_canister(
+        canister_caller, 
+        canister_caller_wasm, 
+        candid::encode_args(()).unwrap(),
+        None,
+    );
+    canister_caller
+}
 
 
 

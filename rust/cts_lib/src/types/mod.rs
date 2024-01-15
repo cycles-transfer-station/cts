@@ -44,6 +44,13 @@ pub struct CyclesTransfer {
 }
 
 
+#[derive(CandidType, Deserialize)]
+pub struct CallCanisterQuest {
+    pub callee: Principal,
+    pub method_name: String,
+    pub arg_raw: Vec<u8>,
+    pub cycles: u128
+}
 
 
 

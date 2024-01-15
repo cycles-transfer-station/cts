@@ -19,10 +19,13 @@ use cts_lib::{
         time_nanos_u64,
         principal_icp_subaccount,
         principal_as_thirty_bytes,
-        thirty_bytes_as_principal
+        thirty_bytes_as_principal,
+        call_error_as_u32_and_string,
     },
+    management_canister::CanisterIdRecord,
     types::{
-        Cycles
+        Cycles,
+        CallError
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,
@@ -43,6 +46,9 @@ use ic_cdk::{
         caller,
         call::{
             reply,
+            msg_cycles_available128,
+            msg_cycles_accept128,
+            call_with_payment128,
         }
     },
     trap
@@ -281,16 +287,119 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, TokenTransferErr
 // icrc1_supported_standards
 
 
+// cycles_in
+
+#[derive(CandidType, Deserialize)]
+pub struct CyclesInQuest {
+    pub cycles: Cycles,
+    pub fee: Option<Cycles>,
+    pub for_account: IcrcId,
+}
+
+#[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
+pub enum CyclesInError {
+    MsgCyclesTooLow,
+    BadFee{ expected_fee: Cycles },
+}
+
+#[update]
+pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
+    if let Some(quest_fee) = q.fee {
+        if quest_fee != BANK_TRANSFER_FEE {
+            return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
+        }    
+    }
+    
+    let msg_cycles_available = msg_cycles_available128();
+    if msg_cycles_available < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
+        return Err(CyclesInError::MsgCyclesTooLow);
+    }
+    
+    msg_cycles_accept128(q.cycles.saturating_add(BANK_TRANSFER_FEE));
+    
+    with_mut(&CYCLES_BALANCES, |cycles_balances| {
+        with_mut(&CB_DATA, |cb_data| {
+            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(q.for_account), q.cycles);
+        });
+    });
+    
+    Ok(0)
+}  
+
+
+// cycles-out
+
+#[derive(CandidType, Deserialize)]
+pub struct CyclesOutQuest {
+    pub cycles: Cycles,
+    pub fee: Option<Cycles>,
+    pub from_subaccount: Option<Subaccount>,
+    pub for_canister: Principal,
+}
+
+#[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
+pub enum CyclesOutError {
+    InsufficientFunds{ balance: Cycles },
+    BadFee{ expected_fee: Cycles },
+    DepositCyclesCallError(CallError),
+}
+
+#[update]
+pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
+    if let Some(quest_fee) = q.fee {
+        if quest_fee != BANK_TRANSFER_FEE {
+            return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
+        }    
+    }
+    
+    let caller_count_id: CountId = (caller(), q.from_subaccount);
+    
+    with_mut(&CYCLES_BALANCES, |cycles_balances| {
+        let caller_balance: Cycles = cycles_balance(cycles_balances, caller_count_id); 
+        if caller_balance < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
+            return Err(CyclesOutError::InsufficientFunds{ balance: caller_balance.into() })
+        }        
+        with_mut(&CB_DATA, |cb_data| {
+            subtract_cycles_balance(cycles_balances, cb_data, caller_count_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));            
+        }); 
+        Ok(())
+    })?;
+    
+    let r = call_with_payment128::<_, ()>(
+        Principal::management_canister(),
+        "deposit_cycles",
+        (CanisterIdRecord{canister_id: q.for_canister},),
+        q.cycles
+    ).await;
+    
+    with_mut(&CYCLES_BALANCES, |cycles_balances| {
+        with_mut(&CB_DATA, |cb_data| {
+            match r {
+                Ok(()) => {
+                    // put log
+                    Ok(0)
+                }
+                Err(call_error) => {
+                    add_cycles_balance(cycles_balances, cb_data, caller_count_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));                        
+                    Err(CyclesOutError::DepositCyclesCallError(call_error_as_u32_and_string(call_error)))
+                }
+            }            
+        })
+    })
+}  
 
 
 
 // mint_cycles
 
+// put fee here?
+
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
 pub struct MintCyclesQuest {
-    pub burn_icp: u128, 
+    pub burn_icp: u128,
     pub burn_icp_transfer_fee: u128,
-    pub for_subaccount: Option<Subaccount>   
+    pub for_account: IcrcId,   
+    //pub fee: Option<Cycles>, // for the do take fee?
 }
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -389,7 +498,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         with_mut(&CB_DATA, |cb_data| {
-            add_cycles_balance(cycles_balances, cb_data, (user_id, mid_call_data.quest.for_subaccount), mid_call_data.cmc_cycles.unwrap());        
+            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(mid_call_data.quest.for_account), mid_call_data.cmc_cycles.unwrap());        
             cb_data.users_mint_cycles.remove(&user_id);
         });
     });
