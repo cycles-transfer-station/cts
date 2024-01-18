@@ -1,20 +1,20 @@
 use std::borrow::Cow;
 use serde::Serialize;
-use candid::{CandidType, Deserialize};
+use candid::{Principal, CandidType, Deserialize};
 use cts_lib::types::Cycles;
 use serde_bytes::ByteBuf;
 use crate::CountId;
 use ic_stable_structures::{Storable, storable::Bound};
 
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Log {
     pub ts: u64,
     pub fee: Option<Cycles>, // if the user does not specify the fee in the request
     pub tx: LogTX,
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct LogTX {
     pub op: Operation,
     pub fee: Option<Cycles>, // if the user specifies the fee in the request
@@ -23,11 +23,17 @@ pub struct LogTX {
     pub ts: Option<u64>, // if the user specifies the created_at_time field in the request.
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum Operation {
-    Burn{ from: CountId },
-    Mint{ to: CountId },
+    Mint{ to: CountId, kind: MintKind },
+    Burn{ from: CountId, for_canister: Principal },
     Xfer{ from: CountId, to: CountId } 
+}
+    
+#[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum MintKind {
+    CyclesIn{ from_canister: Principal },
+    CMC{ caller: Principal, icp_block_height: u64 }    
 }
     
 impl Storable for Log {

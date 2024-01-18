@@ -73,7 +73,7 @@ use serde_bytes::ByteBuf;
 mod tests;
 
 mod log_types;
-use log_types::{Log, LogTX, Operation};
+use log_types::{Log, LogTX, Operation, MintKind};
 
 // --------- TYPES -----------
 
@@ -132,8 +132,9 @@ pub const CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
 pub const LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
 pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
+pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/;
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
-pub const BANK_TRANSFER_FEE: Cycles = 1_000_000_000;
+pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
 
 // --------- GLOBAL-STATE ----------
 
@@ -333,14 +334,14 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, TokenTransferErr
 const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;
 
 #[derive(CandidType, Deserialize)]
-pub struct UserGetLogsBackwardsSponse {
-    logs: Vec<Log>,
+pub struct GetLogsBackwardsSponse {
+    logs: Vec<(BlockId, Log)>,
     is_last_chunk: bool,
 }
 
 #[query]
-pub fn user_get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> UserGetLogsBackwardsSponse {
-    let mut v: Vec<Log> = Vec::new();
+pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
+    let mut v: Vec<(BlockId, Log)> = Vec::new();
     let mut is_last_chunk = true;
     with(&USER_LOGS_POINTERS, |user_logs_pointers| {
         let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id_as_count_id(icrc_id)) {
@@ -356,11 +357,11 @@ pub fn user_get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u
         is_last_chunk = start_i == 0; 
         with(&LOGS, |logs| {
             for block_height in list[start_i..end_i].iter() {
-                v.push(logs.get(block_height.clone() as u64).unwrap());     
+                v.push((block_height.clone() as u128, logs.get(block_height.clone() as u64).unwrap()));     
             }
         });
     });
-    UserGetLogsBackwardsSponse {
+    GetLogsBackwardsSponse {
         logs: v,
         is_last_chunk,
     }    
@@ -387,8 +388,9 @@ fn controller_clear_user_logs_pointers_cache() {
 pub struct CyclesInQuest {
     pub cycles: Cycles,
     pub fee: Option<Cycles>,
-    pub for_account: IcrcId,
+    pub to: IcrcId,
     pub memo: Option<ByteBuf>,
+    pub created_at_time: Option<u64>
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
@@ -421,13 +423,34 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         with_mut(&CB_DATA, |cb_data| {
-            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(q.for_account), q.cycles);
+            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(q.to), q.cycles);
         });
     });
     
-    // put log
+    let block_height: u64 = with_mut(&LOGS, |logs| {
+        logs.push(
+            &Log{
+                ts: time_nanos_u64(),
+                fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                tx: LogTX{
+                    op: Operation::Mint{ to: icrc_id_as_count_id(q.to), kind: MintKind::CyclesIn{ from_canister: caller() } },
+                    fee: q.fee,
+                    amt: q.cycles,
+                    memo: q.memo,
+                    ts: q.created_at_time,
+                }
+            }
+        ).unwrap(); // if growfailed then trap and roll back.
+        logs.len() - 1
+    });
     
-    Ok(0)
+    with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
+        user_logs_pointers.entry(icrc_id_as_count_id(q.to))
+        .or_default()
+        .push(block_height as u32);        
+    });
+
+    Ok(block_height as u128)
 }  
 
 
@@ -440,6 +463,8 @@ pub struct CyclesOutQuest {
     pub from_subaccount: Option<Subaccount>,
     pub memo: Option<ByteBuf>,
     pub for_canister: Principal,
+    pub created_at_time: Option<u64>
+    
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
@@ -486,8 +511,30 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     match r {
         Ok(()) => {
-            // put log
-            Ok(0)
+            let block_height: u64 = with_mut(&LOGS, |logs| {
+                logs.push(
+                    &Log{
+                        ts: time_nanos_u64(),
+                        fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                        tx: LogTX{
+                            op: Operation::Burn{ from: caller_count_id, for_canister: q.for_canister },
+                            fee: q.fee,
+                            amt: q.cycles,
+                            memo: q.memo,
+                            ts: q.created_at_time,
+                        }
+                    }
+                ).unwrap(); // what to do if grow-fail here?
+                logs.len() - 1
+            });
+            
+            with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
+                user_logs_pointers.entry(caller_count_id)
+                .or_default()
+                .push(block_height as u32);
+            });                    
+            
+            Ok(block_height as u128)
         }
         Err(call_error) => {
             with_mut(&CYCLES_BALANCES, |cycles_balances| {
@@ -510,13 +557,19 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
 pub struct MintCyclesQuest {
     pub burn_icp: u128,
     pub burn_icp_transfer_fee: u128,
-    pub for_account: IcrcId,   
-    //pub fee: Option<Cycles>, // for the do take fee?
+    pub to: IcrcId,   
+    pub fee: Option<Cycles>,
+    pub memo: Option<ByteBuf>,    
+    pub created_at_time: Option<u64>
+    
 }
 
 #[derive(CandidType, Deserialize, Debug)]
 pub enum MintCyclesError {
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
+    MinimumBurnIcp{ minimum_burn_icp: u128 },
+    BadFee{ expected_fee: Cycles },
+    GenericError{ error_code: u128, message: String },
     CBIsBusy,
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
     LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
@@ -530,7 +583,8 @@ pub enum MintCyclesMidCallError {
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct MintCyclesSuccess {
-    pub mint_cycles: Cycles
+    pub mint_cycles: Cycles,
+    pub mint_cycles_block_height: u128,
 }
 
 pub type MintCyclesResult = Result<MintCyclesSuccess, MintCyclesError>;
@@ -540,6 +594,7 @@ pub struct MintCyclesMidCallData {
     start_time_nanos: u64,
     lock: bool,
     quest: MintCyclesQuest,
+    fee: Cycles,
     cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
     cmc_cycles: Option<Cycles>,
 }
@@ -549,6 +604,23 @@ pub struct MintCyclesMidCallData {
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
+    
+    if q.burn_icp < MINIMUM_BURN_ICP {
+        return Err(MintCyclesError::MinimumBurnIcp{ minimum_burn_icp: MINIMUM_BURN_ICP });
+    }
+    
+    if let Some(quest_fee) = q.fee {
+        if quest_fee != BANK_TRANSFER_FEE {
+            return Err(MintCyclesError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
+        }
+    }
+    let fee: Cycles = BANK_TRANSFER_FEE; // save in the call here in case the fee changes while this mint is doing, use the agreed upon fee.  
+    
+    if let Some(ref memo) = q.memo {
+        if memo.len() > 32 {
+            return Err(MintCyclesError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+        }
+    }
     
     let user_id: Principal = caller();
     
@@ -561,6 +633,7 @@ pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
             start_time_nanos: time_nanos_u64(),
             lock: true,
             quest: q, 
+            fee: fee,
             cmc_icp_transfer_block_height: None,
             cmc_cycles: None,
         };
@@ -610,13 +683,37 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         with_mut(&CB_DATA, |cb_data| {
-            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(mid_call_data.quest.for_account), mid_call_data.cmc_cycles.unwrap());        
+            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(mid_call_data.quest.to), mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee));        
             cb_data.users_mint_cycles.remove(&user_id);
         });
     });
+    
+    let block_height: u64 = with_mut(&LOGS, |logs| {
+        logs.push(
+            &Log{
+                ts: time_nanos_u64(),
+                fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
+                tx: LogTX{
+                    op: Operation::Mint{ to: icrc_id_as_count_id(mid_call_data.quest.to), kind: MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
+                    fee: mid_call_data.quest.fee,
+                    amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
+                    memo: mid_call_data.quest.memo,
+                    ts: mid_call_data.quest.created_at_time,
+                }
+            }
+        ).unwrap(); // if growfailed then trap and roll back.
+        logs.len() - 1
+    });
+    
+    with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
+        user_logs_pointers.entry(icrc_id_as_count_id(mid_call_data.quest.to))
+        .or_default()
+        .push(block_height as u32);        
+    });
 
     Ok(MintCyclesSuccess{
-        mint_cycles: mid_call_data.cmc_cycles.unwrap(),
+        mint_cycles: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
+        mint_cycles_block_height: block_height as u128
     })
 }
 
