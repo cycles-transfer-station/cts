@@ -543,7 +543,9 @@ fn write_purchase_cycles_bank_data(user_id: &Principal, purchase_cycles_bank_dat
 // for the now a user must pay with the icp.
 #[update]
 pub async fn create_membership(q: PurchaseCyclesBankQuest) -> Result<PurchaseCyclesBankSuccess, PurchaseCyclesBankError> {
-
+    
+    trap("Creating a membership is no longer needed.");
+    
     let user_id: Principal = q.for_user.unwrap_or(caller());
     
     let purchase_cycles_bank_data: PurchaseCyclesBankData = with_mut(&CTS_DATA, |cts_data| {
