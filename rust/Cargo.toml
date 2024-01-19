@@ -61,4 +61,6 @@ ic0 = "0.18.11"
 ic-cdk-timers = "0.4"
 ic_principal = "0.1.1"
 rmp-serde = "1.1.2"
+leb128 = "0.2.5"
+
 

@@ -2,10 +2,11 @@ use crate::{
     ic_cdk::{
         call,
     },
-    types::CallError,
+    types::{CallError, Cycles},
     tools::call_error_as_u32_and_string,
 };
-use candid::Principal;
+use candid::{CandidType, Deserialize, Principal};
+use serde_bytes::ByteBuf;
 
 pub use icrc_ledger_types::{
     icrc1::{
@@ -23,11 +24,21 @@ pub use icrc_ledger_types::{
     }
 };
 
+#[derive(CandidType, Deserialize)]
+pub struct Icrc1TransferQuest {
+    pub to: IcrcId,
+    pub fee: Option<Cycles>,
+    pub memo: Option<ByteBuf>,
+    pub from_subaccount: Option<IcrcSub>,
+    pub created_at_time: Option<u64>,
+    pub amount: Cycles,
+}
+
 pub use u128 as BlockId;
 pub use u128 as Tokens;
 
 
-pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, CallError> {
+pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: Icrc1TransferQuest) -> Result<Result<BlockId, TokenTransferError>, CallError> {
     call(
         icrc1_ledger_id,
         "icrc1_transfer",

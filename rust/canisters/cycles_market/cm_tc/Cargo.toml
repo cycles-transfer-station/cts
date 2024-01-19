@@ -18,6 +18,7 @@ futures = { workspace = true }
 ic-stable-structures = { workspace = true }
 ic-cdk-timers = { workspace = true }
 canister-tools = { workspace = true }
+leb128 = { workspace = true }
 
 [dev-dependencies]
 pocket-ic = "2.0.1"

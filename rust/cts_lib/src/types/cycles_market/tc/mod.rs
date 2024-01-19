@@ -14,6 +14,8 @@ pub struct CMIcrc1TokenTradeContractInit {
     pub cm_main_id: Principal,
     pub icrc1_token_ledger: Principal,
     pub icrc1_token_ledger_transfer_fee: Tokens,
+    pub cycles_bank_id: Principal,
+    pub cycles_bank_transfer_fee: Cycles,
     pub trades_storage_canister_code: CanisterCode,
     pub positions_storage_canister_code: CanisterCode,
 }

@@ -52,7 +52,7 @@ use cts_lib::{
         IcrcMemo,
         Tokens,
         TokenTransferError,
-        TokenTransferArg,
+        Icrc1TransferQuest,
         BlockId,
         icrc1_transfer,
         //icrc1_balance_of
@@ -125,6 +125,8 @@ struct CMData {
     cm_main_id: Principal,
     icrc1_token_ledger: Principal,
     icrc1_token_ledger_transfer_fee: Tokens,
+    cycles_bank_id: Principal,
+    cycles_bank_transfer_fee: Cycles,
     positions_id_counter: u128,
     trade_logs_id_counter: u128,
     mid_call_user_token_balance_locks: HashSet<Principal>,
@@ -146,6 +148,8 @@ impl CMData {
             cm_main_id: Principal::from_slice(&[]),
             icrc1_token_ledger: Principal::from_slice(&[]),
             icrc1_token_ledger_transfer_fee: 0,
+            cycles_bank_id: Principal::from_slice(&[]),
+            cycles_bank_transfer_fee: 0,
             positions_id_counter: 0,
             trade_logs_id_counter: 0,
             mid_call_user_token_balance_locks: HashSet::new(),
@@ -315,48 +319,24 @@ const DO_TRADE_LOGS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 10;
 const DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 10;
 
 
-const CM_MESSAGE_METHOD_VOID_CYCLES_POSITION_POSITOR: &'static str = "cm_message_void_cycles_position_positor";
-const CM_MESSAGE_METHOD_TRADE_TOKENS_CYCLES_PAYOUT: &'static str = "cm_message_trade_tokens_cycles_payout";
-
-
 mod token_transfer_memo_mod {
     use crate::{PositionKind, PurchaseId};
-    const TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-TPP-";
-    const CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-CPP-";
+    use serde_bytes::ByteBuf;
     
-    const TOKEN_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-TPPF";
-    const CYCLES_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START: &[u8; 8] = b"CTS-CPPF";
-    
+    const TRADE_MEMO_START: &[u8; 8] = b"CTSTRADE";
     const VOID_TOKEN_POSITION_MEMO_START: &[u8; 8] = b"CTS-VTP-";
     
-    
-    pub fn position_purchase_token_transfer_memo(position_kind: PositionKind, purchase_id: PurchaseId) -> [u8; 24] {
-        create_token_transfer_memo_(
-            match position_kind {
-                PositionKind::Cycles => CYCLES_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START,
-                PositionKind::Token => TOKEN_POSITION_PURCHASE_TOKEN_TRANSFER_MEMO_START,
-            },
-            purchase_id   
-        )    
+    pub fn create_trade_transfer_memo(purchase_id: PurchaseId) -> ByteBuf {
+        create_token_transfer_memo_(TRADE_MEMO_START, purchase_id)    
     }
-    pub fn position_purchase_token_fee_collection_transfer_memo(position_kind: PositionKind, purchase_id: PurchaseId) -> [u8; 24] {
-        create_token_transfer_memo_(
-            match position_kind {
-                PositionKind::Cycles => CYCLES_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START,
-                PositionKind::Token => TOKEN_POSITION_PURCHASE_TOKEN_FEE_COLLECTION_TRANSFER_MEMO_START,
-            },
-            purchase_id
-        )
-        
-    }
-    fn create_token_transfer_memo_(memo_start: &[u8; 8], id: u128) -> [u8; 24] {
-        let mut b: [u8; 24] = [0u8; 24];
-        b[..8].copy_from_slice(memo_start);
-        b[8..24].copy_from_slice(&id.to_be_bytes());
-        return b;
-    }
-    pub fn create_void_token_position_transfer_memo(position_id: u128) -> [u8; 24] {
+    pub fn create_void_token_position_transfer_memo(position_id: u128) -> ByteBuf {
         create_token_transfer_memo_(VOID_TOKEN_POSITION_MEMO_START, position_id)
+    }
+    fn create_token_transfer_memo_(memo_start: &[u8; 8], id: u128) -> ByteBuf {
+        let mut v = Vec::<u8>::new();
+        v.extend_from_slice(memo_start);
+        leb128::write::unsigned(&mut v, id as u64).unwrap(); // when position ids get close to u64::max, change for a different library compatible with a u128.
+        return ByteBuf::from(v);
     }
 }
 use token_transfer_memo_mod::*;
@@ -384,8 +364,6 @@ const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
 const POSITIONS_TOKEN_SUBACCOUNT: &[u8; 32] = &[5; 32];
 
-const CYCLES_DUST_COLLECTION_THRESHOLD: Cycles = 10_000_000_000; // 0.01T-cycles
-
 const MINIMUM_CYCLES_POSITION: Cycles = 1 * TRILLION; 
 
 
@@ -406,6 +384,8 @@ thread_local! {
     // not save through the upgrades
     static TOKEN_LEDGER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static TOKEN_LEDGER_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
+    static CYCLES_BANK_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
+    static CYCLES_BANK_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
     static STOP_CALLS: Cell<bool> = Cell::new(false);   
     pub static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[])); 
 }
@@ -424,6 +404,8 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
         cm_data.cm_main_id = cm_init.cm_main_id; 
         cm_data.icrc1_token_ledger = cm_init.icrc1_token_ledger; 
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
+        cm_data.cycles_bank_id = cm_init.cycles_bank_id;
+        cm_data.cycles_bank_transfer_fee = cm_init.cycles_bank_transfer_fee;
     });
     
     with_mut(&TRADES_STORAGE_DATA, |trades_storage_data| {
@@ -435,6 +417,8 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
     
     localkey::cell::set(&TOKEN_LEDGER_ID, cm_init.icrc1_token_ledger);
     localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_init.icrc1_token_ledger_transfer_fee);
+    localkey::cell::set(&CYCLES_BANK_ID, cm_init.cycles_bank_id);
+    localkey::cell::set(&CYCLES_BANK_TRANSFER_FEE, cm_init.cycles_bank_transfer_fee);
     localkey::cell::set(&CTS_ID, cm_init.cts_id);
 } 
 
@@ -454,6 +438,8 @@ fn post_upgrade() {
     with(&CM_DATA, |cm_data| {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
         localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data.icrc1_token_ledger_transfer_fee);
+        localkey::cell::set(&CYCLES_BANK_ID, cm_data.cycles_bank_id);
+        localkey::cell::set(&CYCLES_BANK_TRANSFER_FEE, cm_data.cycles_bank_transfer_fee);
         localkey::cell::set(&CTS_ID, cm_data.cts_id);    
     });
     
@@ -463,7 +449,7 @@ fn post_upgrade() {
 
 
 // -------------------------------------------------------------
-
+/*
 #[no_mangle]
 fn canister_inspect_message() {
     use cts_lib::ic_cdk::api::call::{method_name, accept_message};
@@ -482,7 +468,7 @@ fn canister_inspect_message() {
     }
     
 }
-
+*/
 
 // -------------------------------------------------------------
 
@@ -493,23 +479,28 @@ fn new_id(cm_data_id_counter: &mut u128) -> u128 {
     id
 }
 
-async fn token_transfer(q: TokenTransferArg) -> Result<Result<BlockId, TokenTransferError>, CallError> {
-    let r = icrc1_transfer(localkey::cell::get(&TOKEN_LEDGER_ID), q).await;
+async fn token_transfer(q: Icrc1TransferQuest) -> LedgerTransferReturnType {
+    _ledger_transfer(q, &TOKEN_LEDGER_ID, &TOKEN_LEDGER_TRANSFER_FEE, |cm_data| { &mut cm_data.icrc1_token_ledger_transfer_fee }).await
+}
+async fn cycles_transfer(q: Icrc1TransferQuest) -> LedgerTransferReturnType {
+    _ledger_transfer(q, &CYCLES_BANK_ID, &CYCLES_BANK_TRANSFER_FEE, |cm_data| { &mut cm_data.cycles_bank_transfer_fee }).await
+}
+
+pub type LedgerTransferReturnType = Result<Result<BlockId, TokenTransferError>, CallError>;
+
+async fn _ledger_transfer<F>(q: Icrc1TransferQuest, local_key_cell_ledger: &'static LocalKey<Cell<Principal>>, localkey_cell_ledger_transfer_fee: &'static LocalKey<Cell<u128>>, get_mut_cm_data_ledger_transfer_fee: F) -> LedgerTransferReturnType 
+where F: Fn(&mut CMData) -> &mut u128 {
+    let r = icrc1_transfer(localkey::cell::get(local_key_cell_ledger), q).await;
     if let Ok(ref tr) = r {
         if let Err(TokenTransferError::BadFee { ref expected_fee }) = tr {
-            localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, expected_fee.0.clone().try_into().unwrap_or(0));
+            localkey::cell::set(localkey_cell_ledger_transfer_fee, expected_fee.0.clone().try_into().unwrap_or(0));
             with_mut(&CM_DATA, |cm_data| {
-                cm_data.icrc1_token_ledger_transfer_fee = expected_fee.0.clone().try_into().unwrap_or(0);
+                *get_mut_cm_data_ledger_transfer_fee(cm_data) = expected_fee.0.clone().try_into().unwrap_or(0);
             });
         }
     } 
     r
 }
-/*
-async fn token_balance(count_id: IcrcId) -> Result<Tokens, CallError> {
-    icrc1_balance_of(localkey::cell::get(&TOKEN_LEDGER_ID), count_id).await
-}
-*/
 
 #[derive(CandidType, Deserialize)]
 pub enum PutUserTokenBalanceLockError {
@@ -756,10 +747,10 @@ async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult
     // transfer token balance into the main-count 
     // change this to an icrc2_transfer_from when sns leder plements icrc2
     match token_transfer(
-        TokenTransferArg{
+        Icrc1TransferQuest{
             memo: None,
-            amount: q.tokens.into(),
-            fee: q.posit_transfer_ledger_fee.map(|n| n.into()),
+            amount: q.tokens,
+            fee: q.posit_transfer_ledger_fee,
             from_subaccount: Some(principal_token_subaccount(&caller)),
             to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_TOKEN_SUBACCOUNT)},
             created_at_time: None,
@@ -890,8 +881,8 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         cycles_payout_fee,
                         cycles_payout_lock: false,
                         token_payout_lock: false,
-                        cycles_payout_data: CyclesPayoutData::new(),
-                        token_payout_data: TokenPayoutData::new()
+                        cycles_payout_data: None,
+                        token_payout_data: None
                     }
                 );
                 
@@ -1064,10 +1055,10 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
     })?;
     
     let token_transfer_result = token_transfer(
-        TokenTransferArg {
+        Icrc1TransferQuest {
             memo: None,
-            amount: q.tokens.into(),
-            fee: Some(q.token_fee.into()),
+            amount: q.tokens,
+            fee: Some(q.token_fee),
             from_subaccount: Some(principal_token_subaccount(&user_id)),
             to: q.to,
             created_at_time: Some(q.created_at_time.unwrap_or(time_nanos_u64()))
@@ -1267,7 +1258,7 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
                 .map(|tl| {
                     let mut v = Vec::new();
                     v.extend(tl.stable_memory_serialize());
-                    v.extend_from_slice(&[tl.cycles_payout_data.is_complete() as u8, tl.token_payout_data.is_complete() as u8]);
+                    v.extend_from_slice(&[tl.cycles_payout_data.is_some() as u8, tl.token_payout_data.is_some() as u8]);
                     v
                 })
                 .collect()
@@ -1334,7 +1325,7 @@ pub fn view_void_positions_pending(q: ViewStorageLogsQuest<<PositionLog as Stora
         = Box::new(
             void_positions[..start_before_i]
             .iter()
-            .map(|vp| (&(vp.update_storage_position_data().update_storage_position_log), vp.payout_data().is_complete()))
+            .map(|vp| (&(vp.update_storage_position_data().update_storage_position_log), vp.payout_data().is_some()))
             .rev());
         if let Some(index_key) = q.index_key {
             iter = Box::new(iter.filter(move |(pl, _)| pl.positor == index_key));

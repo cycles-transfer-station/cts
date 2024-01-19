@@ -11,6 +11,7 @@ use std::{
 use cts_lib::{
     icrc::{
         IcrcId,
+        Icrc1TransferQuest,
         TokenTransferError,
         BlockId,
     },
@@ -250,16 +251,6 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
     with(&CYCLES_BALANCES, |cycles_balances| {
         cycles_balance(cycles_balances, icrc_id_as_count_id(icrc_id))
     })
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct Icrc1TransferQuest {
-    to: IcrcId,
-    fee: Option<Cycles>,
-    memo: Option<ByteBuf>,
-    from_subaccount: Option<Subaccount>,
-    created_at_time: Option<u64>,
-    amount: Cycles,
 }
 
 #[update]
