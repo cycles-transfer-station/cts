@@ -1,12 +1,25 @@
 use candid::{Principal, CandidType, Deserialize};
-use crate::icrc::{IcrcId, Tokens, TokenTransferError, BlockId};
+use crate::icrc::{IcrcId, Tokens, Icrc1TransferError, BlockId};
 use crate::types::{Cycles, CallError, canister_code::CanisterCode};
 use crate::consts::KiB;
 use serde::Serialize;
 
+pub mod trade_log; 
+pub mod position_log;
+
+
+pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
+
+
 pub type PositionId = u128;
 pub type PurchaseId = u128;
 pub type CyclesPerToken = Cycles;
+
+#[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum PositionKind {
+    Cycles,
+    Token
+}
 
 #[derive(CandidType, Deserialize)]
 pub struct CMIcrc1TokenTradeContractInit {
@@ -22,70 +35,38 @@ pub struct CMIcrc1TokenTradeContractInit {
 
 // ----
 
-
-
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct BuyTokensQuest {
+pub struct TradeCyclesQuest {
     pub cycles: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
+    pub posit_transfer_ledger_fee: Option<Cycles>,
 }
 
-pub type TradeCyclesQuest = BuyTokensQuest;
-
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct SellTokensQuest {
+pub struct TradeTokensQuest {
     pub tokens: Tokens,
     pub cycles_per_token_rate: CyclesPerToken,
     pub posit_transfer_ledger_fee: Option<Tokens>,
 }
 
-
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum BuyTokensError {
-    MinimumPosition{ minimum_cycles: Cycles, minimum_tokens: Tokens},
-    RateCannotBeZero,
-    MsgCyclesTooLow,
-    CyclesMarketIsBusy,
-}
-pub type TradeCyclesError = BuyTokensError;
-
 #[derive(CandidType, Deserialize)]
-pub struct BuyTokensSuccess {
+pub struct TradeSuccess {
     pub position_id: PositionId,
 }
-pub type TradeCyclesSuccess = BuyTokensSuccess;
-
-pub type BuyTokensResult = Result<BuyTokensSuccess, BuyTokensError>;
-
-pub type TradeCyclesResult = BuyTokensResult;
-
-
-
 
 #[derive(CandidType, Deserialize, Debug)]
-pub enum SellTokensError {
+pub enum TradeError {
     MinimumPosition{ minimum_cycles: Cycles, minimum_tokens: Tokens},
     RateCannotBeZero,
-    CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
+    CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance,
     CyclesMarketIsBusy,
-    CollectTokensForThePositionLedgerTransferCallError(CallError),
-    CollectTokensForThePositionLedgerTransferError(TokenTransferError)
+    CollectForThePositionLedgerTransferCallError(CallError),
+    CollectForThePositionLedgerTransferError(Icrc1TransferError)
 }
 
+pub type TradeResult = Result<TradeSuccess, TradeError>;
 
-#[derive(CandidType, Deserialize)]
-pub struct SellTokensSuccess {
-    pub position_id: PositionId,
-    //sell_tokens_so_far: Tokens,
-    //cycles_payout_so_far: Cycles,
-    //position_closed: bool
-}
-
-
-pub type SellTokensResult = Result<SellTokensSuccess, SellTokensError>;
-
-
+// ---
 
 #[derive(CandidType, Deserialize)]
 pub struct VoidPositionQuest {
@@ -107,38 +88,28 @@ pub type VoidPositionResult = Result<(), VoidPositionError>;
 #[derive(CandidType, Deserialize)]
 pub struct TransferTokenBalanceQuest {
     pub tokens: Tokens,
-    pub token_fee: Tokens, // must set and cant be opt, bc the contract must check that the user has the available balance unlocked and must know the amount + fee is available (not locked) in the account.   
-    pub to: IcrcId,
-    pub created_at_time: Option<u64>
+    pub ledger_transfer_fee: Option<Tokens>,   
+    pub to: IcrcId
 }
 
 #[derive(CandidType, Deserialize)]
-pub enum TransferTokenBalanceError {
-    CyclesMarketIsBusy,
-    CallerIsInTheMiddleOfADifferentCallThatLocksTheTokenBalance,
-    TokenTransferCallError((u32, String)),
-    TokenTransferError(TokenTransferError)
+pub struct TransferCyclesBalanceQuest {
+    pub cycles: Cycles,
+    pub ledger_transfer_fee: Option<Cycles>,   
+    pub to: IcrcId
 }
 
-pub type TransferTokenBalanceResult = Result<BlockId, TransferTokenBalanceError>;
+#[derive(CandidType, Deserialize)]
+pub enum TransferBalanceError {
+    CyclesMarketIsBusy,
+    CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance,
+    TransferCallError(CallError),
+    Icrc1TransferError(Icrc1TransferError)
+}
+
+pub type TransferBalanceResult = Result<BlockId, TransferBalanceError>;
 
 // ----
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMVoidCyclesPositionPositorMessageQuest {
-    pub position_id: PositionId,
-    // cycles in the call
-    pub timestamp_nanos: u128
-}
-
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CMTradeTokensCyclesPayoutMessageQuest {
-    pub token_position_id: PositionId,
-    pub purchase_id: PurchaseId,
-}
-
-// ---------------
 
 #[derive(CandidType, Deserialize)]
 pub struct ViewPositionBookQuest {
@@ -150,24 +121,7 @@ pub struct ViewPositionBookSponse {
     pub is_last_chunk: bool,
 }
 
-
-
 // ------
-pub mod trade_log; 
-pub mod position_log;
-
-
-
-pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
-
-
-
-#[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub enum PositionKind {
-    Cycles,
-    Token
-}
-
 
 #[derive(CandidType, Deserialize)]
 pub struct ViewLatestTradesQuest {
@@ -181,6 +135,3 @@ pub struct ViewLatestTradesSponse {
     pub trades_data: Vec<LatestTradesDataItem>, 
     pub is_last_chunk_on_this_canister: bool,
 }
-
-
-

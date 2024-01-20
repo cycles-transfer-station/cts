@@ -16,10 +16,8 @@ pub use icrc_ledger_types::{
             DEFAULT_SUBACCOUNT as ICRC_DEFAULT_SUBACCOUNT,    
         },
         transfer::{
-            //BlockIndex as BlockId, // don't use Nat for serialization. bincode does not support Nat for deserialization, since Nat Deserialize uses deserialize_any.
             Memo as IcrcMemo,
-            TransferArg as TokenTransferArg,
-            TransferError as TokenTransferError,
+            TransferError as Icrc1TransferError,
         }
     }
 };

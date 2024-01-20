@@ -177,7 +177,6 @@ pub struct CTSData {
     cbs_maps: HashMap<Principal, CBSMStatus>,
     create_new_cbs_map_lock: bool,
     temp_create_new_cbsmap_holder: Option<Principal>,
-    users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     users_purchase_cycles_bank: HashMap<Principal, PurchaseCyclesBankData>,
     users_transfer_icp: HashSet<Principal>,
     users_lengthen_membership: HashMap<Principal, LengthenMembershipMidCallData>,
@@ -196,7 +195,6 @@ impl CTSData {
             cbs_maps: HashMap::new(),
             create_new_cbs_map_lock: false,
             temp_create_new_cbsmap_holder: None,
-            users_mint_cycles: HashMap::new(),    
             users_purchase_cycles_bank: HashMap::new(),
             users_transfer_icp: HashSet::new(),
             users_lengthen_membership: HashMap::new(),
@@ -260,23 +258,14 @@ pub const CB_CACHE_SIZE: usize = {
 pub const CB_AUTHS_MAX_SIZE: usize = CB_CACHE_SIZE;
 pub const MINIMUM_CB_AUTH_DURATION_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
 
-const MAX_USERS_MINT_CYCLES: usize = 170;
 
 const STABLE_MEMORY_CTS_DATA_SERIALIZATION_MEMORY_ID: MemoryId = MemoryId::new(0);
-const USER_CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
-//const USER_CYCLES_TRANSFERS_LOGS: MemoryId = MemoryId::new(2);
 
 
 thread_local! {
     
     pub static CTS_DATA: RefCell<CTSData> = RefCell::new(CTSData::new());
     
-    pub static USER_CYCLES_BALANCES: RefCell<StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>> 
-        = RefCell::new(StableBTreeMap::init(get_virtual_memory(USER_CYCLES_BALANCES_MEMORY_ID)));
-    /*
-    pub static USER_CYCLES_TRANSFERS: RefCell<StableBTreeMap<ic_principal::Principal, Vec<CyclesTransferLog>, VirtualMemory<DefaultMemoryImpl>>> 
-        = RefCell::new(StableBTreeMap::init(get_virtual_memory(USER_CYCLES_TRANSFERS_LOGS)));
-    */
     // not save through the upgrades
     pub static LATEST_KNOWN_CMC_RATE: Cell<IcpXdrConversionRate> = Cell::new(IcpXdrConversionRate{ xdr_permyriad_per_icp: 0, timestamp_seconds: 0 });
     static     STOP_CALLS: Cell<bool> = Cell::new(false);
@@ -363,7 +352,6 @@ pub fn canister_inspect_message() {
 #[derive(CandidType, Deserialize, Debug)]
 pub enum UserIsInTheMiddleOfADifferentCall {
     PurchaseCyclesBankCall{ must_call_complete: bool },
-    MintCyclesCall{ must_call_complete: bool },
     TransferIcpCall,
     LengthenMembershipCall{ must_call_complete: bool },
     LengthenMembershipCBCyclesPaymentCall{ must_call_complete: bool },
@@ -371,9 +359,6 @@ pub enum UserIsInTheMiddleOfADifferentCall {
 
 
 fn check_if_user_is_in_the_middle_of_a_different_call(cts_data: &CTSData, user_id: &Principal) -> Result<(), UserIsInTheMiddleOfADifferentCall> {
-    if let Some(mint_cycles_mid_call_data) = cts_data.users_mint_cycles.get(user_id) {
-        return Err(UserIsInTheMiddleOfADifferentCall::MintCyclesCall{ must_call_complete: !mint_cycles_mid_call_data.lock });
-    }
     if cts_data.users_transfer_icp.contains(user_id) == true {
         return Err(UserIsInTheMiddleOfADifferentCall::TransferIcpCall);
     }
@@ -448,182 +433,10 @@ pub fn view_fees() -> Fees {
 
 
 // ---------------
-// user mint cycles
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-pub struct MintCyclesQuest {
-    pub burn_icp: IcpTokens, 
-    pub burn_icp_transfer_fee: IcpTokens,   
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum MintCyclesError {
-    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
-    CTSIsBusy,
-    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
-    MidCallError(MintCyclesMidCallError)
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum MintCyclesMidCallError {
-    LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-}
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
-pub struct MintCyclesSuccess {
-    pub mint_cycles: Cycles
-}
-
-pub type MintCyclesResult = Result<MintCyclesSuccess, MintCyclesError>;
-
-#[derive(CandidType, Deserialize, Clone)]
-pub struct MintCyclesMidCallData {
-    start_time_nanos: u64,
-    lock: bool,
-    quest: MintCyclesQuest,
-    cmc_icp_transfer_block_height: Option<IcpBlockHeight>,
-    cmc_cycles: Option<Cycles>,
-}
 
 
-#[update]
-pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
-    
-    let user_id: Principal = caller();
-    
-    let mid_call_data: MintCyclesMidCallData = with_mut(&CTS_DATA, |cts_data| {
-        check_if_user_is_in_the_middle_of_a_different_call(cts_data, &user_id).map_err(|e| MintCyclesError::UserIsInTheMiddleOfADifferentCall(e))?;
-        if cts_data.users_mint_cycles.len() >= MAX_USERS_MINT_CYCLES {
-            return Err(MintCyclesError::CTSIsBusy);
-        }
-        let mid_call_data = MintCyclesMidCallData{
-            start_time_nanos: time_nanos_u64(),
-            lock: true,
-            quest: q, 
-            cmc_icp_transfer_block_height: None,
-            cmc_cycles: None,
-        };
-        cts_data.users_mint_cycles.insert(user_id.clone(), mid_call_data.clone());
-        Ok(mid_call_data)
-    })?;
 
-    mint_cycles_(user_id, mid_call_data).await
-}
-
-async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallData) -> MintCyclesResult {   
-    
-    if mid_call_data.cmc_icp_transfer_block_height.is_none() {
-        match ledger_topup_cycles_cmc_icp_transfer(
-            mid_call_data.quest.burn_icp, 
-            mid_call_data.quest.burn_icp_transfer_fee,
-            Some(principal_icp_subaccount(&user_id)),
-            ic_cdk::api::id()
-        ).await {
-            Ok(block_height) => { 
-                mid_call_data.cmc_icp_transfer_block_height = Some(block_height); 
-            },
-            Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
-                with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.remove(&user_id); });
-                return Err(MintCyclesError::LedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error));
-            }
-        }
-    }
-    
-    if mid_call_data.cmc_cycles.is_none() {
-        match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
-            Ok(cmc_cycles) => { 
-                mid_call_data.cmc_cycles = Some(cmc_cycles); 
-            },
-            Err(ledger_topup_cycles_cmc_notify_error) => {
-                if let LedgerTopupCyclesCmcNotifyError::CmcNotifyError(CmcNotifyError::Refunded{ block_index: Some(b), reason: r }) = ledger_topup_cycles_cmc_notify_error {
-                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.remove(&user_id); });
-                    return Err(MintCyclesError::LedgerTopupCyclesCmcNotifyRefund{ block_index: b, reason: r});
-                } else {
-                    mid_call_data.lock = false;
-                    with_mut(&CTS_DATA, |cts_data| { cts_data.users_mint_cycles.insert(user_id, mid_call_data); });
-                    return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
-                }
-            }
-        }
-    }
-        
-    with_mut(&USER_CYCLES_BALANCES, |user_cycles_balances| {
-        add_user_cycles_balance(user_cycles_balances, user_id, mid_call_data.cmc_cycles.unwrap());
-    });
-    
-    with_mut(&CTS_DATA, |cts_data| { 
-        cts_data.users_mint_cycles.remove(&user_id);        
-    });
-    
-    Ok(MintCyclesSuccess{
-        mint_cycles: mid_call_data.cmc_cycles.unwrap(),
-    })
-}
-
-#[derive(CandidType, Deserialize)]
-pub enum CompleteMintCyclesError{
-    UserIsNotInTheMiddleOfAMintCyclesCall,
-    MintCyclesError(MintCyclesError)
-}
-
-#[update]
-pub async fn complete_mint_cycles(for_user: Option<Principal>) -> Result<MintCyclesSuccess, CompleteMintCyclesError> {
-    complete_mint_cycles_(for_user.unwrap_or(caller())).await
-}
-
-async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, CompleteMintCyclesError> {
-    
-    let mid_call_data: MintCyclesMidCallData = with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.users_mint_cycles.get_mut(&user_id) {
-            Some(mid_call_data) => {
-                if mid_call_data.lock == true {
-                    return Err(CompleteMintCyclesError::MintCyclesError(MintCyclesError::UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall::MintCyclesCall{ must_call_complete: false })));
-                }
-                mid_call_data.lock = true;
-                Ok(mid_call_data.clone())
-            },
-            None => {
-                return Err(CompleteMintCyclesError::UserIsNotInTheMiddleOfAMintCyclesCall);
-            }
-        }
-    })?;
-
-    mint_cycles_(user_id, mid_call_data).await
-        .map_err(|mint_cycles_error| { 
-            CompleteMintCyclesError::MintCyclesError(mint_cycles_error) 
-        })
-}
-
-
-#[query]
-pub fn caller_cycles_balance() -> Cycles {
-    let user_id: Principal = caller();
-    with(&USER_CYCLES_BALANCES, |user_cycles_balances| {
-        user_cycles_balance(user_cycles_balances, user_id)
-    })
-}
-
-
-fn add_user_cycles_balance(user_cycles_balances: &mut StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal, add_cycles: Cycles) {
-    let user_id = candid_principal_as_ic_principal(user_id);
-    user_cycles_balances.insert(
-        user_id,
-        user_cycles_balances.get(&user_id).unwrap_or(0).saturating_add(add_cycles)
-    );
-}
-
-fn subtract_user_cycles_balance(user_cycles_balances: &mut StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal, sub_cycles: Cycles) {
-    let user_id = candid_principal_as_ic_principal(user_id);
-    user_cycles_balances.insert(
-        user_id,
-        user_cycles_balances.get(&user_id).unwrap_or(0).saturating_sub(sub_cycles)
-    );
-}
-
-fn user_cycles_balance(user_cycles_balances: &StableBTreeMap<ic_principal::Principal, Cycles, VirtualMemory<DefaultMemoryImpl>>, user_id: Principal) -> Cycles {
-    user_cycles_balances.get(&candid_principal_as_ic_principal(user_id)).unwrap_or(0)    
-}
+/*
 
 #[update]
 pub fn cm_tc_user_payout_cycles(q: CMTCUserPayoutCyclesQuest) {
@@ -669,7 +482,7 @@ pub async fn cm_trade_cycles(tc_id: Principal, q: cm_tc::TradeCyclesQuest) -> Re
     r
 }
 
-
+*/
 
 // -----------------------------------------
 // TRANSFER-ICP
