@@ -1,30 +1,17 @@
 [package]
-name = "bank"
+name = "pic_tools"
 version = "0.1.0"
 edition = "2021"
 
 
-[lib]
-crate-type = ["cdylib"]
-
-
 [dependencies]
+candid = { workspace = true }
+pocket-ic = "2.0.1"
 cts_lib = { path = "../../cts_lib" }
 serde = { workspace = true }
-candid = { workspace = true }
-canister-tools = { workspace = true }
-ic-cdk = { workspace = true }
-ic-stable-structures = { workspace = true }
-serde_bytes = { workspace = true }
-rmp-serde = { workspace = true }
-
-[dev-dependencies]
-pocket-ic = "2.0.1"
-pic_tools = { path = "../../pic_tests/pic_tools" }
 icp-ledger = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
 cycles-minting-canister = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
 icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
 ic-nns-common = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
 ic-base-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
 more-asserts = "0.3.1"
-

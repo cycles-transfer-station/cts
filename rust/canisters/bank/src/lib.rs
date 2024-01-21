@@ -12,7 +12,7 @@ use cts_lib::{
     icrc::{
         IcrcId,
         Icrc1TransferQuest,
-        TokenTransferError,
+        Icrc1TransferError,
         BlockId,
     },
     tools::{
@@ -26,12 +26,11 @@ use cts_lib::{
     management_canister::CanisterIdRecord,
     types::{
         Cycles,
-        CallError
+        bank::{*, log_types::{Log, LogTX, Operation, MintKind}},
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,
         ledger_topup_cycles_cmc_notify,
-        LedgerTopupCyclesCmcIcpTransferError,
         LedgerTopupCyclesCmcNotifyError,
         CmcNotifyError
     },
@@ -67,14 +66,11 @@ use canister_tools::{
     MemoryId,
     get_virtual_memory,
 };
-use serde_bytes::ByteBuf;
 
 
 #[cfg(test)]
 mod tests;
 
-mod log_types;
-use log_types::{Log, LogTX, Operation, MintKind};
 
 // --------- TYPES -----------
 
@@ -120,8 +116,6 @@ impl From<CountId> for StorableCountId {
     }
 }
 
-type Subaccount = [u8; 32];
-type CountId = (Principal, Option<Subaccount>);
 type CyclesBalances = StableBTreeMap<StorableCountId, Cycles, VirtualMemory<DefaultMemoryImpl>>;
 type Logs = StableVec<Log, VirtualMemory<DefaultMemoryImpl>>;
 type UserLogsPointers = HashMap<CountId, Vec<u32>>;
@@ -135,7 +129,6 @@ pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/;
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
-pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
 
 // --------- GLOBAL-STATE ----------
 
@@ -167,11 +160,6 @@ fn post_upgrade() {
 } 
 
 // ------- FUNCTIONS -------
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum UserIsInTheMiddleOfADifferentCall {
-    MintCyclesCall{ must_call_complete: bool },
-}
 
 fn check_if_user_is_in_the_middle_of_a_different_call(cb_data: &CBData, user_id: &Principal) -> Result<(), UserIsInTheMiddleOfADifferentCall> {
     if let Some(mint_cycles_mid_call_data) = cb_data.users_mint_cycles.get(user_id) {
@@ -254,29 +242,29 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
 }
 
 #[update]
-pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, TokenTransferError> {
+pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
     let caller_count_id: CountId = (caller(), q.from_subaccount);
         
     if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
-        return Err(TokenTransferError::GenericError{ error_code: 0.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });    
+        return Err(Icrc1TransferError::GenericError{ error_code: 0.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });    
     }
         
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(TokenTransferError::GenericError{ error_code: 1.into(), message: "Max memo length is 32 bytes.".to_string() });
+            return Err(Icrc1TransferError::GenericError{ error_code: 1.into(), message: "Max memo length is 32 bytes.".to_string() });
         }
     }
     
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
-            return Err(TokenTransferError::BadFee{ expected_fee: BANK_TRANSFER_FEE.into() });
+            return Err(Icrc1TransferError::BadFee{ expected_fee: BANK_TRANSFER_FEE.into() });
         }    
     }
             
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         let caller_balance: Cycles = cycles_balance(cycles_balances, caller_count_id); 
         if caller_balance < q.amount.saturating_add(BANK_TRANSFER_FEE) {
-            return Err(TokenTransferError::InsufficientFunds{ balance: caller_balance.into() })
+            return Err(Icrc1TransferError::InsufficientFunds{ balance: caller_balance.into() })
         }
         
         with_mut(&CB_DATA, |cb_data| {
@@ -324,11 +312,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, TokenTransferErr
 
 const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;
 
-#[derive(CandidType, Deserialize)]
-pub struct GetLogsBackwardsSponse {
-    logs: Vec<(BlockId, Log)>,
-    is_last_chunk: bool,
-}
+
 
 #[query]
 pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
@@ -375,21 +359,6 @@ fn controller_clear_user_logs_pointers_cache() {
 
 // cycles_in
 
-#[derive(CandidType, Deserialize)]
-pub struct CyclesInQuest {
-    pub cycles: Cycles,
-    pub fee: Option<Cycles>,
-    pub to: IcrcId,
-    pub memo: Option<ByteBuf>,
-    pub created_at_time: Option<u64>
-}
-
-#[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
-pub enum CyclesInError {
-    MsgCyclesTooLow,
-    BadFee{ expected_fee: Cycles },
-    GenericError{ error_code: u128, message: String },
-}
 
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
@@ -447,24 +416,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
 
 // cycles-out
 
-#[derive(CandidType, Deserialize)]
-pub struct CyclesOutQuest {
-    pub cycles: Cycles,
-    pub fee: Option<Cycles>,
-    pub from_subaccount: Option<Subaccount>,
-    pub memo: Option<ByteBuf>,
-    pub for_canister: Principal,
-    pub created_at_time: Option<u64>
-    
-}
 
-#[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
-pub enum CyclesOutError {
-    InsufficientFunds{ balance: Cycles },
-    BadFee{ expected_fee: Cycles },
-    DepositCyclesCallError(CallError),
-    GenericError{ error_code: u128, message: String },    
-}
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
@@ -542,46 +494,8 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
 
 // mint_cycles
 
-// put fee here?
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-pub struct MintCyclesQuest {
-    pub burn_icp: u128,
-    pub burn_icp_transfer_fee: u128,
-    pub to: IcrcId,   
-    pub fee: Option<Cycles>,
-    pub memo: Option<ByteBuf>,    
-    pub created_at_time: Option<u64>
-    
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum MintCyclesError {
-    UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
-    MinimumBurnIcp{ minimum_burn_icp: u128 },
-    BadFee{ expected_fee: Cycles },
-    GenericError{ error_code: u128, message: String },
-    CBIsBusy,
-    LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-    LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
-    MidCallError(MintCyclesMidCallError)
-}
-
-#[derive(CandidType, Deserialize, Debug)]
-pub enum MintCyclesMidCallError {
-    LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-}
-
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
-pub struct MintCyclesSuccess {
-    pub mint_cycles: Cycles,
-    pub mint_cycles_block_height: u128,
-}
-
-pub type MintCyclesResult = Result<MintCyclesSuccess, MintCyclesError>;
-
 #[derive(CandidType, Deserialize, Clone)]
-pub struct MintCyclesMidCallData {
+struct MintCyclesMidCallData {
     start_time_nanos: u64,
     lock: bool,
     quest: MintCyclesQuest,

@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use serde::Serialize;
 use candid::{Principal, CandidType, Deserialize};
-use cts_lib::types::Cycles;
+use crate::types::Cycles;
 use serde_bytes::ByteBuf;
-use crate::CountId;
+use super::CountId;
 use ic_stable_structures::{Storable, storable::Bound};
 
 

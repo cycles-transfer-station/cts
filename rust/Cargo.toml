@@ -14,7 +14,8 @@ members = [
     "canisters/cycles_market/cm_positions_storage",
     "cts_lib/canister_authorizations",
     "canisters/bank",
-    "pic_tests/canister_caller"
+    "pic_tests/canister_caller",
+    "pic_tests/pic_tools",
 ]
 
 exclude = [
