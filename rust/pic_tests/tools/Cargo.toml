@@ -6,12 +6,12 @@ edition = "2021"
 
 [dependencies]
 candid = { workspace = true }
-pocket-ic = "2.0.1"
-cts_lib = { path = "../../cts_lib" }
+pocket-ic = { workspace = true }
+cts_lib = { workspace = true }
 serde = { workspace = true }
+icrc-ledger-types = { workspace = true }
+more-asserts = { workspace = true }
 icp-ledger = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
 cycles-minting-canister = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
-icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
 ic-nns-common = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
 ic-base-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
-more-asserts = "0.3.1"

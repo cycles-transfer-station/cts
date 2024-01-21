@@ -1,0 +1,25 @@
+[package]
+name = "pic_tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+
+[[test]]
+name = "test_bank"
+path = "test_bank.rs"
+
+[[test]]
+name = "test_cm_tc"
+path = "test_cm_tc.rs"
+
+
+[dev-dependencies]
+pic_tools = { path = "../tools" }
+cts_lib = { workspace = true }
+pocket-ic = { workspace = true }
+icrc-ledger-types = { workspace = true }
+more-asserts = { workspace = true }
+candid = { workspace = true }
+
+

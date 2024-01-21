@@ -47,35 +47,10 @@ fn t() {
         Principal::from_slice(&[2,2,2,2,2]),
     );
     
-    // create cbs
-    let cb_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cycles_bank.wasm").unwrap();
-    let (cb1,cb2) = {
-        let v = [p1,p2].into_iter().map(|p| {
-            let cb: Principal = pic.create_canister_on_subnet(None, None, fid_subnet);
-            println!("cb: {cb}");
-            pic.add_cycles(cb, 1_000_000 * TRILLION);
-            pic.install_canister(
-                cb, 
-                cb_wasm.clone(), 
-                candid::encode_one(
-                    CyclesBankInit{
-                        user_id: p,
-                        cts_id: Principal::from_slice(&[]),
-                        cbsm_id: Principal::from_slice(&[]),
-                        storage_size_mib: 310,                         
-                        lifetime_termination_timestamp_seconds: 60*60*24*365*100,
-                        start_with_user_cycles_balance: CB_START_CYCLES_BALANCE,
-                        sns_control: false,
-                    }
-                ).unwrap(), 
-                None
-            );
-            cb                        
-        }).collect::<Vec<Principal>>();
-        (v[0], v[1])
-    };
+    
     
     // create ledger
+    /*
     const CB_START_TOKEN_BALANCE: Tokens = 10000000000000000;
     let icrc1_ledger_wasm = std::fs::read("ic-icrc1-ledger-o-f99495f3772d5a85d25ef5008179b49a5f12c5c2.wasm").unwrap();
     let ledger: Principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
@@ -108,6 +83,7 @@ fn t() {
         ).unwrap(), 
         None
     );
+    */
     
     // create cm-main
     let cm_main_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "cm_main.wasm").unwrap();

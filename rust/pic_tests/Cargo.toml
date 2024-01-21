@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "tests",
+    "tools",
+]
+
+exclude = [
+    "canister_caller",
+]
+
+[workspace.dependencies]
+icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
+pocket-ic = "2.0.1"
+more-asserts = "0.3.1"
+candid = "0.9.10"
+cts_lib = { path = "../cts_lib" }
+serde = { version = "1.0.193", features = ["derive"] }
+
+
+
+

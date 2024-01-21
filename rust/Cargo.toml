@@ -3,23 +3,21 @@
 resolver = "2"
 
 members = [
-    "cts_lib",
     "canisters/cts",
-    "canisters/cbs_map",
-    "canisters/cycles_bank",
+    "canisters/bank",    
     "canisters/cycles_market/cm_main",
     "canisters/cycles_market/cm_tc",
     "canisters/cycles_market/cm_storage_lib",
     "canisters/cycles_market/cm_trades_storage",
     "canisters/cycles_market/cm_positions_storage",
+    "cts_lib",    
     "cts_lib/canister_authorizations",
-    "canisters/bank",
     "pic_tests/canister_caller",
-    "pic_tests/pic_tools",
 ]
 
 exclude = [
-        
+    "pic_tests/tests",
+    "pic_tests/tools",
 ]
 
 [profile.release]
@@ -37,12 +35,12 @@ codegen-units = 1
 split-debuginfo= "packed"
 strip = "debuginfo"
 
-[profile.test]
-lto = false
-opt-level = 0
-codegen-units = 256
-split-debuginfo= "off"
-strip = "none"
+#[profile.test]
+#lto = false
+#opt-level = 0
+#codegen-units = 256
+#split-debuginfo= "off"
+#strip = "none"
 
 
 [workspace.dependencies]
@@ -63,5 +61,3 @@ ic-cdk-timers = "0.4"
 ic_principal = "0.1.1"
 rmp-serde = "1.1.2"
 leb128 = "0.2.5"
-
-

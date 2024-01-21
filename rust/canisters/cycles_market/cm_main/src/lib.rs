@@ -264,6 +264,8 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
             encode_one(CMIcrc1TokenTradeContractInit{
                 cts_id: data.cts_id,
                 cm_main_id: ic_cdk::api::id(),
+                cycles_bank_id: Principal::from_slice(&[]), // do!
+                cycles_bank_transfer_fee: cts_lib::types::bank::BANK_TRANSFER_FEE,
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,
                 trades_storage_canister_code: data.trades_storage_canister_code.clone(),

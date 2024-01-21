@@ -209,7 +209,7 @@ pub fn cycles_transform_tokens(cycles: Cycles, cycles_per_token: Cycles) -> Toke
 #[test]
 fn test_tokens_cycles_transform() {
     let cycles_per_token: Cycles = 500_000_000;
-    let tokens: Tokens = Tokens::from(10);
+    let tokens: Tokens = 10;
     assert_eq!(tokens.clone(), cycles_transform_tokens(tokens_transform_cycles(tokens.clone(), cycles_per_token), cycles_per_token));
 
     println!("{:?}", tokens_transform_cycles(tokens.clone(), cycles_per_token));

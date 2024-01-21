@@ -68,10 +68,6 @@ use canister_tools::{
 };
 
 
-#[cfg(test)]
-mod tests;
-
-
 // --------- TYPES -----------
 
 #[derive(CandidType, Deserialize)]

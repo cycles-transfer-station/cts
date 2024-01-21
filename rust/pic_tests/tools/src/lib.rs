@@ -27,8 +27,35 @@ pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
 pub const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
-pub const WASMS_DIR: &str = "../../target/wasm32-unknown-unknown/debug/";
 
+
+use std::path::PathBuf;
+
+
+/*
+fn workspace_dir() -> PathBuf {
+    let output = std::process::Command::new(env!("CARGO"))
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
+        .unwrap()
+        .stdout;
+    let cargo_path = Path::new(std::str::from_utf8(&output).unwrap().trim());
+    cargo_path.parent().unwrap().to_path_buf()
+}
+*/
+pub fn workspace_dir() -> PathBuf {
+    let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    d = d.parent().unwrap().parent().unwrap().to_path_buf();
+    d
+}
+
+pub fn wasms_dir() -> PathBuf {
+    let mut d = workspace_dir();
+    d.push("target/wasm32-unknown-unknown/debug");
+    d
+}
 
 pub fn pic_get_time_nanos(pic: &PocketIc) -> u128 {
     pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -77,7 +104,7 @@ pub fn set_up() -> PocketIc {
     let fid_subnet = pic.topology().get_fiduciary().unwrap();
     
     let icp_minter = ICP_MINTER;
-    let icp_ledger_wasm = std::fs::read("../../pic_tests/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz").unwrap();
+    let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
     let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
     pic.add_cycles(icp_ledger, 1_000 * TRILLION);    
     pic.install_canister(
@@ -106,7 +133,7 @@ pub fn set_up() -> PocketIc {
     );
      
     let nns_governance = NNS_GOVERNANCE;
-    let cmc_wasm = std::fs::read("../../pic_tests/cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz").unwrap();
+    let cmc_wasm = std::fs::read(workspace_dir().join("pic_tests/cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz")).unwrap();
     let cmc = pic.create_canister_with_id(None, None, CMC).unwrap();
     pic.add_cycles(cmc, 1_000 * TRILLION);    
     pic.install_canister(
@@ -154,7 +181,7 @@ pub fn set_up() -> PocketIc {
 pub fn set_up_bank(pic: &PocketIc) -> Principal {
     let fid_subnet = pic.topology().get_fiduciary().unwrap();
     let bank: Principal = pic.create_canister_on_subnet(Some(CTS_CONTROLLER), None, fid_subnet);
-    let bank_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "bank.wasm").unwrap();
+    let bank_wasm: Vec<u8> = std::fs::read(wasms_dir().join("bank.wasm")).unwrap();
     println!("bank: {bank}");    
     pic.add_cycles(bank, 1_000 * TRILLION);
     pic.install_canister(
@@ -168,7 +195,7 @@ pub fn set_up_bank(pic: &PocketIc) -> Principal {
 
 pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     let canister_caller: Principal = pic.create_canister();
-    let canister_caller_wasm: Vec<u8> = std::fs::read(WASMS_DIR.to_owned() + "canister_caller.wasm").unwrap();
+    let canister_caller_wasm: Vec<u8> = std::fs::read(wasms_dir().join("canister_caller.wasm")).unwrap();
     println!("canister_caller: {canister_caller}");    
     pic.add_cycles(canister_caller, 1_000_000_000 * TRILLION);
     pic.install_canister(

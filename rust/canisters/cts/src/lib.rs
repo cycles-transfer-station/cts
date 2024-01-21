@@ -21,9 +21,6 @@ use cts_lib::{
             CBSMUserData,
             self,
         },
-        cycles_bank::{
-            CyclesBankInit,
-        },
         cycles_market::{
             tc as cm_tc,
         },
@@ -128,9 +125,6 @@ use canister_tools::{
 };
 
 
-
-#[cfg(test)]
-mod tests;
 
 mod tools;
 use tools::{
@@ -543,7 +537,7 @@ pub async fn transfer_icp(q: TransferIcpQuest) -> Result<IcpBlockHeight, Transfe
 
 
 
-
+/*
 // ------------
 // create_membership
 // save the fees in the purchase_cycles_bank_data so the fees cant change while creating a new user
@@ -1204,7 +1198,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
         cycles_bank_canister_id: purchase_cycles_bank_data.cycles_bank_canister.unwrap()
     })
 }
-
+*/
 
 
 
@@ -1213,7 +1207,7 @@ async fn purchase_cycles_bank_(user_id: Principal, mut purchase_cycles_bank_data
 
 
 
-
+/*
 
 #[derive(CandidType, Deserialize, Debug)]
 pub enum FindCyclesBankError {
@@ -1261,13 +1255,13 @@ async fn find_cycles_bank_(user_id: &Principal) -> Result<Option<Principal>, Fin
     Ok(opt_cb) 
 } 
 
-
+*/
 
 
 // cb-auths
 
 
-
+/*
 #[derive(CandidType, Deserialize, Debug)]
 pub enum SetCBAuthError {
     CBNotFound,
@@ -1308,7 +1302,7 @@ pub fn get_cb_auth_of_an_sns_control(user_id: Principal, cb_id: Principal) -> Ve
     get_cb_auth_(UserAndCB{user_id, cb_id })
 }
 
-
+*/
 
 
 
@@ -1316,7 +1310,7 @@ pub fn get_cb_auth_of_an_sns_control(user_id: Principal, cb_id: Principal) -> Ve
 // LENGTHEN-MEMBERSHIP
 
 
-
+/*
 
 
 
@@ -1909,7 +1903,7 @@ async fn complete_lengthen_membership_cb_cycles_payment_(user_id: Principal) -> 
         
 }
 
-
+*/
 
 
 
@@ -1923,7 +1917,7 @@ async fn complete_lengthen_membership_cb_cycles_payment_(user_id: Principal) -> 
 // ----- USERS_MAP_CANISTERS-METHODS --------------------------
 
 
-
+/*
 #[update]
 pub fn controller_put_umc_code(canister_code: CanisterCode) -> () {
     caller_is_controller_gaurd(&caller());
@@ -2205,7 +2199,7 @@ pub async fn controller_complete_users_purchase_cycles_bank(opt_complete_users_p
     
 }
 
-
+*/
 
 
 

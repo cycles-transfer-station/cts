@@ -106,9 +106,6 @@ use trade_fee::*;
 mod transfer_memo;
 use transfer_memo::*;
 
-#[cfg(test)]
-mod tests;
-
 // ---------------
 
 
