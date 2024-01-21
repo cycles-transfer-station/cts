@@ -178,7 +178,6 @@ pub mod cts {
         }
     }
         
-    
     #[derive(CandidType, Deserialize)]
     pub struct CyclesBankLifetimeTerminationQuest {
         pub user_id: Principal,
@@ -188,18 +187,6 @@ pub mod cts {
     #[derive(CandidType, serde::Serialize, Deserialize, Clone)]
     pub struct LengthenMembershipQuest {
         pub lengthen_years: u128,
-    }
-        
-    #[derive(CandidType, Deserialize)]
-    pub struct CMTCUserPayoutCyclesQuest{
-        pub user_id: Principal
-    }
-    
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum CTSCMTradeCyclesError {
-        CyclesBalanceTooLow{ cycles_balance: Cycles },
-        CMTradeCyclesCallError(CallError),
-        CMTradeCyclesError(super::cycles_market::tc::TradeCyclesError),
     }
     
 }
@@ -251,99 +238,6 @@ pub mod cbs_map {
     }
     
     pub type UpdateUserResult = Result<(), UpdateUserError>;
-
-}
-
-
-
-
-pub mod cycles_bank {
-    use super::*;
-    use super::cycles_market::cm_main::TradeContractIdAndLedgerId;
-    use crate::cmc::*; 
-    use crate::ic_ledger_types::IcpTokens;
-    
-    #[derive(CandidType, Deserialize)]
-    pub struct CyclesBankInit {
-        pub user_id: Principal,
-        pub cts_id: Principal,
-        pub cbsm_id: Principal,
-        pub storage_size_mib: u128,                         
-        pub lifetime_termination_timestamp_seconds: u128,
-        pub start_with_user_cycles_balance: Cycles,
-        pub sns_control: bool,
-    }
-    
-    #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
-    pub struct UserCBMetrics {
-        pub cycles_balance: Cycles,
-        pub ctsfuel_balance: CTSFuel,
-        pub storage_size_mib: u128,
-        pub lifetime_termination_timestamp_seconds: u128,
-        pub user_id: Principal,
-        pub user_canister_creation_timestamp_nanos: u128,
-        pub storage_usage: u128,
-        pub cycles_transfers_id_counter: u128,
-        pub cycles_transfers_in_len: u128,
-        pub cycles_transfers_out_len: u128,
-        pub cm_trade_contracts: Vec<TradeContractIdAndLedgerId>,   
-        pub cts_cb_authorization: bool, 
-        pub cbsm_id: Principal,
-        pub sns_control: bool,
-    }    
-    
-
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum UserIsInTheMiddleOfADifferentCall {
-        BurnIcpMintCyclesCall{ must_call_complete: bool },
-    }
-    
-    // burn icp mint cycles
-    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-    pub struct BurnIcpMintCyclesQuest {
-        pub burn_icp: IcpTokens, 
-        pub burn_icp_transfer_fee: IcpTokens,   
-    }
-    
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum BurnIcpMintCyclesError {
-        UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
-        LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
-        LedgerTopupCyclesCmcNotifyRefund{ block_index: u64, reason: String},
-        MidCallError(BurnIcpMintCyclesMidCallError)
-    }
-    
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum BurnIcpMintCyclesMidCallError {
-        LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
-    }
-    
-    #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
-    pub struct BurnIcpMintCyclesSuccess {
-        pub mint_cycles: Cycles
-    }
-    
-    pub type BurnIcpMintCyclesResult = Result<BurnIcpMintCyclesSuccess, BurnIcpMintCyclesError>;
-    
-    // cm_methods
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum CBTradeCyclesError {
-        MemoryIsFull,
-        CyclesBalanceTooLow{ cycles_balance: Cycles },
-        CMTradeCyclesCallError((u32, String)),
-        CMTradeCyclesCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-    }
-    
-    pub type CBTradeCyclesResult = Result<cm::tc::BuyTokensResult, CBTradeCyclesError>;
-    
-    #[derive(CandidType, Deserialize, Debug)]
-    pub enum CBTradeTokensError {
-        MemoryIsFull,
-        CMTradeTokensCallError(CallError),
-        CMTradeTokensCallSponseCandidDecodeError{candid_error: String, sponse_bytes: Vec<u8> },
-    }
-    
-    pub type CBTradeTokensResult = Result<cm::tc::SellTokensResult, CBTradeTokensError>;
 
 }
 

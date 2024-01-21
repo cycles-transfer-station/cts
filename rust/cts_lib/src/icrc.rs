@@ -36,14 +36,14 @@ pub use u128 as BlockId;
 pub use u128 as Tokens;
 
 
-pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: Icrc1TransferQuest) -> Result<Result<BlockId, TokenTransferError>, CallError> {
+pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: Icrc1TransferQuest) -> Result<Result<BlockId, Icrc1TransferError>, CallError> {
     call(
         icrc1_ledger_id,
         "icrc1_transfer",
         (q,),
     ).await
     .map_err(call_error_as_u32_and_string)
-    .map(|(ir,): (Result<candid::Nat, TokenTransferError>,)| ir.map(|nat| nat.0.try_into().unwrap_or(0)))
+    .map(|(ir,): (Result<candid::Nat, Icrc1TransferError>,)| ir.map(|nat| nat.0.try_into().unwrap_or(0)))
 }
 
 pub async fn icrc1_balance_of(icrc1_ledger_id: Principal, count_id: IcrcId) -> Result<Tokens, (u32, String)> {

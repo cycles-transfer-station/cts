@@ -43,16 +43,16 @@ pub struct CreatePositionQuestLog {
     pub quantity: u128,
     pub cycles_per_token_rate: CyclesPerToken
 }
-impl From<BuyTokensQuest> for CreatePositionQuestLog {
-    fn from(q: BuyTokensQuest) -> Self {
+impl From<TradeCyclesQuest> for CreatePositionQuestLog {
+    fn from(q: TradeCyclesQuest) -> Self {
         Self {
             quantity: q.cycles,
             cycles_per_token_rate: q.cycles_per_token_rate 
         }
     }
 }
-impl From<SellTokensQuest> for CreatePositionQuestLog {
-    fn from(q: SellTokensQuest) -> Self {
+impl From<TradeTokensQuest> for CreatePositionQuestLog {
+    fn from(q: TradeTokensQuest) -> Self {
         Self {
             quantity: q.tokens,
             cycles_per_token_rate: q.cycles_per_token_rate 
@@ -153,7 +153,7 @@ pub trait CurrentPositionTrait {
 pub struct CyclesPosition {
     pub id: PositionId,   
     pub positor: Principal,
-    pub quest: BuyTokensQuest,
+    pub quest: TradeCyclesQuest,
     pub current_position_cycles: Cycles,
     pub purchases_rates_times_cycles_quantities_sum: u128,
     pub fill_quantity_tokens: Tokens,
@@ -265,7 +265,7 @@ impl CurrentPositionTrait for CyclesPosition {
 pub struct TokenPosition {
     pub id: PositionId,   
     pub positor: Principal,
-    pub quest: SellTokensQuest,
+    pub quest: TradeTokensQuest,
     pub current_position_tokens: Tokens,
     pub purchases_rates_times_token_quantities_sum: u128,
     pub cycles_payouts_fees_sum: Cycles,

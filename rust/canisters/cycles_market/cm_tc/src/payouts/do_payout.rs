@@ -30,7 +30,7 @@ where F: Fn(Icrc1TransferQuest) -> LedgerTransferFuture {
                 to: IcrcId{ owner: q.payee, subaccount: None },
                 fee: Some(ledger_transfer_fee),
                 memo: Some(q.memo),
-                from_subaccount: Some(*POSITIONS_TOKEN_SUBACCOUNT),
+                from_subaccount: Some(*POSITIONS_SUBACCOUNT),
                 created_at_time: None,
                 amount: q.trade_mount.saturating_sub(q.cts_payout_fee).saturating_sub(ledger_transfer_fee),
             }

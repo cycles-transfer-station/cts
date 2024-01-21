@@ -14,7 +14,7 @@ async fn _ledger_transfer<F>(q: Icrc1TransferQuest, local_key_cell_ledger: &'sta
 where F: Fn(&mut CMData) -> &mut u128 {
     let r = icrc1_transfer(localkey::cell::get(local_key_cell_ledger), q).await;
     if let Ok(ref tr) = r {
-        if let Err(TokenTransferError::BadFee { ref expected_fee }) = tr {
+        if let Err(Icrc1TransferError::BadFee { ref expected_fee }) = tr {
             localkey::cell::set(localkey_cell_ledger_transfer_fee, expected_fee.0.clone().try_into().unwrap_or(0));
             with_mut(&CM_DATA, |cm_data| {
                 *get_mut_cm_data_ledger_transfer_fee(cm_data) = expected_fee.0.clone().try_into().unwrap_or(0);

@@ -60,8 +60,8 @@ pub enum TradeError {
     RateCannotBeZero,
     CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance,
     CyclesMarketIsBusy,
-    CollectForThePositionLedgerTransferCallError(CallError),
-    CollectForThePositionLedgerTransferError(Icrc1TransferError)
+    CreatePositionLedgerTransferCallError(CallError),
+    CreatePositionLedgerTransferError(Icrc1TransferError)
 }
 
 pub type TradeResult = Result<TradeSuccess, TradeError>;

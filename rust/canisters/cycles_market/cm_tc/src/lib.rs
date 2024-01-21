@@ -3,7 +3,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{HashSet, VecDeque},
-    //time::Duration,
+    time::Duration,
     thread::LocalKey,
 };
 use std::iter::DoubleEndedIterator;
@@ -109,8 +109,8 @@ use flush_logs::FlushLogsStorageError;
 mod candle_counter;
 use candle_counter::CandleCounter;
 
-mod balance_locks;
-use balance_locks::*;
+mod trade_quest;
+use trade_quest::TradeQuest;
 
 mod ledger_transfer;
 use ledger_transfer::*;
@@ -246,7 +246,7 @@ const DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE: usize = 5;
 const DO_TRADE_LOGS_CYCLES_PAYOUTS_CHUNK_SIZE: usize = 10;
 const DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 10;
 
-const MAX_MID_CALL_USER_TOKEN_BALANCE_LOCKS: usize = 500;
+const MAX_MID_CALL_USER_BALANCE_LOCKS: usize = 500;
 
 pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = 0;
 
@@ -353,10 +353,10 @@ fn new_id(cm_data_id_counter: &mut u128) -> u128 {
 
 
 pub fn minimum_tokens_match() -> Tokens {
-    _minimum_match(&localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE))
+    _minimum_match(localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE))
 }
 pub fn minimum_cycles_match() -> Cycles {
-    _minimum_match(&localkey::cell::get(&CYCLES_BANK_TRANSFER_FEE))
+    _minimum_match(localkey::cell::get(&CYCLES_BANK_TRANSFER_FEE))
 }
 pub fn _minimum_match(ledger_transfer_fee: u128) -> Tokens {
     10_000/*for the fee ten-thousandths*/ + ledger_transfer_fee*10
@@ -365,364 +365,109 @@ pub fn _minimum_match(ledger_transfer_fee: u128) -> Tokens {
 // -----------------
 
 
-
-fn plus_one_ongoing_buy_call(cm_data: &mut CMData) {
-    cm_data.ongoing_buy_calls = cm_data.ongoing_buy_calls.checked_add(1).unwrap();
-}
-fn minus_one_ongoing_buy_call(cm_data: &mut CMData) {
-    cm_data.ongoing_buy_calls = cm_data.ongoing_buy_calls.saturating_sub(1);
+#[update]
+pub async fn trade_cycles(q: TradeCyclesQuest) -> TradeResult {
+    _trade(caller(), q).await
 }
 
-
-
-#[export_name = "canister_update trade_cycles"]
-extern "C" fn trade_cycles() {
-    let caller: Principal = caller();
-    
-    let (positor, q): (Principal, BuyTokensQuest) = {
-        if caller == with(&CM_DATA, |cm_data| cm_data.cts_id) {
-            arg_data()
-        } else {
-            let (q, (user_of_the_cb, cts_cb_authorization)): (BuyTokensQuest, (Principal, Vec<u8>)) = arg_data();
-            #[cfg(not(debug_assertions))]
-            if is_cts_cb_authorization_valid(
-                localkey::cell::get(&CTS_ID),        
-                UserAndCB{
-                    user_id: user_of_the_cb,
-                    cb_id: caller,
-                },
-                cts_cb_authorization
-            ) == false {
-                trap("Caller must be a CTS-CYCLES-BANK.");
-            }
-            (caller, q)
-        }
-    };
-    
-    with_mut(&CM_DATA, |cm_data| { plus_one_ongoing_buy_call(cm_data); });
-    
-    let buy_tokens_result: BuyTokensResult = buy_tokens_(positor, q);
-    
-    with_mut(&CM_DATA, |cm_data| { minus_one_ongoing_buy_call(cm_data); });
-    
-    reply::<(BuyTokensResult,)>((buy_tokens_result,));
-    
-    ic_cdk::spawn(do_payouts());
-    return;   
+#[update]
+pub async fn trade_tokens(q: TradeTokensQuest) -> TradeResult {
+    _trade(caller(), q).await
 }
 
-
-
-fn buy_tokens_(caller: Principal, q: BuyTokensQuest) -> BuyTokensResult {
+async fn _trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
     
-    if q.cycles < minimum_cycles_match() || cycles_transform_tokens(q.cycles, q.cycles_per_token_rate) < minimum_tokens_match() {
-        return Err(BuyTokensError::MinimumPosition{ minimum_cycles: minimum_cycles_match(), minimum_tokens: minimum_tokens_match()});
-    }    
+    let trade_result: TradeResult = __trade(caller, q).await;
     
-    if q.cycles_per_token_rate == 0 {
-        return Err(BuyTokensError::RateCannotBeZero);
-    }
-    
-    with_mut(&CM_DATA, |cm_data| {
-        
-        if cm_data.cycles_positions.len().saturating_add(cm_data.ongoing_buy_calls as usize) >= MAX_CYCLES_POSITIONS.saturating_sub(10)
-        || MAX_VOID_CYCLES_POSITIONS
-            .saturating_sub(cm_data.void_cycles_positions.len())
-            .saturating_sub(cm_data.cycles_positions.len().saturating_add(cm_data.ongoing_buy_calls as usize))
-             < 10 {
-            // check for a bump?
-            return Err(BuyTokensError::CyclesMarketIsBusy);
-        }
-        
-        let cycles_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
-        ic_cdk::print(&format!("creating cycles-position id: {cycles_position_id}"));
-        let cycles_position: CyclesPosition = CyclesPosition{
-            id: cycles_position_id,
-            positor: caller,
-            quest: q.clone(),
-            current_position_cycles: q.cycles,
-            purchases_rates_times_cycles_quantities_sum: 0,
-            fill_quantity_tokens: 0,
-            tokens_payouts_fees_sum: 0,
-            timestamp_nanos: time_nanos(),
-        };
-          
-        msg_cycles_accept128(q.cycles);
-          
-        with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(cycles_position.as_stable_memory_position_log(None).stable_memory_serialize());  
-        });
-        
-        cm_data.cycles_positions.push(cycles_position);  
-        
-        match_trades(
-            cm_data.cycles_positions.len() - 1,
-            &mut cm_data.cycles_positions,  
-            &mut cm_data.token_positions, 
-            &mut cm_data.void_cycles_positions,
-            &mut cm_data.void_token_positions,
-            &mut cm_data.trade_logs,
-            &mut cm_data.trade_logs_id_counter,
-            &mut cm_data.candle_counter,
-        );
-        
-        Ok(BuyTokensSuccess{
-            position_id: cycles_position_id
-        })
-
-    })
-    
-}
-
-
-
-
-fn plus_one_ongoing_sell_call(cm_data: &mut CMData) {
-    cm_data.ongoing_sell_calls = cm_data.ongoing_sell_calls.checked_add(1).unwrap();
-}
-fn minus_one_ongoing_sell_call(cm_data: &mut CMData) {
-    cm_data.ongoing_sell_calls = cm_data.ongoing_sell_calls.saturating_sub(1);
-}
-
-
-
-#[update(manual_reply = true)]
-pub fn trade_tokens(q: TradeTokensQuest) {
-    let caller: Principal = caller();
-    
-    let m = with_mut(&CM_DATA, |cm_data| { 
-        put_user_token_balance_lock(cm_data, caller)?;
-        plus_one_ongoing_sell_call(cm_data);
-        Ok(())
-    });
-    if let Err(e) = m {
-        reply::<(SellTokensResult,)>((Err(e),));
-        return;
-    };
-    
-    ic_cdk::spawn(async move {
-        let sell_tokens_result: SellTokensResult = sell_tokens_(caller, q).await;
-        
+    if let Err(TradeError::CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance) = trade_result {
+        // do not remove the lock bc it is from a different call.
+    } else {
         with_mut(&CM_DATA, |cm_data| {
-            remove_user_token_balance_lock(cm_data, caller);
-            minus_one_ongoing_sell_call(cm_data); 
+            TradeQuestType::mid_call_balance_locks(cm_data).remove(&caller);
         });
-        
-        reply::<(SellTokensResult,)>((sell_tokens_result,));
-    
-        do_payouts().await;
-    });
-}
-
-
-
-async fn sell_tokens_(caller: Principal, q: SellTokensQuest) -> SellTokensResult {
-    
-    if q.tokens < minimum_tokens_match() || tokens_transform_cycles(q.tokens, q.cycles_per_token_rate) < minimum_cycles_match() {
-        return Err(SellTokensError::MinimumPosition{ minimum_cycles: minimum_cycles_match(), minimum_tokens: minimum_tokens_match()});
     }
     
-    if q.cycles_per_token_rate == 0 {
-        return Err(SellTokensError::RateCannotBeZero);
+    ic_cdk_timers::set_timer(Duration::from_millis(1), || ic_cdk::spawn(do_payouts()));
+    
+    trade_result        
+}
+
+async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
+    
+    if q.is_less_than_minimum_position() {
+        return Err(TradeError::MinimumPosition{ minimum_cycles: minimum_cycles_match(), minimum_tokens: minimum_tokens_match()});
+    }
+    
+    if q.cycles_per_token_rate() == 0 {
+        return Err(TradeError::RateCannotBeZero);
     }    
     
     with_mut(&CM_DATA, |cm_data| {
-        if cm_data.token_positions.len().saturating_add(cm_data.ongoing_sell_calls as usize) >= MAX_TOKEN_POSITIONS.saturating_sub(10)
-        || MAX_VOID_TOKEN_POSITIONS
-            .saturating_sub(cm_data.void_token_positions.len())
-            .saturating_sub(cm_data.token_positions.len().saturating_add(cm_data.ongoing_sell_calls as usize))
+        if TradeQuestType::matcher_positions(cm_data).len().saturating_add(TradeQuestType::mid_call_balance_locks(cm_data).len()) >= TradeQuestType::MAX_POSITIONS.saturating_sub(10)         
+        || TradeQuestType::MAX_VOID_POSITIONS
+            .saturating_sub(TradeQuestType::matcher_void_positions(cm_data).len())
+            .saturating_sub(TradeQuestType::matcher_positions(cm_data).len())
+            .saturating_sub(TradeQuestType::mid_call_balance_locks(cm_data).len())
              < 10 {
             // check for a bump? 30/90-days of positions without matches get cancel/void. 
-            return Err(SellTokensError::CyclesMarketIsBusy);
+            return Err(TradeError::CyclesMarketIsBusy);
         }
+        if TradeQuestType::mid_call_balance_locks(cm_data).contains(&caller) {
+            return Err(TradeError::CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance);
+        }
+        if TradeQuestType::mid_call_balance_locks(cm_data).len() >= MAX_MID_CALL_USER_BALANCE_LOCKS {
+            return Err(TradeError::CyclesMarketIsBusy);
+        }
+        TradeQuestType::mid_call_balance_locks(cm_data).insert(caller);
         Ok(())
     })?;    
     
     // transfer token balance into the main-count 
     // change this to an icrc2_transfer_from when sns leder plements icrc2
-    match token_transfer(
+    match TradeQuestType::posit_transfer(
         Icrc1TransferQuest{
             memo: None,
-            amount: q.tokens,
-            fee: q.posit_transfer_ledger_fee,
+            amount: q.quantity(),
+            fee: q.posit_transfer_ledger_fee(),
             from_subaccount: Some(principal_token_subaccount(&caller)),
-            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_TOKEN_SUBACCOUNT)},
+            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_SUBACCOUNT)},
             created_at_time: None,
         }
     ).await {
         Ok(transfer_result) => match transfer_result {
             Ok(_block_id) => {}
             Err(transfer_error) => {
-                return Err(SellTokensError::CollectTokensForThePositionLedgerTransferError(transfer_error));
+                return Err(TradeError::CreatePositionLedgerTransferError(transfer_error));
             }
         }
         Err(call_error) => {
-            return Err(SellTokensError::CollectTokensForThePositionLedgerTransferCallError(call_error));        
+            return Err(TradeError::CreatePositionLedgerTransferCallError(call_error));        
         }
     }
     // must be success afner the token transfer.
     
     Ok(with_mut(&CM_DATA, |cm_data| {
         
-        let token_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
-        ic_cdk::print(&format!("creating token-position id: {token_position_id}"));
-        let token_position: TokenPosition = TokenPosition{
-            id: token_position_id,
-            positor: caller,
-            quest: q.clone(),
-            current_position_tokens: q.tokens,
-            purchases_rates_times_token_quantities_sum: 0,
-            cycles_payouts_fees_sum: 0,
-            timestamp_nanos: time_nanos(),                
-        };
+        let position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
+        ic_cdk::print(&format!("creating position id: {position_id}"));
+        
+        let position: TradeQuestType::MatcherPositionType = TradeQuestType::create_current_position(q, position_id, caller);
         
         with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log(None).stable_memory_serialize());  
+            positions_storage_data.storage_buffer.extend(position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
-        cm_data.token_positions.push(token_position);
+        TradeQuestType::matcher_positions(cm_data).push(position);
         
-        match_trades(
-            cm_data.token_positions.len() - 1,
-            &mut cm_data.token_positions,  
-            &mut cm_data.cycles_positions, 
-            &mut cm_data.void_token_positions,
-            &mut cm_data.void_cycles_positions,
-            &mut cm_data.trade_logs,
-            &mut cm_data.trade_logs_id_counter,
-            &mut cm_data.candle_counter,
-        );
+        let start_matcher_positions_i: usize = TradeQuestType::matcher_positions(cm_data).len() - 1;
         
-        SellTokensSuccess{
-            position_id: token_position_id,
+        TradeQuestType::match_trades(cm_data, start_matcher_positions_i);
+        
+        TradeSuccess{
+            position_id: position_id,
         }
     }))    
 }
-
-// -----------
-
-
-#[update(manual_reply = true)]
-pub fn trade_tokens(q: TradeTokensQuest) {
-    let caller: Principal = caller();
-    
-    let m = with_mut(&CM_DATA, |cm_data| { 
-        put_user_token_balance_lock(cm_data, caller)?;
-        plus_one_ongoing_sell_call(cm_data);
-        Ok(())
-    });
-    if let Err(e) = m {
-        reply::<(SellTokensResult,)>((Err(e),));
-        return;
-    };
-    
-    ic_cdk::spawn(async move {
-        let sell_tokens_result: SellTokensResult = sell_tokens_(caller, q).await;
-        
-        with_mut(&CM_DATA, |cm_data| {
-            remove_user_token_balance_lock(cm_data, caller);
-            minus_one_ongoing_sell_call(cm_data); 
-        });
-        
-        reply::<(SellTokensResult,)>((sell_tokens_result,));
-    
-        do_payouts().await;
-    });
-}
-
-
-#[update(manual_reply = true)]
-pub fn trade_cycles(q: TradeCyclesQuest) {
-    
-}
-
-
-async fn _trade(caller: Principal, q: SellTokensQuest) -> SellTokensResult {
-    
-    if q.tokens < minimum_tokens_match() || tokens_transform_cycles(q.tokens, q.cycles_per_token_rate) < minimum_cycles_match() {
-        return Err(SellTokensError::MinimumPosition{ minimum_cycles: minimum_cycles_match(), minimum_tokens: minimum_tokens_match()});
-    }
-    
-    if q.cycles_per_token_rate == 0 {
-        return Err(SellTokensError::RateCannotBeZero);
-    }    
-    
-    with_mut(&CM_DATA, |cm_data| {
-        if cm_data.token_positions.len().saturating_add(cm_data.ongoing_sell_calls as usize) >= MAX_TOKEN_POSITIONS.saturating_sub(10)
-        || MAX_VOID_TOKEN_POSITIONS
-            .saturating_sub(cm_data.void_token_positions.len())
-            .saturating_sub(cm_data.token_positions.len().saturating_add(cm_data.ongoing_sell_calls as usize))
-             < 10 {
-            // check for a bump? 30/90-days of positions without matches get cancel/void. 
-            return Err(SellTokensError::CyclesMarketIsBusy);
-        }
-        Ok(())
-    })?;    
-    
-    // transfer token balance into the main-count 
-    // change this to an icrc2_transfer_from when sns leder plements icrc2
-    match token_transfer(
-        Icrc1TransferQuest{
-            memo: None,
-            amount: q.tokens,
-            fee: q.posit_transfer_ledger_fee,
-            from_subaccount: Some(principal_token_subaccount(&caller)),
-            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_TOKEN_SUBACCOUNT)},
-            created_at_time: None,
-        }
-    ).await {
-        Ok(transfer_result) => match transfer_result {
-            Ok(_block_id) => {}
-            Err(transfer_error) => {
-                return Err(SellTokensError::CollectTokensForThePositionLedgerTransferError(transfer_error));
-            }
-        }
-        Err(call_error) => {
-            return Err(SellTokensError::CollectTokensForThePositionLedgerTransferCallError(call_error));        
-        }
-    }
-    // must be success afner the token transfer.
-    
-    Ok(with_mut(&CM_DATA, |cm_data| {
-        
-        let token_position_id: PositionId = new_id(&mut cm_data.positions_id_counter); 
-        ic_cdk::print(&format!("creating token-position id: {token_position_id}"));
-        let token_position: TokenPosition = TokenPosition{
-            id: token_position_id,
-            positor: caller,
-            quest: q.clone(),
-            current_position_tokens: q.tokens,
-            purchases_rates_times_token_quantities_sum: 0,
-            cycles_payouts_fees_sum: 0,
-            timestamp_nanos: time_nanos(),                
-        };
-        
-        with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
-            positions_storage_data.storage_buffer.extend(token_position.as_stable_memory_position_log(None).stable_memory_serialize());  
-        });
-        
-        cm_data.token_positions.push(token_position);
-        
-        match_trades(
-            cm_data.token_positions.len() - 1,
-            &mut cm_data.token_positions,  
-            &mut cm_data.cycles_positions, 
-            &mut cm_data.void_token_positions,
-            &mut cm_data.void_cycles_positions,
-            &mut cm_data.trade_logs,
-            &mut cm_data.trade_logs_id_counter,
-            &mut cm_data.candle_counter,
-        );
-        
-        SellTokensSuccess{
-            position_id: token_position_id,
-        }
-    }))    
-}
-
-
-
-
 
 
 // ------
@@ -880,35 +625,15 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
 
 
 
-
-
-
-/*
-#[derive(CandidType, Deserialize)]
-pub struct ViewTokenLockQuest {
-    principal_id: Principal,
-}
-
-#[query]
-pub fn view_token_lock(q: ViewTokenLockQuest) -> Tokens {
-    with(&CM_DATA, |cm_data| { check_user_token_balance_in_the_lock(cm_data, &q.principal_id) })
-}
-*/
-
-
-
-
-#[update(manual_reply = true)]
-pub fn void_position(q: VoidPositionQuest) { // -> VoidPositionResult
+#[update]
+pub fn void_position(q: VoidPositionQuest) -> VoidPositionResult {
     let caller: Principal = caller();
     
     let r: VoidPositionResult = void_position_(caller, q);
     
-    reply::<(VoidPositionResult,)>((r,));
+    ic_cdk_timers::set_timer(Duration::from_millis(1), || ic_cdk::spawn(do_payouts()));    
     
-    ic_cdk::spawn(do_payouts());
-    return; 
-
+    r
 }   
     
 fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult {
@@ -952,19 +677,18 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
 
 
 
+/*
 
-
-#[update(manual_reply = true)]
-pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) { // -> TransferTokenBalanceResult {
+#[update]
+pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
     
     let user_id: Principal = caller();
     
     let r: TransferTokenBalanceResult = transfer_token_balance_(user_id, q).await;
     
-    reply::<(TransferTokenBalanceResult,)>((r,));
+    ic_cdk_timers::set_timer(Duration::from_millis(1), ic_cdk::spawn(do_payouts()));
     
-    do_payouts().await;
-    return;
+    r;
 }    
     
 async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
@@ -1004,6 +728,7 @@ async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQues
     }
 
 }
+*/
 
 
 
