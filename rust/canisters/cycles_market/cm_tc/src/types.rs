@@ -8,7 +8,7 @@ pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
 
 
-
+// -------
 
 pub trait StorageLogTrait {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
@@ -20,6 +20,7 @@ pub trait StorageLogTrait {
     fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey>;
 }
 
+// -------
 
 // this one goes into the PositionLog storage and gets updated for the position-termination.
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -114,14 +115,7 @@ impl StorageLogTrait for PositionLog {
     }
 }
 
-
-
-
-
-
-
 // ------------------
-
 
 pub trait CurrentPositionTrait {
     fn id(&self) -> PositionId;
@@ -146,9 +140,6 @@ pub trait CurrentPositionTrait {
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog;
 }
 
-
-
-
 #[derive(CandidType, Serialize, Deserialize)]
 pub struct CyclesPosition {
     pub id: PositionId,   
@@ -160,7 +151,6 @@ pub struct CyclesPosition {
     pub tokens_payouts_fees_sum: Tokens,
     pub timestamp_nanos: u128,
 }
-
 
 impl CurrentPositionTrait for CyclesPosition {
     fn id(&self) -> PositionId { self.id }
@@ -254,12 +244,7 @@ impl CurrentPositionTrait for CyclesPosition {
             void_position_payout_ledger_transfer_fee: 0, // this field is not used for the cycles-positions.
         }
     }
-
-
 }
-
-
-
 
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct TokenPosition {
@@ -369,7 +354,6 @@ impl CurrentPositionTrait for TokenPosition {
             void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-token-position-payout is done.                    
         }
     }
-
 }
 
 /*
@@ -389,13 +373,7 @@ fn find_current_position_available_rate(
 }
 */
 
-
-
-
-
-// ----------------------------
-
-
+// -----------------
 
 #[derive(Clone, Copy, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct PayoutData {
@@ -403,41 +381,7 @@ pub struct PayoutData {
     pub ledger_transfer_fee: Tokens,
 }
 
-/*
-impl PayoutDataTrait for TokenPayoutData {
-    fn is_complete(&self) -> bool {
-        self.token_transfer.is_some()
-    }    
-    fn dust_collection(&self) -> bool {
-        if let Some(ref token_transfer_data) = self.token_transfer {
-            if token_transfer_data.did_transfer == false {
-                return true;
-            }
-        }
-        false
-    }
-    fn token_payout_ledger_transfer_fee(&self) -> Option<Tokens> {
-        self.token_transfer.as_ref().map(|ttd| ttd.ledger_transfer_fee)
-    }
-}
-*/
-/*
-pub trait TokenPayoutTrait {
-    fn token_payout_data(&self) -> TokenPayoutData;
-    fn token_payout_lock(&self) -> bool;
-    fn token_payout_payee(&self) -> Principal;
-    fn token_payout_payor(&self) -> Principal;
-    fn tokens(&self) -> Tokens;
-    fn token_transfer_memo(&self) -> Option<IcrcMemo>;
-    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo>;
-    fn token_ledger_transfer_fee(&self) -> Tokens;
-    fn tokens_payout_fee(&self) -> Tokens;
-}
-*/
-
-
 // -----------------
-
 
 #[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct TradeLog {
@@ -505,62 +449,8 @@ impl StorageLogTrait for TradeLog {
         trade_log::index_keys_of_the_log_serialization(log_b)
     }
 }
-/*
-impl CyclesPayoutTrait for TradeLog {
-    fn cycles_payout_data(&self) -> CyclesPayoutData { self.cycles_payout_data.clone() }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal { 
-        match self.matchee_position_kind { 
-            PositionKind::Cycles => self.matcher_position_positor,
-            PositionKind::Token => self.matchee_position_positor,
-        }
-    }
-    fn cycles_payout_payee_method(&self) -> &'static str { 
-        CM_MESSAGE_METHOD_TRADE_TOKENS_CYCLES_PAYOUT
-    }
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMTradeTokensCyclesPayoutMessageQuest {
-                token_position_id: match self.matchee_position_kind { 
-                    PositionKind::Cycles => self.position_id_matcher,
-                    PositionKind::Token => self.position_id_matchee
-                },
-                purchase_id: self.id,
-            }
-        )
-    }
-    fn cycles(&self) -> Cycles { self.cycles }
-    fn cycles_payout_fee(&self) -> Cycles { self.cycles_payout_fee }
-}
-impl TokenPayoutTrait for TradeLog {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { 
-        match self.matchee_position_kind { 
-            PositionKind::Cycles => self.matchee_position_positor,
-            PositionKind::Token => self.matcher_position_positor,
-        }
-    }
-    fn token_payout_payor(&self) -> Principal { 
-        match self.matchee_position_kind { 
-            PositionKind::Cycles => self.matcher_position_positor,
-            PositionKind::Token => self.matchee_position_positor,
-        }
-    }
-    fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { 
-        Some(IcrcMemo(ByteBuf::from(position_purchase_token_transfer_memo(self.matchee_position_kind, self.id))))
-    }
-    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> {
-        Some(IcrcMemo(ByteBuf::from(position_purchase_token_fee_collection_transfer_memo(self.matchee_position_kind, self.id))))
-    }
-    fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
-    fn tokens_payout_fee(&self) -> Tokens { self.tokens_payout_fee }
-}
-*/
 
 // --------
-
 
 pub trait VoidPositionTrait: Clone {
     fn position_id(&self) -> PositionId;
@@ -622,40 +512,7 @@ impl VoidPositionTrait for VoidCyclesPosition {
     }
 }
 
-/*
-impl CyclesPayoutTrait for VoidCyclesPosition {
-    fn cycles_payout_data(&self) -> CyclesPayoutData {
-        self.cycles_payout_data.clone()
-    }
-    fn cycles_payout_lock(&self) -> bool { self.cycles_payout_lock }
-    fn cycles_payout_payee(&self) -> Principal {
-        self.positor
-    }
-    fn cycles_payout_payee_method(&self) -> &'static str {
-        CM_MESSAGE_METHOD_VOID_CYCLES_POSITION_POSITOR
-    } 
-    fn cycles_payout_payee_method_quest_bytes(&self) -> Result<Vec<u8>, CandidError> {
-        encode_one(
-            CMVoidCyclesPositionPositorMessageQuest{
-                position_id: self.position_id,
-                timestamp_nanos: self.timestamp_nanos,
-            }
-        )
-    }
-    fn cycles(&self) -> Cycles {
-        self.cycles
-    }
-    fn cycles_payout_fee(&self) -> Cycles {
-        0
-    }
-}
-*/
-
-
-
 // --------
-
-
 
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct VoidTokenPosition {
@@ -697,16 +554,3 @@ impl VoidPositionTrait for VoidTokenPosition {
         &mut self.update_storage_position_data
     }
 }
-/*
-impl TokenPayoutTrait for VoidTokenPosition {
-    fn token_payout_data(&self) -> TokenPayoutData { self.token_payout_data.clone() }
-    fn token_payout_lock(&self) -> bool { self.token_payout_lock }
-    fn token_payout_payee(&self) -> Principal { self.positor }
-    fn token_payout_payor(&self) -> Principal { self.positor }
-    fn tokens(&self) -> Tokens { self.tokens }
-    fn token_transfer_memo(&self) -> Option<IcrcMemo> { Some(IcrcMemo(ByteBuf::from(create_void_token_position_transfer_memo(self.position_id)))) }
-    fn token_fee_collection_transfer_memo(&self) -> Option<IcrcMemo> { None }
-    fn token_ledger_transfer_fee(&self) -> Tokens { localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE) }
-    fn tokens_payout_fee(&self) -> Tokens { 0 } 
-}
-*/

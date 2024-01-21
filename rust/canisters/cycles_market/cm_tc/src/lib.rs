@@ -12,7 +12,6 @@ use cts_lib::{
         localkey::{
             self,
             refcell::{with, with_mut},
-            cell::{get}
         },
         principal_as_thirty_bytes,
         cycles_transform_tokens,
@@ -30,7 +29,6 @@ use cts_lib::{
             UpgradeOutcome,
         },        
     },
-    cts_cb_authorizations::is_cts_cb_authorization_valid,
     consts::{
         KiB,
         MiB,
@@ -42,20 +40,15 @@ use cts_lib::{
         CallError,
         canister_code::CanisterCode,
         cycles_market::{*, tc::{*, trade_log, position_log}},
-        cts::UserAndCB,
     },
     management_canister,
     icrc::{
         IcrcId, 
-        //IcrcSub,
-        //ICRC_DEFAULT_SUBACCOUNT,
-        IcrcMemo,
         Tokens,
         Icrc1TransferError,
         Icrc1TransferQuest,
         BlockId,
         icrc1_transfer,
-        //icrc1_balance_of
     },
     ic_cdk::{
         self,
@@ -67,13 +60,8 @@ use cts_lib::{
                 call_raw128,
                 reply,
                 reply_raw,
-                msg_cycles_available128,
-                msg_cycles_accept128,
-                arg_data,
             },
-            canister_balance128,
             is_controller,
-           
         },
         update,
         query,
@@ -84,12 +72,9 @@ use cts_lib::{
 };
 use canister_tools::{self, MemoryId};
 use candid::{
-    self, 
     Principal,
     CandidType,
     Deserialize,
-    utils::{encode_one},
-    error::Error as CandidError,
 };
 use cm_storage_lib::LogStorageInit;
 use serde_bytes::{ByteBuf};
@@ -676,59 +661,59 @@ fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult
 
 
 
-
-/*
+#[update]
+pub async fn transfer_cycles_balance(q: TransferBalanceQuest) -> TransferBalanceResult {
+    _transfer_balance::<TradeCyclesQuest>(caller(), q).await
+}
 
 #[update]
-pub async fn transfer_token_balance(q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
+pub async fn transfer_token_balance(q: TransferBalanceQuest) -> TransferBalanceResult {
+    _transfer_balance::<TradeTokensQuest>(caller(), q).await
+}
     
-    let user_id: Principal = caller();
-    
-    let r: TransferTokenBalanceResult = transfer_token_balance_(user_id, q).await;
-    
-    ic_cdk_timers::set_timer(Duration::from_millis(1), ic_cdk::spawn(do_payouts()));
-    
-    r;
-}    
-    
-async fn transfer_token_balance_(user_id: Principal, q: TransferTokenBalanceQuest) -> TransferTokenBalanceResult {
+async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: TransferBalanceQuest) -> TransferBalanceResult {
 
     with_mut(&CM_DATA, |cm_data| {
-        put_user_token_balance_lock(cm_data, user_id)?;
-        Ok::<(), TransferTokenBalanceError>(())
+        if TradeQuestType::mid_call_balance_locks(cm_data).contains(&caller) {
+            return Err(TransferBalanceError::CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance);
+        }
+        if TradeQuestType::mid_call_balance_locks(cm_data).len() >= MAX_MID_CALL_USER_BALANCE_LOCKS {
+            return Err(TransferBalanceError::CyclesMarketIsBusy);
+        }
+        TradeQuestType::mid_call_balance_locks(cm_data).insert(caller);
+        Ok(())
     })?;
     
-    let token_transfer_result = token_transfer(
+    let transfer_call_result: LedgerTransferReturnType = TradeQuestType::posit_transfer(
         Icrc1TransferQuest {
             memo: None,
-            amount: q.tokens,
-            fee: Some(q.token_fee),
-            from_subaccount: Some(principal_token_subaccount(&user_id)),
+            amount: q.amount,
+            fee: q.ledger_transfer_fee,
+            from_subaccount: Some(principal_token_subaccount(&caller)),
             to: q.to,
-            created_at_time: Some(q.created_at_time.unwrap_or(time_nanos_u64()))
+            created_at_time: None
         }   
     ).await;
     
     with_mut(&CM_DATA, |cm_data| { 
-        remove_user_token_balance_lock(cm_data, user_id); 
+        TradeQuestType::mid_call_balance_locks(cm_data).remove(&caller);
     });
 
-    match token_transfer_result {
-        Ok(token_transfer_result) => match token_transfer_result {
-            Ok(token_transfer_block_height) => {
-                return Ok(token_transfer_block_height);
-            },
-            Err(token_transfer_error) => {
-                return Err(TransferTokenBalanceError::TokenTransferError(token_transfer_error));
+    match transfer_call_result {
+        Ok(transfer_result) => match transfer_result {
+            Ok(block_height) => {
+                Ok(block_height)
             }
-        },
-        Err(token_transfer_call_error) => {
-            return Err(TransferTokenBalanceError::TokenTransferCallError(token_transfer_call_error));
+            Err(transfer_error) => {
+                Err(TransferBalanceError::TransferError(transfer_error))
+            }
+        }
+        Err(transfer_call_error) => {
+            Err(TransferBalanceError::TransferCallError(transfer_call_error))
         }
     }
-
 }
-*/
+
 
 
 

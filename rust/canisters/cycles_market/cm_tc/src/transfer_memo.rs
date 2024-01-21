@@ -1,4 +1,4 @@
-use crate::{PositionKind, PurchaseId};
+use crate::PurchaseId;
 use serde_bytes::ByteBuf;
 
 const TRADE_MEMO_START: &[u8; 8] = b"CTSTRADE";

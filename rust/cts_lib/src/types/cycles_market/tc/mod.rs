@@ -86,16 +86,9 @@ pub type VoidPositionResult = Result<(), VoidPositionError>;
 // ----
 
 #[derive(CandidType, Deserialize)]
-pub struct TransferTokenBalanceQuest {
-    pub tokens: Tokens,
-    pub ledger_transfer_fee: Option<Tokens>,   
-    pub to: IcrcId
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct TransferCyclesBalanceQuest {
-    pub cycles: Cycles,
-    pub ledger_transfer_fee: Option<Cycles>,   
+pub struct TransferBalanceQuest {
+    pub amount: u128,
+    pub ledger_transfer_fee: Option<u128>,   
     pub to: IcrcId
 }
 
@@ -104,7 +97,7 @@ pub enum TransferBalanceError {
     CyclesMarketIsBusy,
     CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance,
     TransferCallError(CallError),
-    Icrc1TransferError(Icrc1TransferError)
+    TransferError(Icrc1TransferError)
 }
 
 pub type TransferBalanceResult = Result<BlockId, TransferBalanceError>;
