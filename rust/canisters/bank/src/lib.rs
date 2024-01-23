@@ -654,4 +654,4 @@ async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, 
 }
 
 
-
+ic_cdk::export_candid!();
