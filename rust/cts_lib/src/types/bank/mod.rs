@@ -1,5 +1,5 @@
 use super::*;
-use crate::icrc::{IcrcId, BlockId};
+use crate::icrc::{IcrcId, BlockId, IcrcSubaccount};
 use serde_bytes::ByteBuf;
 use crate::cmc::{LedgerTopupCyclesCmcIcpTransferError, LedgerTopupCyclesCmcNotifyError};
 
@@ -8,9 +8,6 @@ pub mod log_types;
 
 pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
 
-
-pub type Subaccount = [u8; 32];
-pub type CountId = (Principal, Option<Subaccount>);
 
 #[derive(CandidType, Deserialize)]
 pub struct CyclesInQuest {
@@ -32,7 +29,7 @@ pub enum CyclesInError {
 pub struct CyclesOutQuest {
     pub cycles: Cycles,
     pub fee: Option<Cycles>,
-    pub from_subaccount: Option<Subaccount>,
+    pub from_subaccount: Option<IcrcSubaccount>,
     pub memo: Option<ByteBuf>,
     pub for_canister: Principal,
     pub created_at_time: Option<u64>   

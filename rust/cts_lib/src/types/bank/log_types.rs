@@ -3,7 +3,7 @@ use serde::Serialize;
 use candid::{Principal, CandidType, Deserialize};
 use crate::types::Cycles;
 use serde_bytes::ByteBuf;
-use super::CountId;
+use crate::icrc::IcrcId;
 use ic_stable_structures::{Storable, storable::Bound};
 
 
@@ -25,9 +25,9 @@ pub struct LogTX {
 
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum Operation {
-    Mint{ to: CountId, kind: MintKind },
-    Burn{ from: CountId, for_canister: Principal },
-    Xfer{ from: CountId, to: CountId } 
+    Mint{ to: IcrcId, kind: MintKind },
+    Burn{ from: IcrcId, for_canister: Principal },
+    Xfer{ from: IcrcId, to: IcrcId } 
 }
     
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]

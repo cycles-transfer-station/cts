@@ -10,7 +10,7 @@ use cts_lib::{
     },
     icrc::BlockId,
 };
-use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError}};
+use icrc_ledger_types::icrc1::{account::Account, account::Account as IcrcId, transfer::{TransferArg, TransferError}};
 use more_asserts::*;
 use pic_tools::{*, bank::*};
 
@@ -59,7 +59,7 @@ fn test_mint_cycles() {
             ts: pic_get_time_nanos(&pic) as u64,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: (user, None), kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
+                op: Operation::Mint{ to: IcrcId{owner:user, subaccount: None}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
                 fee: None,
                 amt: mint_cycles_mount,
                 memo: None,
@@ -87,7 +87,7 @@ fn test_mint_for_subaccount() {
             ts: pic_get_time_nanos(&pic) as u64,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: (user, Some(subaccount)), kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
+                op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
                 fee: None,
                 amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
                 memo: None,
@@ -128,7 +128,7 @@ fn test_transfer() {
                 ts: pic_get_time_nanos(&pic) as u64,
                 fee: None,
                 tx: LogTX{
-                    op: Operation::Xfer{ from: (user, None), to: (user2, None) },
+                    op: Operation::Xfer{ from: IcrcId{owner: user, subaccount: None}, to: IcrcId{owner: user2, subaccount: None} },
                     fee: Some(BANK_TRANSFER_FEE),
                     amt: transfer_cycles_mount,
                     memo: None,
@@ -227,7 +227,7 @@ fn test_cycles_in() {
                     ts: pic_get_time_nanos(&pic) as u64,
                     fee: None,
                     tx: LogTX{
-                        op: Operation::Mint{ to: (user, Some(subaccount)), kind: MintKind::CyclesIn{ from_canister: canister_caller } },
+                        op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CyclesIn{ from_canister: canister_caller } },
                         fee: Some(BANK_TRANSFER_FEE),
                         amt: cycles,
                         memo: None,
@@ -272,7 +272,7 @@ fn test_cycles_out() {
             ts: pic_get_time_nanos(&pic) as u64,
             fee: None,
             tx: LogTX{
-                op: Operation::Burn{ from: (user, Some(subaccount)), for_canister: receiving_canister },
+                op: Operation::Burn{ from: IcrcId{owner: user, subaccount: Some(subaccount)}, for_canister: receiving_canister },
                 fee: Some(BANK_TRANSFER_FEE),
                 amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2,
                 memo: None,

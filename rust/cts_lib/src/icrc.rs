@@ -12,7 +12,8 @@ pub use icrc_ledger_types::{
     icrc1::{
         account::{
             Account as IcrcId,
-            Subaccount as IcrcSub,    
+            Subaccount as IcrcSub,
+            Subaccount as IcrcSubaccount,    
             DEFAULT_SUBACCOUNT as ICRC_DEFAULT_SUBACCOUNT,    
         },
         transfer::{

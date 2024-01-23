@@ -14,6 +14,8 @@ use cts_lib::{
         Icrc1TransferQuest,
         Icrc1TransferError,
         BlockId,
+        IcrcSubaccount,
+        ICRC_DEFAULT_SUBACCOUNT,
     },
     tools::{
         localkey::refcell::{with, with_mut},
@@ -86,18 +88,18 @@ impl CBData {
 }
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
-pub struct StorableCountId(pub CountId);
-impl Storable for StorableCountId {
+pub struct StorableIcrcId(pub IcrcId);
+impl Storable for StorableIcrcId {
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut v = Vec::<u8>::new();
-        v.extend(&principal_as_thirty_bytes(&self.0.0));
-        v.extend(&self.0.1.unwrap_or([0u8; 32]));
+        v.extend(&principal_as_thirty_bytes(&self.0.owner));
+        v.extend(self.0.effective_subaccount());
         Cow::Owned(v)
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         let owner = thirty_bytes_as_principal(&bytes[..30].try_into().unwrap());
-        let subaccount: Subaccount = bytes[30..].try_into().unwrap();
-        Self((owner, if subaccount == [0u8; 32] { None } else { Some(subaccount) }))
+        let subaccount: IcrcSubaccount = bytes[30..].try_into().unwrap();
+        Self(IcrcId{ owner, subaccount: if subaccount == *ICRC_DEFAULT_SUBACCOUNT { None } else { Some(subaccount) }})
     }
     const BOUND: Bound = {
         Bound::Bounded{
@@ -106,15 +108,15 @@ impl Storable for StorableCountId {
         }
     };
 }
-impl From<CountId> for StorableCountId {
-    fn from(count_id: CountId) -> Self {
-        Self(count_id)
+impl From<IcrcId> for StorableIcrcId {
+    fn from(icrc_id: IcrcId) -> Self {
+        Self(icrc_id)
     }
 }
 
-type CyclesBalances = StableBTreeMap<StorableCountId, Cycles, VirtualMemory<DefaultMemoryImpl>>;
+type CyclesBalances = StableBTreeMap<StorableIcrcId, Cycles, VirtualMemory<DefaultMemoryImpl>>;
 type Logs = StableVec<Log, VirtualMemory<DefaultMemoryImpl>>;
-type UserLogsPointers = HashMap<CountId, Vec<u32>>;
+type UserLogsPointers = HashMap<IcrcId, Vec<u32>>;
 
 // --------- CONSTS --------
 
@@ -164,34 +166,30 @@ fn check_if_user_is_in_the_middle_of_a_different_call(cb_data: &CBData, user_id:
     Ok(())           
 }
 
-fn count_id_as_storable(count_id: CountId) -> StorableCountId {
-    count_id.into()
+fn icrc_id_as_storable(icrc_id: IcrcId) -> StorableIcrcId {
+    icrc_id.into()
 }
 
-fn cycles_balance(cycles_balances: &CyclesBalances, count_id: CountId) -> Cycles {
-    cycles_balances.get(&count_id_as_storable(count_id)).unwrap_or(0)    
+fn cycles_balance(cycles_balances: &CyclesBalances, icrc_id: IcrcId) -> Cycles {
+    cycles_balances.get(&icrc_id_as_storable(icrc_id)).unwrap_or(0)    
 }
 
-fn add_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut CBData, count_id: CountId, add_cycles: Cycles) {
-    let count_id = count_id_as_storable(count_id);
+fn add_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut CBData, icrc_id: IcrcId, add_cycles: Cycles) {
+    let icrc_id = icrc_id_as_storable(icrc_id);
     cycles_balances.insert(
-        count_id,
-        cycles_balances.get(&count_id).unwrap_or(0).saturating_add(add_cycles)
+        icrc_id,
+        cycles_balances.get(&icrc_id).unwrap_or(0).saturating_add(add_cycles)
     );
     cb_data.total_supply = cb_data.total_supply.saturating_add(add_cycles);
 }
 
-fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut CBData, count_id: CountId, sub_cycles: Cycles) {
-    let count_id = count_id_as_storable(count_id);
+fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut CBData, icrc_id: IcrcId, sub_cycles: Cycles) {
+    let icrc_id = icrc_id_as_storable(icrc_id);
     cycles_balances.insert(
-        count_id,
-        cycles_balances.get(&count_id).unwrap_or(0).saturating_sub(sub_cycles)
+        icrc_id,
+        cycles_balances.get(&icrc_id).unwrap_or(0).saturating_sub(sub_cycles)
     );
     cb_data.total_supply = cb_data.total_supply.saturating_sub(sub_cycles);    
-}
-
-fn icrc_id_as_count_id(icrc_id: IcrcId) -> CountId {
-    (icrc_id.owner, icrc_id.subaccount)
 }
 
 
@@ -233,13 +231,13 @@ pub fn icrc1_total_supply() -> Cycles {
 #[query]
 pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
     with(&CYCLES_BALANCES, |cycles_balances| {
-        cycles_balance(cycles_balances, icrc_id_as_count_id(icrc_id))
+        cycles_balance(cycles_balances, icrc_id)
     })
 }
 
 #[update]
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
-    let caller_count_id: CountId = (caller(), q.from_subaccount);
+    let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
         
     if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
         return Err(Icrc1TransferError::GenericError{ error_code: 0.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });    
@@ -258,14 +256,14 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     }
             
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
-        let caller_balance: Cycles = cycles_balance(cycles_balances, caller_count_id); 
+        let caller_balance: Cycles = cycles_balance(cycles_balances, caller_icrc_id); 
         if caller_balance < q.amount.saturating_add(BANK_TRANSFER_FEE) {
             return Err(Icrc1TransferError::InsufficientFunds{ balance: caller_balance.into() })
         }
         
         with_mut(&CB_DATA, |cb_data| {
-            subtract_cycles_balance(cycles_balances, cb_data, caller_count_id, q.amount.saturating_add(BANK_TRANSFER_FEE));
-            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(q.to), q.amount);
+            subtract_cycles_balance(cycles_balances, cb_data, caller_icrc_id, q.amount.saturating_add(BANK_TRANSFER_FEE));
+            add_cycles_balance(cycles_balances, cb_data, q.to, q.amount);
         });
         
         Ok(())
@@ -277,7 +275,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
                 tx: LogTX{
-                    op: Operation::Xfer{ from: caller_count_id, to: icrc_id_as_count_id(q.to) },
+                    op: Operation::Xfer{ from: caller_icrc_id, to: q.to },
                     fee: q.fee,
                     amt: q.amount,
                     memo: q.memo,
@@ -289,11 +287,14 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     });
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
-        for count_id in [caller_count_id, icrc_id_as_count_id(q.to)] {
-            user_logs_pointers.entry(count_id)
+        user_logs_pointers.entry(caller_icrc_id)
+        .or_default()
+        .push(block_height as u32);
+        if q.to != caller_icrc_id {
+            user_logs_pointers.entry(q.to)
             .or_default()
             .push(block_height as u32);
-        }        
+        }
     });
     
     Ok(block_height as u128)
@@ -315,7 +316,7 @@ pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>)
     let mut v: Vec<(BlockId, Log)> = Vec::new();
     let mut is_last_chunk = true;
     with(&USER_LOGS_POINTERS, |user_logs_pointers| {
-        let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id_as_count_id(icrc_id)) {
+        let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id) {
             Some(list) => list,
             None => return,
         };
@@ -379,7 +380,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         with_mut(&CB_DATA, |cb_data| {
-            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(q.to), q.cycles);
+            add_cycles_balance(cycles_balances, cb_data, q.to, q.cycles);
         });
     });
     
@@ -389,7 +390,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
                 tx: LogTX{
-                    op: Operation::Mint{ to: icrc_id_as_count_id(q.to), kind: MintKind::CyclesIn{ from_canister: caller() } },
+                    op: Operation::Mint{ to: q.to, kind: MintKind::CyclesIn{ from_canister: caller() } },
                     fee: q.fee,
                     amt: q.cycles,
                     memo: q.memo,
@@ -401,7 +402,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     });
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
-        user_logs_pointers.entry(icrc_id_as_count_id(q.to))
+        user_logs_pointers.entry(q.to)
         .or_default()
         .push(block_height as u32);        
     });
@@ -428,15 +429,15 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
         }
     }
     
-    let caller_count_id: CountId = (caller(), q.from_subaccount);
+    let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
     
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
-        let caller_balance: Cycles = cycles_balance(cycles_balances, caller_count_id); 
+        let caller_balance: Cycles = cycles_balance(cycles_balances, caller_icrc_id); 
         if caller_balance < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
             return Err(CyclesOutError::InsufficientFunds{ balance: caller_balance.into() })
         }        
         with_mut(&CB_DATA, |cb_data| {
-            subtract_cycles_balance(cycles_balances, cb_data, caller_count_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));            
+            subtract_cycles_balance(cycles_balances, cb_data, caller_icrc_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));            
         }); 
         Ok(())
     })?;
@@ -456,7 +457,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                         ts: time_nanos_u64(),
                         fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
                         tx: LogTX{
-                            op: Operation::Burn{ from: caller_count_id, for_canister: q.for_canister },
+                            op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
                             amt: q.cycles,
                             memo: q.memo,
@@ -468,7 +469,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
             });
             
             with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
-                user_logs_pointers.entry(caller_count_id)
+                user_logs_pointers.entry(caller_icrc_id)
                 .or_default()
                 .push(block_height as u32);
             });                    
@@ -478,7 +479,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
         Err(call_error) => {
             with_mut(&CYCLES_BALANCES, |cycles_balances| {
                 with_mut(&CB_DATA, |cb_data| {
-                    add_cycles_balance(cycles_balances, cb_data, caller_count_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));
+                    add_cycles_balance(cycles_balances, cb_data, caller_icrc_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));
                 })
             });
             Err(CyclesOutError::DepositCyclesCallError(call_error_as_u32_and_string(call_error)))
@@ -584,7 +585,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         
     with_mut(&CYCLES_BALANCES, |cycles_balances| {
         with_mut(&CB_DATA, |cb_data| {
-            add_cycles_balance(cycles_balances, cb_data, icrc_id_as_count_id(mid_call_data.quest.to), mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee));        
+            add_cycles_balance(cycles_balances, cb_data, mid_call_data.quest.to, mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee));        
             cb_data.users_mint_cycles.remove(&user_id);
         });
     });
@@ -595,7 +596,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                 ts: time_nanos_u64(),
                 fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
                 tx: LogTX{
-                    op: Operation::Mint{ to: icrc_id_as_count_id(mid_call_data.quest.to), kind: MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
+                    op: Operation::Mint{ to: mid_call_data.quest.to, kind: MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
                     fee: mid_call_data.quest.fee,
                     amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
                     memo: mid_call_data.quest.memo,
@@ -607,7 +608,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     });
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
-        user_logs_pointers.entry(icrc_id_as_count_id(mid_call_data.quest.to))
+        user_logs_pointers.entry(mid_call_data.quest.to)
         .or_default()
         .push(block_height as u32);        
     });
