@@ -545,7 +545,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                     matcher_position_is_void = true;
                 }    
                 
-                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {            
+                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {
                     let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
                     let position_for_the_void_void_positions_insertion_i: usize = { 
                         matchee_void_positions.binary_search_by_key(
@@ -1117,6 +1117,26 @@ fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'stati
     })
 }
 
+// ---- candle-counter ----
+
+use candle_counter::*;
+
+#[query(manual_reply=true)]
+pub fn view_candles(q: ViewCandlesQuest)/* -> ViewCandlesSponse */{
+    with(&CM_DATA, |cm_data| {
+        reply::<(ViewCandlesSponse,)>((ViewCandlesSponse{
+            candles: &create_candles(&cm_data.candle_counter, q)[..],
+        },))
+    })
+}
+#[query]
+pub fn view_volume_stats() -> ViewVolumeStatsSponse {
+    with(&CM_DATA, |cm_data| {
+        create_view_volume_stats(&cm_data.candle_counter)
+    })
+}
+
+
 
 
 
@@ -1281,6 +1301,6 @@ pub fn http_request(q: HttpRequest) -> HttpResponse {
 */
 
 
-
+ic_cdk::export_candid!();
 
 

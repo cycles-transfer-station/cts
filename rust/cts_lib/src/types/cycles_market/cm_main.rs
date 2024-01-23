@@ -16,6 +16,7 @@ pub struct TradeContractIdAndLedgerId {
 #[derive(CandidType, Deserialize)]
 pub struct CMMainInit {
     pub cts_id: Principal,
+    pub cycles_bank_id: Principal,
 }
 
 #[derive(CandidType, Deserialize)]

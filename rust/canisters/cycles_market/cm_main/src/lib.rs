@@ -70,6 +70,7 @@ struct CMMainData {
     trades_storage_canister_code: CanisterCode,
     positions_storage_canister_code: CanisterCode,
     controller_create_icrc1token_trade_contract_mid_call_data: Option<ControllerCreateIcrc1TokenTradeContractMidCallData>,
+    cycles_bank_id: Principal,
 }
 
 impl CMMainData {
@@ -81,6 +82,7 @@ impl CMMainData {
             trades_storage_canister_code: CanisterCode::empty(),
             positions_storage_canister_code: CanisterCode::empty(),
             controller_create_icrc1token_trade_contract_mid_call_data: None,
+            cycles_bank_id: Principal::from_slice(&[]),
         }
     }
 }
@@ -105,6 +107,7 @@ fn init(cm_main_init: CMMainInit) {
 
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         cm_main_data.cts_id = cm_main_init.cts_id;
+        cm_main_data.cycles_bank_id = cm_main_init.cycles_bank_id;
     });
 }
 
@@ -264,7 +267,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
             encode_one(CMIcrc1TokenTradeContractInit{
                 cts_id: data.cts_id,
                 cm_main_id: ic_cdk::api::id(),
-                cycles_bank_id: Principal::from_slice(&[]), // do!
+                cycles_bank_id: data.cycles_bank_id,
                 cycles_bank_transfer_fee: cts_lib::types::bank::BANK_TRANSFER_FEE,
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,

@@ -11,7 +11,7 @@ const MAX_CANDLES_SPONSE: usize = (MiB as usize * 1 + KiB as usize * 512) / std:
 
 
 #[derive(Default, Serialize, Deserialize, CandidType, Clone)]
-struct Candle {
+pub struct Candle {
     time_nanos: u64, // of the time-period start
     volume_cycles: Cycles,
     volume_tokens: Tokens,
@@ -90,21 +90,12 @@ pub struct ViewCandlesQuest {
 
 #[derive(CandidType)]
 pub struct ViewCandlesSponse<'a> {
-    candles: &'a [Candle],
+    pub candles: &'a [Candle],
     
 }
 
-#[query(manual_reply=true)]
-pub fn view_candles(q: ViewCandlesQuest)/* -> ViewCandlesSponse */{
-    with(&CM_DATA, |cm_data| {
-        reply::<(ViewCandlesSponse,)>((ViewCandlesSponse{
-            candles: &create_candles(&cm_data.candle_counter, q)[..],
-        },))
-    })
-}
 
-
-fn create_candles<'a>(candle_counter: &'a CandleCounter, q: ViewCandlesQuest) -> Cow<'a, [Candle]> {
+pub fn create_candles<'a>(candle_counter: &'a CandleCounter, q: ViewCandlesQuest) -> Cow<'a, [Candle]> {
         
     let mut s = &candle_counter.segments_1_minute[..];
     
@@ -183,14 +174,9 @@ pub struct Volume{
     volume_sum: u128,
 }
 
-#[query]
-pub fn view_volume_stats() -> ViewVolumeStatsSponse {
-    with(&CM_DATA, |cm_data| {
-        create_view_volume_stats(&cm_data.candle_counter)
-    })
-}
 
-fn create_view_volume_stats(candle_counter: &CandleCounter) -> ViewVolumeStatsSponse {
+
+pub fn create_view_volume_stats(candle_counter: &CandleCounter) -> ViewVolumeStatsSponse {
     
     let h = |timeframe_length_nanos: u128| {
         let timeframe_start_nanos = time_nanos_u64().saturating_sub(timeframe_length_nanos as u64);
