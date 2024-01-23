@@ -128,8 +128,6 @@ struct CMData {
     void_cycles_positions: Vec<VoidCyclesPosition>,
     void_token_positions: Vec<VoidTokenPosition>,
     do_payouts_errors: Vec<CallError>,
-    ongoing_buy_calls: u32,
-    ongoing_sell_calls: u32,
     candle_counter: CandleCounter,
 }
 
@@ -152,8 +150,6 @@ impl CMData {
             void_cycles_positions: Vec::new(),
             void_token_positions: Vec::new(),
             do_payouts_errors: Vec::new(),
-            ongoing_buy_calls: 0,
-            ongoing_sell_calls: 0,
             candle_counter: CandleCounter::default(),
         }
     }
@@ -246,7 +242,7 @@ pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1 * KiB;
 
 const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
-const POSITIONS_SUBACCOUNT: &[u8; 32] = &[5; 32];
+const POSITIONS_SUBACCOUNT: &[u8; 32] = &[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5];
 
 
 
@@ -404,8 +400,6 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
         Ok(())
     })?;    
     
-    // transfer token balance into the main-count 
-    // change this to an icrc2_transfer_from when sns leder plements icrc2
     match TradeQuestType::posit_transfer(
         Icrc1TransferQuest{
             memo: None,
