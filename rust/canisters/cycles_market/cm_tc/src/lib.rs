@@ -536,7 +536,8 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 candle_counter.count_trade(trade_logs.back().unwrap());
                 
                 let mut matcher_position_is_void: bool = false;
-                if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() { 
+                if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
+                || tokens_transform_cycles(matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()), matcher_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() { 
                     let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
                     matcher_void_positions.insert(
                         matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
@@ -545,7 +546,8 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                     matcher_position_is_void = true;
                 }    
                 
-                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() {
+                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
+                || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
                     let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
                     let position_for_the_void_void_positions_insertion_i: usize = { 
                         matchee_void_positions.binary_search_by_key(
