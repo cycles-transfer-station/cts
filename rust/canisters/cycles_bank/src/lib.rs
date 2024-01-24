@@ -77,6 +77,7 @@ use cts_lib::{
             }
         },
         call_error_as_u32_and_string,
+        caller_is_controller_gaurd,
     },
     icrc::{BlockId},
     management_canister::CanisterIdRecord,
@@ -1466,8 +1467,34 @@ pub fn cts_see_metrics() -> CTSUCMetrics {
 
 
 
+// ----- CONTROLLER_CALL_CANISTER-METHOD --------------------------
 
+#[derive(CandidType, Deserialize)]
+pub struct ControllerCallCanisterQuest {
+    pub callee: Principal,
+    pub method_name: String,
+    pub arg_raw: Vec<u8>,
+    pub cycles: Cycles
+}
 
-
-
+#[update(manual_reply = true)]
+pub async fn controller_call_canister() {
+    caller_is_controller_gaurd(&caller());
+    
+    let (q,): (ControllerCallCanisterQuest,) = arg_data::<(ControllerCallCanisterQuest,)>(); 
+    
+    match call_raw128(
+        q.callee,
+        &q.method_name,
+        &q.arg_raw,
+        q.cycles   
+    ).await {
+        Ok(raw_sponse) => {
+            reply::<(Result<Vec<u8>, (u32, String)>,)>((Ok(raw_sponse),));
+        }, 
+        Err(call_error) => {
+            reply::<(Result<Vec<u8>, (u32, String)>,)>((Err((call_error.0 as u32, call_error.1)),));
+        }
+    }
+}
 
