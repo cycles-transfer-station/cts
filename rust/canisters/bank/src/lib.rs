@@ -48,7 +48,6 @@ use ic_cdk::{
     api::{
         caller,
         call::{
-            reply,
             msg_cycles_available128,
             msg_cycles_accept128,
             call_with_payment128,
@@ -196,14 +195,14 @@ fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut C
 
 // ------- METHODS ---------
 
-#[query(manual_reply = true)]
-pub fn icrc1_name() {
-    reply::<(&str,)>(("CYCLES",));
+#[query]
+pub fn icrc1_name() -> String {
+    "CTS-CYCLES-BANK".to_string()
 }
 
-#[query(manual_reply = true)]
-pub fn icrc1_symbol() {
-    reply::<(&str,)>(("CYCLES",));
+#[query]
+pub fn icrc1_symbol() -> String {
+    "CYCLES".to_string()
 }
 
 #[query]
