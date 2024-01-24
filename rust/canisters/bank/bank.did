@@ -134,6 +134,7 @@ type UserIsInTheMiddleOfADifferentCall = variant {
 };
 service : () -> {
   complete_mint_cycles : (opt principal) -> (Result);
+  controller_clear_user_logs_pointers_cache : () -> ();
   cycles_in : (CyclesInQuest) -> (Result_1);
   cycles_out : (CyclesOutQuest) -> (Result_2);
   get_logs_backwards : (Account, opt nat) -> (GetLogsBackwardsSponse) query;
