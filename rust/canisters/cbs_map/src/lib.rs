@@ -433,6 +433,7 @@ pub struct UMCMetrics {
     cycles_balance: u128,
     user_canister_code_hash: Option<[u8; 32]>,
     users_map_len: u64,
+    users_map: UsersMap
 }
 
 fn create_umc_metrics(cbsm_data: &CBSMData) -> UMCMetrics {
@@ -441,6 +442,7 @@ fn create_umc_metrics(cbsm_data: &CBSMData) -> UMCMetrics {
         cycles_balance: ic_cdk::api::canister_balance128(),
         user_canister_code_hash: if cbsm_data.cycles_bank_canister_code.module().len() != 0 { Some(cbsm_data.cycles_bank_canister_code.module_hash().clone()) } else { None },
         users_map_len: cbsm_data.users_map.len() as u64,
+        users_map: cbsm_data.users_map.clone()
     }
 }
 
