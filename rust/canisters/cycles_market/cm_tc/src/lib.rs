@@ -600,6 +600,21 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     }
 }
 
+fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
+    format!("{:#?}", q)
+}
+
+#[query]
+pub fn sns_validate_trade_cycles(q: TradeCyclesQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
+
+#[query]
+pub fn sns_validate_trade_tokens(q: TradeTokensQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
+
+
 
 
 
@@ -613,6 +628,11 @@ pub fn void_position(q: VoidPositionQuest) -> VoidPositionResult {
     
     r
 }   
+
+#[query]
+pub fn sns_validate_void_position(q: VoidPositionQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
     
 fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult {
     
@@ -663,7 +683,17 @@ pub async fn transfer_cycles_balance(q: TransferBalanceQuest) -> TransferBalance
 pub async fn transfer_token_balance(q: TransferBalanceQuest) -> TransferBalanceResult {
     _transfer_balance::<TradeTokensQuest>(caller(), q).await
 }
-    
+
+#[query]
+pub fn sns_validate_transfer_cycles_balance(q: TransferBalanceQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
+
+#[query]
+pub fn sns_validate_transfer_token_balance(q: TransferBalanceQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
+
 async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: TransferBalanceQuest) -> TransferBalanceResult {
 
     with_mut(&CM_DATA, |cm_data| {

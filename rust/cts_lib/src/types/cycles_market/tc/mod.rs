@@ -68,7 +68,7 @@ pub type TradeResult = Result<TradeSuccess, TradeError>;
 
 // ---
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct VoidPositionQuest {
     pub position_id: PositionId
 }
@@ -85,7 +85,7 @@ pub type VoidPositionResult = Result<(), VoidPositionError>;
 
 // ----
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct TransferBalanceQuest {
     pub amount: u128,
     pub ledger_transfer_fee: Option<u128>,   
