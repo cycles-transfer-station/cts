@@ -68,16 +68,10 @@ pub async fn do_payouts() {
 
 #[export_name = "canister_update do_payouts_public_method"]
 pub extern "C" fn do_payouts_public_method() {
-    let caller: Principal = caller();
-    if ic_cdk::api::id() != caller && is_controller(&caller) == false {
-        trap("caller without the authorization.");
-    }
-    
     ic_cdk::spawn(async {
         _do_payouts().await;
         reply::<()>(());    
     });
-    
 }
 
 

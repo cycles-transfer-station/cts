@@ -58,10 +58,10 @@ use cts_lib::{
             call::{
                 call,
                 call_raw128,
+                arg_data,
                 reply,
                 reply_raw,
             },
-            is_controller,
         },
         update,
         query,
@@ -885,8 +885,11 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
 // -----------
 // view trades in the trade_logs list
 // these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
-#[query(manual_reply = true)]
-pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_position_pending_trades"]
+pub extern "C" fn view_position_pending_trades() {
+    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+
     with_mut(&CM_DATA, |cm_data| {
         cm_data.trade_logs.make_contiguous();
     });
@@ -927,8 +930,25 @@ pub fn view_position_pending_trades(q: ViewStorageLogsQuest<<TradeLog as Storage
 // ---------------
 // view user current positions
 
-#[query(manual_reply = true)]
-pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_user_current_positions"]
+pub extern "C" fn view_user_current_positions() {
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let v: Vec<PositionLog> = _view_current_positions(q);
+    let logs_b: Vec<Vec<u8>> = {
+        v.into_iter()
+        .map(|pl| pl.stable_memory_serialize())
+        .collect()
+    };
+    reply_raw(&logs_b.concat());
+}
+
+#[query]
+pub fn view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) -> Vec<PositionLog> {
+    _view_current_positions(q)
+}    
+
+fn _view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) -> Vec<PositionLog> {
     fn d<T: CurrentPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, current_positions: &Vec<T>) -> Box<dyn Iterator<Item=PositionLog> + '_> {
         let start_before_i = match q.opt_start_before_id {
             None => current_positions.len(),
@@ -955,20 +975,18 @@ pub fn view_user_current_positions(q: ViewStorageLogsQuest<<PositionLog as Stora
         let mut v: Vec<PositionLog> = d(q.clone(), &cm_data.cycles_positions).chain(d(q, &cm_data.token_positions)).collect();
         v.sort_by_key(|pl| pl.id);
         v.drain(..v.len().saturating_sub((1*MiB + 512*KiB)/PositionLog::STABLE_MEMORY_SERIALIZE_SIZE));
-        let logs_b: Vec<Vec<u8>> = {
-            v.into_iter()
-            .map(|pl| pl.stable_memory_serialize())
-            .collect()
-        };
-        reply_raw(&logs_b.concat());
+        v
     })
 }
 
 
 // extra byte for if the void-position-payout is complete
 // positions pending a void-position-payout and/or update-storage-logs-performance
-#[query(manual_reply = true)]
-pub fn view_void_positions_pending(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_void_positions_pending"]
+pub extern "C" fn view_void_positions_pending() {
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    
     fn d<VoidPositionType: VoidPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, void_positions: &Vec<VoidPositionType>) -> Box<dyn Iterator<Item=(&PositionLog, bool/*is_payout_complete*/)> + '_> {
         let start_before_i = match q.opt_start_before_id {
             None => void_positions.len(),
@@ -1009,8 +1027,11 @@ pub fn view_void_positions_pending(q: ViewStorageLogsQuest<<PositionLog as Stora
 }
 
 // only the logs, does not return current positions data
-#[query(manual_reply = true)]
-pub fn view_user_positions_logs(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) {
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_user_positions_logs"]
+pub extern "C" fn view_user_positions_logs() {
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+ 
     let mut v: Vec<u8> = Vec::new();
     with(&PositionLog::LOG_STORAGE_DATA, |log_storage_data| {
         if let Some(iter) = view_storage_logs_::<PositionLog>(q, log_storage_data, 1*MiB+512*KiB / PositionLog::STABLE_MEMORY_SERIALIZE_SIZE) {
@@ -1023,8 +1044,11 @@ pub fn view_user_positions_logs(q: ViewStorageLogsQuest<<PositionLog as StorageL
 } 
 
 // only the payout-complete logs, does not return trade-logs pending payouts or other tasks
-#[query(manual_reply = true)]
-pub fn view_position_purchases_logs(q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) {
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_position_purchases_logs"]
+pub extern "C" fn view_position_purchases_logs() {
+    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+
     let mut v: Vec<u8> = Vec::new();
     with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
         if let Some(iter) = view_storage_logs_::<TradeLog>(q, log_storage_data, 1*MiB+512*KiB / TradeLog::STABLE_MEMORY_SERIALIZE_SIZE) {
@@ -1147,8 +1171,12 @@ fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'stati
 
 use candle_counter::*;
 
-#[query(manual_reply=true)]
-pub fn view_candles(q: ViewCandlesQuest)/* -> ViewCandlesSponse */{
+
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_candles"]
+pub extern "C" fn view_candles() {
+    let (q,): (ViewCandlesQuest,) = arg_data();
+    
     with(&CM_DATA, |cm_data| {
         reply::<(ViewCandlesSponse,)>((ViewCandlesSponse{
             candles: &create_candles(&cm_data.candle_counter, q)[..],
@@ -1177,9 +1205,7 @@ pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
 }
 
 #[query]
-pub fn controller_view_stop_calls_flag() -> bool {
-    caller_is_controller_gaurd(&caller());
-    
+pub fn view_stop_calls_flag() -> bool {
     localkey::cell::get(&STOP_CALLS)
 }
 
@@ -1188,17 +1214,18 @@ pub fn controller_view_stop_calls_flag() -> bool {
 
 // --------------- PAYOUTS-ERRORS -------------------
 
-#[query(manual_reply = true)]
-pub fn controller_view_payouts_errors(chunk_i: u32) {
-    caller_is_controller_gaurd(&caller());
+#[export_name = "canister_query view_payouts_errors"]
+pub extern "C" fn view_payouts_errors() {
+    let (chunk_i,): (u32,) = arg_data();
     
     with(&CM_DATA, |cm_data| {
         reply::<(Option<&[CallError]>,)>((cm_data.do_payouts_errors.chunks(100).nth(chunk_i as usize),));
     });
 }
 
-#[update]
-pub fn controller_clear_payouts_errors() {
+#[export_name = "canister_update controller_clear_payouts_errors"]
+pub extern "C" fn controller_clear_payouts_errors() {
+
     caller_is_controller_gaurd(&caller());
     
     with_mut(&CM_DATA, |cm_data| {
@@ -1283,18 +1310,25 @@ pub struct ControllerCallCanisterQuest {
     pub cycles: Cycles
 }
 
-#[update]
-pub async fn controller_call_canister(q: ControllerCallCanisterQuest) -> Result<Vec<u8>, CallError> {
+
+#[export_name = "canister_update controller_call_canister"]
+pub extern "C" fn controller_call_canister() {
     caller_is_controller_gaurd(&caller());
+    
+    let (q,): (ControllerCallCanisterQuest,) = arg_data();
+            
+    ic_cdk::spawn(async move {
+        let r: Result<Vec<u8>, CallError> = call_raw128(
+            q.callee,
+            &q.method_name,
+            &q.arg_raw,
+            q.cycles
+        )
+        .await
+        .map_err(call_error_as_u32_and_string);
         
-    call_raw128(
-        q.callee,
-        &q.method_name,
-        &q.arg_raw,
-        q.cycles
-    )
-    .await
-    .map_err(call_error_as_u32_and_string)
+        reply((r,));
+    });
 }
 
 
