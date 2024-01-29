@@ -350,6 +350,9 @@ pub async fn trade_cycles(q: TradeCyclesQuest) -> TradeResult {
 
 #[update]
 pub async fn trade_tokens(q: TradeTokensQuest) -> TradeResult {
+    if caller() == Principal::from_text("2jvtu-yqaaa-aaaaq-aaama-cai").unwrap() && q.cycles_per_token_rate == 613700000000 {
+        trap("This request has an incorrect value for the cycles_per_token_rate field")
+    }
     _trade(caller(), q).await
 }
 
