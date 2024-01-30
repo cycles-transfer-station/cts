@@ -27,7 +27,7 @@ use super::*;
                     payouts_chunk.push((
                         vp.position_id(),
                         do_payout_fn(DoPayoutQuest{
-                            payee: vp.positor(),
+                            payee: IcrcId{ owner: vp.positor(), subaccount: vp.return_to_subaccount() },
                             trade_mount: vp.quantity(),
                             cts_payout_fee: 0,
                             memo: create_void_token_position_transfer_memo(vp.position_id())

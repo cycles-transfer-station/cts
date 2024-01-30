@@ -526,7 +526,17 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                         cycles_payout_lock: false,
                         token_payout_lock: false,
                         cycles_payout_data: None,
-                        token_payout_data: None
+                        token_payout_data: None,
+                        payout_cycles_to_subaccount: if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+                            matcher_position.payout_to_subaccount()
+                        } else {
+                            matchee_position.payout_to_subaccount()
+                        },
+                        payout_tokens_to_subaccount: if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
+                            matcher_position.payout_to_subaccount()
+                        } else {
+                            matchee_position.payout_to_subaccount()
+                        },
                     }
                 );
                 

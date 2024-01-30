@@ -57,7 +57,9 @@ type StorageCanister = record {
   length : nat;
 };
 type TradeCyclesQuest = record {
+  payout_tokens_to_subaccount : opt vec nat8;
   posit_transfer_ledger_fee : opt nat;
+  return_cycles_to_subaccount : opt vec nat8;
   cycles_per_token_rate : nat;
   cycles : nat;
 };
@@ -73,7 +75,9 @@ type TradeSuccess = record { position_id : nat };
 type TradeTokensQuest = record {
   posit_transfer_ledger_fee : opt nat;
   cycles_per_token_rate : nat;
+  payout_cycles_to_subaccount : opt vec nat8;
   tokens : nat;
+  return_tokens_to_subaccount : opt vec nat8;
 };
 type TransferBalanceError = variant {
   CyclesMarketIsBusy;

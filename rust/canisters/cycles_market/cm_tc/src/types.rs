@@ -1,12 +1,13 @@
 use std::thread::LocalKey;
 use std::cell::RefCell;
-
 use crate::*;
+use cts_lib::icrc::IcrcSubaccount;
 use serde::Serialize;
+
+// -------
 
 pub type VoidCyclesPositionId = PositionId;
 pub type VoidTokenPositionId = PositionId;
-
 
 // -------
 
@@ -138,6 +139,9 @@ pub trait CurrentPositionTrait {
     const POSITION_KIND: PositionKind;
             
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog;
+
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
+    fn payout_to_subaccount(&self) -> Option<IcrcSubaccount>;
 }
 
 #[derive(CandidType, Serialize, Deserialize)]
@@ -183,7 +187,7 @@ impl CurrentPositionTrait for CyclesPosition {
                 status: false,
                 update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))
             },
-            
+            return_cycles_to_subaccount: self.quest.return_cycles_to_subaccount,
         }
     }
     fn current_position_quantity(&self) -> u128 {
@@ -244,6 +248,13 @@ impl CurrentPositionTrait for CyclesPosition {
             void_position_payout_ledger_transfer_fee: 0, // this field is not used for the cycles-positions.
         }
     }
+    
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.quest.return_cycles_to_subaccount.clone()
+    }
+    fn payout_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.quest.payout_tokens_to_subaccount.clone()
+    }
 }
 
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -296,9 +307,9 @@ impl CurrentPositionTrait for TokenPosition {
             update_storage_position_data: VPUpdateStoragePositionData{
                 status: false,
                 lock: false,
-                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))
-                
-            }
+                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))   
+            },
+            return_tokens_to_subaccount: self.quest.return_tokens_to_subaccount,
         }
     }
     fn current_position_quantity(&self) -> u128 {
@@ -354,6 +365,13 @@ impl CurrentPositionTrait for TokenPosition {
             void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-token-position-payout is done.                    
         }
     }
+    
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.quest.return_tokens_to_subaccount.clone()
+    }
+    fn payout_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.quest.payout_cycles_to_subaccount.clone()
+    }
 }
 
 /*
@@ -401,6 +419,8 @@ pub struct TradeLog {
     pub token_payout_lock: bool,
     pub cycles_payout_data: Option<PayoutData>,
     pub token_payout_data: Option<PayoutData>,
+    pub payout_cycles_to_subaccount: Option<IcrcSubaccount>,
+    pub payout_tokens_to_subaccount: Option<IcrcSubaccount>,
 }
 
 impl TradeLog {
@@ -462,6 +482,7 @@ pub trait VoidPositionTrait: Clone {
     fn can_remove(&self) -> bool;
     fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData;
     fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData;
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
 }
 
 #[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -480,6 +501,7 @@ pub struct VoidCyclesPosition {
     pub cycles_payout_data: Option<PayoutData>,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,
+    pub return_cycles_to_subaccount: Option<IcrcSubaccount>,
 }
 
 impl VoidPositionTrait for VoidCyclesPosition {
@@ -510,6 +532,9 @@ impl VoidPositionTrait for VoidCyclesPosition {
     fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
         &mut self.update_storage_position_data
     }
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.return_cycles_to_subaccount.clone()
+    }
 }
 
 // --------
@@ -523,6 +548,7 @@ pub struct VoidTokenPosition {
     pub token_payout_data: Option<PayoutData>,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,    
+    pub return_tokens_to_subaccount: Option<IcrcSubaccount>,
 }
 
 impl VoidPositionTrait for VoidTokenPosition {
@@ -552,5 +578,8 @@ impl VoidPositionTrait for VoidTokenPosition {
     }
     fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
         &mut self.update_storage_position_data
+    }
+    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
+        self.return_tokens_to_subaccount.clone()
     }
 }

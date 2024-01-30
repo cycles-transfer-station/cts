@@ -1,5 +1,5 @@
 use candid::{Principal, CandidType, Deserialize};
-use crate::icrc::{IcrcId, Tokens, Icrc1TransferError, BlockId};
+use crate::icrc::{IcrcId, Tokens, Icrc1TransferError, BlockId, IcrcSubaccount};
 use crate::types::{Cycles, CallError, canister_code::CanisterCode};
 use crate::consts::KiB;
 use serde::Serialize;
@@ -40,6 +40,8 @@ pub struct TradeCyclesQuest {
     pub cycles: Cycles,
     pub cycles_per_token_rate: CyclesPerToken,
     pub posit_transfer_ledger_fee: Option<Cycles>,
+    pub return_cycles_to_subaccount: Option<IcrcSubaccount>,
+    pub payout_tokens_to_subaccount: Option<IcrcSubaccount>,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -47,6 +49,8 @@ pub struct TradeTokensQuest {
     pub tokens: Tokens,
     pub cycles_per_token_rate: CyclesPerToken,
     pub posit_transfer_ledger_fee: Option<Tokens>,
+    pub return_tokens_to_subaccount: Option<IcrcSubaccount>,
+    pub payout_cycles_to_subaccount: Option<IcrcSubaccount>,
 }
 
 #[derive(CandidType, Deserialize)]

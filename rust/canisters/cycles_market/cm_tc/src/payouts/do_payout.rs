@@ -3,7 +3,7 @@ use super::*;
 pub struct DoPayoutQuest {
     pub trade_mount: u128,
     pub cts_payout_fee: u128,
-    pub payee: Principal,
+    pub payee: IcrcId,
     pub memo: ByteBuf,
 }
 
@@ -27,7 +27,7 @@ where F: Fn(Icrc1TransferQuest) -> LedgerTransferFuture {
     } else {
         match cycles_or_token_transfer(
             Icrc1TransferQuest{
-                to: IcrcId{ owner: q.payee, subaccount: None },
+                to: q.payee,
                 fee: Some(ledger_transfer_fee),
                 memo: Some(q.memo),
                 from_subaccount: Some(*POSITIONS_SUBACCOUNT),
