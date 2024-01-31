@@ -195,7 +195,12 @@ pub struct StorageCanisterData {
 mod memory_location {
     use crate::*;
     
-    pub const CANISTER_DATA_STORAGE_SIZE_MiB: usize = TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 3 - 20/*memory-size at the start [re]placement*/; 
+    const CANISTER_DATA_STORAGE_SIZE_MiB: usize = {
+        (TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB / 5)     /*room for upgrade serialization and safety-space*/
+        .saturating_sub(MAX_STORAGE_BUFFER_SIZE/MiB * 2)    /*positions & trades*/ 
+        .saturating_sub(5 * 2)                              /*storage-canisters-code*/ 
+        .saturating_sub(20)                                 /*memory-size at the start*/
+    }; 
 
     pub const CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB: usize = CANISTER_DATA_STORAGE_SIZE_MiB / 6 * 1;
     pub const MAX_CYCLES_POSITIONS: usize = CYCLES_POSITIONS_MAX_STORAGE_SIZE_MiB * MiB / std::mem::size_of::<CyclesPosition>();
@@ -233,6 +238,8 @@ pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
 
 #[cfg(debug_assertions)]
 pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 2 * KiB;
+
+pub const MAX_STORAGE_BUFFER_SIZE: usize = FLUSH_STORAGE_BUFFER_AT_SIZE + 1*MiB;
 
 #[cfg(not(debug_assertions))]
 pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
@@ -361,23 +368,6 @@ pub async fn trade_tokens(mut q: TradeTokensQuest) -> TradeResult {
 
 async fn _trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
     
-    let trade_result: TradeResult = __trade(caller, q).await;
-    
-    if let Err(TradeError::CallerIsInTheMiddleOfADifferentCallThatLocksTheBalance) = trade_result {
-        // do not remove the lock bc it is from a different call.
-    } else {
-        with_mut(&CM_DATA, |cm_data| {
-            TradeQuestType::mid_call_balance_locks(cm_data).remove(&caller);
-        });
-    }
-    
-    ic_cdk_timers::set_timer(Duration::from_millis(1), || ic_cdk::spawn(do_payouts()));
-    
-    trade_result        
-}
-
-async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
-    
     if q.is_less_than_minimum_position() {
         return Err(TradeError::MinimumPosition{ minimum_cycles: minimum_cycles_match(), minimum_tokens: minimum_tokens_match()});
     }
@@ -385,6 +375,16 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
     if q.cycles_per_token_rate() == 0 {
         return Err(TradeError::RateCannotBeZero);
     }    
+    
+    #[allow(non_snake_case)]
+    for LOG_STORAGE_DATA in [&POSITIONS_STORAGE_DATA, &TRADES_STORAGE_DATA] {
+        with(&LOG_STORAGE_DATA, |log_storage_data| {
+            if log_storage_data.storage_buffer.len() >= MAX_STORAGE_BUFFER_SIZE {
+                return Err(TradeError::CyclesMarketIsBusy);
+            }
+            Ok(())
+        })?;
+    }
     
     with_mut(&CM_DATA, |cm_data| {
         if TradeQuestType::matcher_positions(cm_data).len().saturating_add(TradeQuestType::mid_call_balance_locks(cm_data).len()) >= TradeQuestType::MAX_POSITIONS.saturating_sub(10)         
@@ -405,6 +405,19 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
         TradeQuestType::mid_call_balance_locks(cm_data).insert(caller);
         Ok(())
     })?;    
+    
+    let trade_result: TradeResult = __trade(caller, q).await;
+    
+    with_mut(&CM_DATA, |cm_data| {
+        TradeQuestType::mid_call_balance_locks(cm_data).remove(&caller);
+    });
+    
+    ic_cdk_timers::set_timer(Duration::from_millis(1), || ic_cdk::spawn(do_payouts()));
+    
+    trade_result        
+}
+
+async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
     
     match TradeQuestType::posit_transfer(
         Icrc1TransferQuest{
