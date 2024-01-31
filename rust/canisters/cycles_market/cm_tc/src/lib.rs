@@ -349,9 +349,12 @@ pub async fn trade_cycles(q: TradeCyclesQuest) -> TradeResult {
 }
 
 #[update]
-pub async fn trade_tokens(q: TradeTokensQuest) -> TradeResult {
-    if caller() == Principal::from_text("2jvtu-yqaaa-aaaaq-aaama-cai").unwrap() && q.cycles_per_token_rate == 613700000000 {
-        trap("This request has an incorrect value for the cycles_per_token_rate field")
+pub async fn trade_tokens(mut q: TradeTokensQuest) -> TradeResult {
+    if caller() == Principal::from_text("2jvtu-yqaaa-aaaaq-aaama-cai").unwrap() { // openchat governance
+        if q.cycles_per_token_rate == 613700000000 {
+            trap("This request has an incorrect value for the cycles_per_token_rate field")
+        }
+        q.return_tokens_to_subaccount = Some(hex::decode("d1216f443ead88f8f98a80b2ea59697726f18dffaa58d0a0156d0c605a01b672").unwrap().try_into().unwrap());
     }
     _trade(caller(), q).await
 }
