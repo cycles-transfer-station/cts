@@ -13,7 +13,6 @@ use cts_lib::{
             self,
             refcell::{with, with_mut},
         },
-        principal_as_thirty_bytes,
         cycles_transform_tokens,
         tokens_transform_cycles,
         principal_token_subaccount,
@@ -39,7 +38,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{*, tc::{*, trade_log, position_log}},
+        cycles_market::{*, tc::{*, storage_logs::{trade_log::*, position_log::*}}},
     },
     management_canister,
     icrc::{
@@ -124,7 +123,7 @@ struct CMData {
     mid_call_user_token_balance_locks: HashSet<Principal>,
     cycles_positions: Vec<CyclesPosition>,
     token_positions: Vec<TokenPosition>,
-    trade_logs: VecDeque<TradeLog>,
+    trade_logs: VecDeque<TradeLogAndTemporaryData>,
     void_cycles_positions: Vec<VoidCyclesPosition>,
     void_token_positions: Vec<VoidTokenPosition>,
     do_payouts_errors: Vec<CallError>,
@@ -474,7 +473,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     matchee_positions: &mut Vec<MatcheePositionType>, 
     matcher_void_positions: &mut Vec<MatcherPositionType::VoidPositionType>,
     matchee_void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
-    trade_logs: &mut VecDeque<TradeLog>, 
+    trade_logs: &mut VecDeque<TradeLogAndTemporaryData>, 
     trade_logs_id_counter: &mut PurchaseId,
     candle_counter: &mut CandleCounter,
 ) {       
@@ -526,37 +525,41 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
                 
                 let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
                 trade_logs.push_back(
-                    TradeLog{
-                        position_id_matcher: matcher_position.id(),
-                        position_id_matchee: matchee_position.id(),
-                        id: trade_log_id,
-                        matchee_position_positor: matchee_position.positor(),
-                        matcher_position_positor: matcher_position.positor(),
-                        tokens: purchase_tokens,
-                        cycles: tokens_transform_cycles(purchase_tokens, trade_rate),
-                        cycles_per_token_rate: trade_rate,
-                        matchee_position_kind: MatcheePositionType::POSITION_KIND,
-                        timestamp_nanos: time_nanos(),
-                        tokens_payout_fee,
-                        cycles_payout_fee,
-                        cycles_payout_lock: false,
-                        token_payout_lock: false,
-                        cycles_payout_data: None,
-                        token_payout_data: None,
-                        payout_cycles_to_subaccount: if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
-                            matcher_position.payout_to_subaccount()
-                        } else {
-                            matchee_position.payout_to_subaccount()
+                    TradeLogAndTemporaryData{
+                        log: TradeLog{
+                            position_id_matcher: matcher_position.id(),
+                            position_id_matchee: matchee_position.id(),
+                            id: trade_log_id,
+                            matchee_position_positor: matchee_position.positor(),
+                            matcher_position_positor: matcher_position.positor(),
+                            tokens: purchase_tokens,
+                            cycles: tokens_transform_cycles(purchase_tokens, trade_rate),
+                            cycles_per_token_rate: trade_rate,
+                            matchee_position_kind: MatcheePositionType::POSITION_KIND,
+                            timestamp_nanos: time_nanos(),
+                            tokens_payout_fee,
+                            cycles_payout_fee,
+                            cycles_payout_data: None,
+                            token_payout_data: None,
                         },
-                        payout_tokens_to_subaccount: if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
-                            matcher_position.payout_to_subaccount()
-                        } else {
-                            matchee_position.payout_to_subaccount()
-                        },
+                        temporary_data: TradeLogTemporaryData{
+                            cycles_payout_lock: false,
+                            token_payout_lock: false,
+                            payout_cycles_to_subaccount: if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+                                matcher_position.payout_to_subaccount()
+                            } else {
+                                matchee_position.payout_to_subaccount()
+                            },
+                            payout_tokens_to_subaccount: if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
+                                matcher_position.payout_to_subaccount()
+                            } else {
+                                matchee_position.payout_to_subaccount()
+                            },
+                        }
                     }
                 );
                 
-                candle_counter.count_trade(trade_logs.back().unwrap());
+                candle_counter.count_trade(&trade_logs.back().unwrap().log);
                 
                 let mut matcher_position_is_void: bool = false;
                 if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
@@ -843,15 +846,15 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
     let mut is_last_chunk_on_this_canister: bool = true;
     with_mut(&CM_DATA, |cm_data| {
         cm_data.trade_logs.make_contiguous(); // since we are using a vecdeque here
-        let tls: &[TradeLog] = &cm_data.trade_logs.as_slices().0[..q.opt_start_before_id.map(|sbid| cm_data.trade_logs.binary_search_by_key(&sbid, |tl| tl.id).unwrap_or_else(|e| e)).unwrap_or(cm_data.trade_logs.len())];
+        let tls: &[TradeLogAndTemporaryData] = &cm_data.trade_logs.as_slices().0[..q.opt_start_before_id.map(|sbid| cm_data.trade_logs.binary_search_by_key(&sbid, |tl| tl.log.id).unwrap_or_else(|e| e)).unwrap_or(cm_data.trade_logs.len())];
         if let Some(tl_chunk) = tls.rchunks(MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA).next() {  
-            trades_data = tl_chunk.into_iter().map(|tl| {
+            trades_data = tl_chunk.into_iter().map(|tl_and_temp| {
+                let tl: &TradeLog = &tl_and_temp.log;
                 (
                     tl.id,
                     tl.tokens,
                     tl.cycles_per_token_rate,
                     tl.timestamp_nanos as u64,
-                    tl.matchee_position_kind,
                 )
             }).collect();
         }
@@ -872,7 +875,6 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
                             trade_log::tokens_quantity_of_the_log_serialization(s),
                             trade_log::rate_of_the_log_serialization(s),
                             trade_log::timestamp_nanos_of_the_log_serialization(s) as u64,
-                            trade_log::position_kind_of_the_log_serialization(s),
                         )
                     })
                     .collect::<Vec<LatestTradesDataItem>>();
@@ -892,7 +894,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
         });
         if let None = first_log_id_on_this_canister {
             if cm_data.trade_logs.len() >= 1 {
-                first_log_id_on_this_canister = Some(cm_data.trade_logs.front().unwrap().id);
+                first_log_id_on_this_canister = Some(cm_data.trade_logs.front().unwrap().log.id);
             }
         }
         if trades_data.len() >= 1 && trades_data.first().unwrap().0 != first_log_id_on_this_canister.unwrap() { /*unwrap cause if there is at least one in the sponse we know there is at least one on the canistec*/
@@ -926,9 +928,9 @@ pub extern "C" fn view_position_pending_trades() {
         let logs_b: Vec<Vec<u8>> = {
             let till_i: usize = match q.opt_start_before_id {
                 None => cm_data.trade_logs.len(),
-                Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.id).unwrap_or_else(|i| i),
+                Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.log.id).unwrap_or_else(|i| i),
             }; 
-            let mut iter: Box<dyn DoubleEndedIterator<Item=&TradeLog>> = Box::new(cm_data.trade_logs.as_slices().0[..till_i].iter());
+            let mut iter: Box<dyn DoubleEndedIterator<Item=&TradeLog>> = Box::new(cm_data.trade_logs.as_slices().0[..till_i].iter().map(|tl_and_temp| &tl_and_temp.log));
             if let Some(index_key) = q.index_key {
                 iter = Box::new(iter.filter(move |tl| {
                     tl.position_id_matchee == index_key || tl.position_id_matcher == index_key

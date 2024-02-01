@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use crate::*;
 use cts_lib::icrc::IcrcSubaccount;
 use serde::Serialize;
+pub use cts_lib::types::cm::tc::storage_logs::{*, position_log::PositionLog, trade_log::{TradeLog, PayoutData}};
 
 // -------
 
@@ -11,110 +12,15 @@ pub type VoidTokenPositionId = PositionId;
 
 // -------
 
-pub trait StorageLogTrait {
+pub trait LocalKeyRefCellLogStorageDataTrait {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
-    const STABLE_MEMORY_SERIALIZE_SIZE: usize;
-    const STABLE_MEMORY_VERSION: u16;
-    fn stable_memory_serialize(&self) -> Vec<u8>;// Self::STABLE_MEMORY_SERIALIZE_SIZE]; const generics not stable yet
-    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128;
-    type LogIndexKey: CandidType + for<'a> Deserialize<'a> + PartialEq + Eq;
-    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey>;
 }
 
-// -------
-
-// this one goes into the PositionLog storage and gets updated for the position-termination.
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct PositionLog {
-    pub id: PositionId,
-    pub positor: Principal,
-    pub quest: CreatePositionQuestLog,
-    pub position_kind: PositionKind,
-    pub mainder_position_quantity: u128, // if cycles position this is: Cycles, if Token position this is: Tokens.
-    pub fill_quantity: u128, // if mainder_position_quantity is: Cycles, this is: Tokens. if mainder_position_quantity is: Tokens, this is Cycles.
-    pub fill_average_rate: CyclesPerToken,
-    pub payouts_fees_sum: u128, // // if cycles-position this is: Tokens, if token-position this is: Cycles.
-    pub creation_timestamp_nanos: u128,
-    pub position_termination: Option<PositionTerminationData>,
-    pub void_position_payout_dust_collection: bool,
-    pub void_position_payout_ledger_transfer_fee: u64, // in the use for the token-positions.
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct CreatePositionQuestLog {
-    pub quantity: u128,
-    pub cycles_per_token_rate: CyclesPerToken
-}
-impl From<TradeCyclesQuest> for CreatePositionQuestLog {
-    fn from(q: TradeCyclesQuest) -> Self {
-        Self {
-            quantity: q.cycles,
-            cycles_per_token_rate: q.cycles_per_token_rate 
-        }
-    }
-}
-impl From<TradeTokensQuest> for CreatePositionQuestLog {
-    fn from(q: TradeTokensQuest) -> Self {
-        Self {
-            quantity: q.tokens,
-            cycles_per_token_rate: q.cycles_per_token_rate 
-        }
-    }
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct PositionTerminationData {
-    pub timestamp_nanos: u128,
-    pub cause: PositionTerminationCause
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub enum PositionTerminationCause {
-    Fill, // the position is fill[ed]. position.amount < minimum_token_match()
-    Bump, // the position got bumped
-    TimePass, // expired
-    UserCallVoidPosition, // the user cancelled the position by calling void_position
-}
-
-impl StorageLogTrait for PositionLog {
+impl LocalKeyRefCellLogStorageDataTrait for PositionLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &POSITIONS_STORAGE_DATA;
-    const STABLE_MEMORY_SERIALIZE_SIZE: usize = position_log::STABLE_MEMORY_SERIALIZE_SIZE;  
-    const STABLE_MEMORY_VERSION: u16 = 0;
-    fn stable_memory_serialize(&self) -> Vec<u8> {// [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] {
-        let mut s: [u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE] = [0u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE];
-        s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());        
-        s[2..18].copy_from_slice(&self.id.to_be_bytes());
-        s[18..48].copy_from_slice(&principal_as_thirty_bytes(&self.positor));
-        s[48..64].copy_from_slice(&self.quest.quantity.to_be_bytes());
-        s[64..80].copy_from_slice(&self.quest.cycles_per_token_rate.to_be_bytes());
-        s[80] = if let PositionKind::Cycles = self.position_kind { 0 } else { 1 };
-        s[81..97].copy_from_slice(&self.mainder_position_quantity.to_be_bytes());
-        s[97..113].copy_from_slice(&self.fill_quantity.to_be_bytes());
-        s[113..129].copy_from_slice(&self.fill_average_rate.to_be_bytes());
-        s[129..145].copy_from_slice(&self.payouts_fees_sum.to_be_bytes());
-        s[145..153].copy_from_slice(&(self.creation_timestamp_nanos as u64).to_be_bytes());
-        if let Some(ref data) = self.position_termination { 
-            s[153] = 1; 
-            s[154..162].copy_from_slice(&(data.timestamp_nanos as u64).to_be_bytes());
-            s[162] = match data.cause {
-                PositionTerminationCause::Fill => 0,
-                PositionTerminationCause::Bump => 1,
-                PositionTerminationCause::TimePass => 2,
-                PositionTerminationCause::UserCallVoidPosition => 3
-            };
-        }        
-        s[163] = self.void_position_payout_dust_collection as u8;
-        s[164..172].copy_from_slice(&self.void_position_payout_ledger_transfer_fee.to_be_bytes());
-        s.to_vec()
-    }  
-    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
-        position_log::log_id_of_the_log_serialization(log_b)
-    }
-    type LogIndexKey = Principal;
-    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey> {
-        position_log::index_keys_of_the_log_serialization(log_b)
-    }
 }
+
+
 
 // ------------------
 
@@ -393,80 +299,32 @@ fn find_current_position_available_rate(
 
 // -----------------
 
-#[derive(Clone, Copy, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct PayoutData {
-    pub did_transfer: bool, // if false that means it is dust-collection.
-    pub ledger_transfer_fee: Tokens,
+
+impl LocalKeyRefCellLogStorageDataTrait for TradeLog {
+    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
 }
 
-// -----------------
 
 #[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct TradeLog {
-    pub position_id_matcher: PositionId,
-    pub position_id_matchee: PositionId,
-    pub id: PurchaseId,
-    pub matchee_position_positor: Principal,
-    pub matcher_position_positor: Principal,
-    pub tokens: Tokens,
-    pub cycles: Cycles,
-    pub cycles_per_token_rate: CyclesPerToken,
-    pub matchee_position_kind: PositionKind,
-    pub timestamp_nanos: u128,
-    pub tokens_payout_fee: Tokens,
-    pub cycles_payout_fee: Cycles,
+pub struct TradeLogTemporaryData {
     pub cycles_payout_lock: bool,
     pub token_payout_lock: bool,
-    pub cycles_payout_data: Option<PayoutData>,
-    pub token_payout_data: Option<PayoutData>,
     pub payout_cycles_to_subaccount: Option<IcrcSubaccount>,
     pub payout_tokens_to_subaccount: Option<IcrcSubaccount>,
 }
 
-impl TradeLog {
-    pub fn can_move_into_the_stable_memory_for_the_long_term_storage(&self) -> bool {
-        self.cycles_payout_lock == false
-        && self.token_payout_lock == false
-        && self.cycles_payout_data.is_some()
-        && self.token_payout_data.is_some()
-    }
+#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub struct TradeLogAndTemporaryData {
+    pub log: TradeLog,
+    pub temporary_data: TradeLogTemporaryData,
 }
 
-impl StorageLogTrait for TradeLog {
-    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
-    const STABLE_MEMORY_SERIALIZE_SIZE: usize = trade_log::STABLE_MEMORY_SERIALIZE_SIZE;    
-    const STABLE_MEMORY_VERSION: u16 = 0; 
-    fn stable_memory_serialize(&self) -> Vec<u8> {//[u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] {
-        let mut s: [u8; Self::STABLE_MEMORY_SERIALIZE_SIZE] = [0; Self::STABLE_MEMORY_SERIALIZE_SIZE];
-        s[0..2].copy_from_slice(&(<Self as StorageLogTrait>::STABLE_MEMORY_VERSION).to_be_bytes());
-        s[2..18].copy_from_slice(&self.position_id_matchee.to_be_bytes());
-        s[18..34].copy_from_slice(&self.id.to_be_bytes());
-        s[34..64].copy_from_slice(&principal_as_thirty_bytes(&self.matchee_position_positor));
-        s[64..94].copy_from_slice(&principal_as_thirty_bytes(&self.matcher_position_positor));
-        s[94..110].copy_from_slice(&self.tokens.to_be_bytes());
-        s[110..126].copy_from_slice(&self.cycles.to_be_bytes());
-        s[126..142].copy_from_slice(&self.cycles_per_token_rate.to_be_bytes());
-        s[142] = if let PositionKind::Cycles = self.matchee_position_kind { 0 } else { 1 };
-        s[143..159].copy_from_slice(&self.timestamp_nanos.to_be_bytes());
-        s[159..175].copy_from_slice(&self.tokens_payout_fee.to_be_bytes());
-        s[175..191].copy_from_slice(&self.cycles_payout_fee.to_be_bytes());
-        s[191..207].copy_from_slice(&self.position_id_matcher.to_be_bytes());
-        if let Some(ref cycles_payout_data) = self.cycles_payout_data {
-            s[207..215].copy_from_slice(&(cycles_payout_data.ledger_transfer_fee as u64).to_be_bytes());
-            s[223] = (cycles_payout_data.did_transfer == false) as u8;
-        }
-        if let Some(ref token_payout_data) = self.token_payout_data {
-            s[215..223].copy_from_slice(&(token_payout_data.ledger_transfer_fee as u64).to_be_bytes());    
-            s[224] = (token_payout_data.did_transfer == false) as u8;    
-        }
-        Vec::from(s)
-    }
-    fn log_id_of_the_log_serialization(log_b: &[u8]) -> u128 {
-        trade_log::log_id_of_the_log_serialization(log_b)
-    }
-    type LogIndexKey = PositionId;    
-    fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey> {
-        trade_log::index_keys_of_the_log_serialization(log_b)
+impl TradeLogAndTemporaryData {
+    pub fn can_move_into_the_stable_memory_for_the_long_term_storage(&self) -> bool {
+        self.temporary_data.cycles_payout_lock == false
+        && self.temporary_data.token_payout_lock == false
+        && self.log.cycles_payout_data.is_some()
+        && self.log.token_payout_data.is_some()
     }
 }
 

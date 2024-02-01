@@ -36,7 +36,7 @@ pub async fn do_payouts() {
                 with_mut(&TRADES_STORAGE_DATA, |trades_storage_data| {
                     while cm_data.trade_logs.len() > 0 {
                         if cm_data.trade_logs[0].can_move_into_the_stable_memory_for_the_long_term_storage() == true {
-                            trades_storage_data.storage_buffer.extend(cm_data.trade_logs.pop_front().unwrap().stable_memory_serialize());
+                            trades_storage_data.storage_buffer.extend(cm_data.trade_logs.pop_front().unwrap().log.stable_memory_serialize());
                         } else {
                             break; // bc want to save into the stable-memory in the correct sequence.
                         }
@@ -106,11 +106,14 @@ async fn _do_payouts() {
         
         let mut i: usize = 0;
         while i < cm_data.trade_logs.len() {
-            let tl: &mut TradeLog = &mut cm_data.trade_logs[i];                    
+            let (tl, tl_temp): (&mut TradeLog, &mut TradeLogTemporaryData) = {
+                let tl_and_temp = &mut cm_data.trade_logs[i];
+                (&mut tl_and_temp.log, &mut tl_and_temp.temporary_data)
+            };
             if tl.cycles_payout_data.is_none() 
-            && tl.cycles_payout_lock == false
+            && tl_temp.cycles_payout_lock == false
             && trade_logs_cycles_payouts_chunk.len() < DO_TRADE_LOGS_CYCLES_PAYOUTS_CHUNK_SIZE {
-                tl.cycles_payout_lock = true;    
+                tl_temp.cycles_payout_lock = true;    
                 trade_logs_cycles_payouts_chunk.push(
                     (
                         tl.id,
@@ -120,7 +123,7 @@ async fn _do_payouts() {
                                     PositionKind::Cycles => tl.matcher_position_positor,
                                     PositionKind::Token => tl.matchee_position_positor,
                                 },
-                                subaccount: tl.payout_cycles_to_subaccount,
+                                subaccount: tl_temp.payout_cycles_to_subaccount,
                             },
                             trade_mount: tl.cycles,
                             cts_payout_fee: tl.cycles_payout_fee,
@@ -130,9 +133,9 @@ async fn _do_payouts() {
                 );
             }
             if tl.token_payout_data.is_none()
-            && tl.token_payout_lock == false
+            && tl_temp.token_payout_lock == false
             && trade_logs_token_payouts_chunk.len() < DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE {
-                tl.token_payout_lock = true;
+                tl_temp.token_payout_lock = true;
                 trade_logs_token_payouts_chunk.push(
                     (
                         tl.id,
@@ -142,7 +145,7 @@ async fn _do_payouts() {
                                     PositionKind::Cycles => tl.matchee_position_positor,
                                     PositionKind::Token => tl.matcher_position_positor,
                                 },
-                                subaccount: tl.payout_tokens_to_subaccount,
+                                subaccount: tl_temp.payout_tokens_to_subaccount,
                             },
                             trade_mount: tl.tokens,
                             cts_payout_fee: tl.tokens_payout_fee,
@@ -281,17 +284,20 @@ async fn _do_payouts() {
             .1 = Some(do_token_payout_sponse);
         }
         for (tl_id, (possible_cycles_payout_output, possible_token_payout_output)) in tl_payouts.into_iter() {
-            let tl_trade_logs_i: usize = match cm_data.trade_logs.binary_search_by_key(&tl_id, |tl| { tl.id }) {
+            let tl_trade_logs_i: usize = match cm_data.trade_logs.binary_search_by_key(&tl_id, |tl| { tl.log.id }) {
                 Ok(i) => i,
                 Err(_) => { continue; }    
+            };            
+            let (tl, tl_temp): (&mut TradeLog, &mut TradeLogTemporaryData) = {
+                let tl_and_temp = &mut cm_data.trade_logs[tl_trade_logs_i];
+                (&mut tl_and_temp.log, &mut tl_and_temp.temporary_data)
             };
-            let tl: &mut TradeLog = &mut cm_data.trade_logs[tl_trade_logs_i];
             if let Some(cycles_payout_data) = possible_cycles_payout_output {
-                tl.cycles_payout_lock = false;
+                tl_temp.cycles_payout_lock = false;
                 tl.cycles_payout_data = cycles_payout_data;    
             } 
             if let Some(token_payout_data) = possible_token_payout_output {
-                tl.token_payout_lock = false;
+                tl_temp.token_payout_lock = false;
                 tl.token_payout_data = token_payout_data;    
             }
         }

@@ -566,62 +566,11 @@ fn create_and_download_state_snapshot<T: candid::CandidType + for<'a> Deserializ
 }
 
 fn pl_backwards(b: &[u8]) -> PositionLog {
-    PositionLog{
-        id: PositionId::from_be_bytes(b[2..18].try_into().unwrap()),
-        positor: cts_lib::tools::thirty_bytes_as_principal(b[18..48].try_into().unwrap()),
-        quest: CreatePositionQuestLog {
-            quantity: u128::from_be_bytes(b[48..64].try_into().unwrap()),
-            cycles_per_token_rate: u128::from_be_bytes(b[64..80].try_into().unwrap()),
-        },
-        position_kind: if b[80] == 0 { PositionKind::Cycles } else { PositionKind::Token },
-        mainder_position_quantity: u128::from_be_bytes(b[81..97].try_into().unwrap()), 
-        fill_quantity: u128::from_be_bytes(b[97..113].try_into().unwrap()), 
-        fill_average_rate: CyclesPerToken::from_be_bytes(b[113..129].try_into().unwrap()),
-        payouts_fees_sum: u128::from_be_bytes(b[129..145].try_into().unwrap()),
-        creation_timestamp_nanos: u64::from_be_bytes(b[145..153].try_into().unwrap()) as u128,
-        position_termination: if b[153] == 1 {
-            Some(PositionTerminationData{
-                timestamp_nanos: u64::from_be_bytes(b[154..162].try_into().unwrap()) as u128,
-                cause: match b[162] {
-                    0 => PositionTerminationCause::Fill,
-                    1 => PositionTerminationCause::Bump,
-                    2 => PositionTerminationCause::TimePass,
-                    3 => PositionTerminationCause::UserCallVoidPosition,
-                    _ => panic!("unknown PositionTerminationCause serialization"),
-                }
-            })
-        } else { None },
-        void_position_payout_dust_collection: b[163] == 1,
-        void_token_position_payout_ledger_transfer_fee: u64::from_be_bytes(b[164..172].try_into().unwrap()),
-    }
+    PositionLog::stable_memory_serialize_backwards(b)
 }
 
 fn tl_backwards(b: &[u8]) -> TradeLog {
-    TradeLog{
-        position_id_matcher: u128::from_be_bytes(b[191..207].try_into().unwrap()),
-        position_id_matchee: u128::from_be_bytes(b[2..18].try_into().unwrap()),
-        id: u128::from_be_bytes(b[18..34].try_into().unwrap()),
-        matchee_position_positor: cts_lib::tools::thirty_bytes_as_principal(b[34..64].try_into().unwrap()),
-        matcher_position_positor: cts_lib::tools::thirty_bytes_as_principal(b[64..94].try_into().unwrap()),
-        tokens: u128::from_be_bytes(b[94..110].try_into().unwrap()),
-        cycles: u128::from_be_bytes(b[110..126].try_into().unwrap()),
-        cycles_per_token_rate: u128::from_be_bytes(b[126..142].try_into().unwrap()),
-        matchee_position_kind: if b[142] == 0 { PositionKind::Cycles } else { PositionKind::Token },
-        timestamp_nanos: u128::from_be_bytes(b[143..159].try_into().unwrap()),
-        tokens_payout_fee: u128::from_be_bytes(b[159..175].try_into().unwrap()),
-        cycles_payout_fee: u128::from_be_bytes(b[175..191].try_into().unwrap()),
-        cycles_payout_lock: false,
-        token_payout_lock: false,
-        cycles_payout_data: CyclesPayoutData{
-            cycles_payout: Some(b[223] == 0)
-        },
-        token_payout_data: TokenPayoutData{
-            token_transfer: Some(TokenTransferData{
-                did_transfer: b[224] == 0,
-                ledger_transfer_fee: u128::from_be_bytes(b[207..223].try_into().unwrap()),
-            })
-        }
-    }  
+    TradeLog::stable_memory_serialize_backwards(b)    
 }
 
 

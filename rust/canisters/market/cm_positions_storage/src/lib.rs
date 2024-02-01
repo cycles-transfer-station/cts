@@ -14,7 +14,7 @@ use cts_lib::{
         pre_upgrade,
         post_upgrade
     },
-    types::cycles_market::tc::{PositionId, position_log},
+    types::cycles_market::tc::{PositionId, storage_logs::{StorageLogTrait, position_log::PositionLog}},
 };
 use canister_tools::{self, MemoryId};
 
@@ -79,8 +79,8 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         cm_storage_lib::flush(
             q, 
             user_positions,
-            position_log::log_id_of_the_log_serialization,
-            position_log::index_keys_of_the_log_serialization,
+            PositionLog::log_id_of_the_log_serialization,
+            PositionLog::index_keys_of_the_log_serialization,
         )    
     })
 }

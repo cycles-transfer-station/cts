@@ -4,9 +4,8 @@ use crate::types::{Cycles, CallError, canister_code::CanisterCode};
 use crate::consts::KiB;
 use serde::Serialize;
 
-pub mod trade_log; 
-pub mod position_log;
 
+pub mod storage_logs;
 
 pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
 
@@ -125,10 +124,13 @@ pub struct ViewLatestTradesQuest {
     pub opt_start_before_id: Option<PurchaseId>,
 }
 
-pub type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64, PositionKind);
+pub type LatestTradesDataItem = (PurchaseId, Tokens, CyclesPerToken, u64);
 
 #[derive(CandidType, Deserialize)]
 pub struct ViewLatestTradesSponse {
     pub trades_data: Vec<LatestTradesDataItem>, 
     pub is_last_chunk_on_this_canister: bool,
 }
+
+// ---------
+

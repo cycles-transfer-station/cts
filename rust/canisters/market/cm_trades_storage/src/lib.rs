@@ -22,7 +22,7 @@ use cts_lib::{
         ViewLatestTradesSponse, 
         LatestTradesDataItem, 
         MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA,
-        trade_log,
+        storage_logs::{StorageLogTrait, trade_log::{self, TradeLog}},
     },
 };
 use canister_tools::MemoryId;
@@ -93,8 +93,8 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
         cm_storage_lib::flush(
             q, 
             positions_purchases,
-            trade_log::log_id_of_the_log_serialization,
-            trade_log::index_keys_of_the_log_serialization,
+            TradeLog::log_id_of_the_log_serialization,
+            TradeLog::index_keys_of_the_log_serialization,
         )    
     })
 }
@@ -116,7 +116,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
     let mut trades_data: Vec<LatestTradesDataItem> = vec![];
     let mut is_last_chunk_on_this_canister: bool = true;
     with(&STORAGE_DATA, |storage_data| {
-        if storage_data.logs_memory_i() >= trade_log::STABLE_MEMORY_SERIALIZE_SIZE as u64 {
+        if storage_data.logs_memory_i() >= TradeLog::STABLE_MEMORY_SERIALIZE_SIZE as u64 {
             
             let logs_memory = get_logs_storage_memory();
             
@@ -148,11 +148,10 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
                 );
                     
                 trades_data.push((
-                    trade_log::log_id_of_the_log_serialization(&log),
+                    TradeLog::log_id_of_the_log_serialization(&log),
                     trade_log::tokens_quantity_of_the_log_serialization(&log),
                     trade_log::rate_of_the_log_serialization(&log),
                     trade_log::timestamp_nanos_of_the_log_serialization(&log).try_into().unwrap(), // good for a couple hundred years
-                    trade_log::position_kind_of_the_log_serialization(&log),
                 )); 
                 
             }
