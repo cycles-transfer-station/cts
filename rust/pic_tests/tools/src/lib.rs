@@ -10,7 +10,7 @@ use cts_lib::{
         cts::*,
         CallCanisterQuest,
         Cycles,
-        
+        CanisterCode,
     },
 };
 use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError, BlockIndex}};
@@ -27,7 +27,9 @@ pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
 pub const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
-
+pub const CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 110, 1, 1]);
+pub const CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 111, 1, 1]);
+pub const BANK: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 170, 1, 1]);
 
 use std::path::PathBuf;
 
@@ -94,6 +96,32 @@ pub fn mint_icp(pic: &PocketIc, to: &Account, amount: u128) {
     mint_icp_r.unwrap();
 }
 
+pub fn call_candid_as_<Input, Output>(
+    env: &PocketIc,
+    canister_id: Principal,
+    sender: Principal,
+    method: &str,
+    input: Input
+) -> Result<Output, pocket_ic::CallError>
+where
+    Input: candid::utils::ArgumentEncoder,
+    Output: for<'a> candid::utils::ArgumentDecoder<'a>,
+{
+    call_candid_as(env, canister_id, RawEffectivePrincipal::None, sender, method, input)
+}
+
+pub trait WasmResultUnwrap {
+    fn unwrap(self) -> Vec<u8>;
+}
+impl WasmResultUnwrap for WasmResult {
+    fn unwrap(self) -> Vec<u8> {
+        match self {
+            WasmResult::Reply(b) => b,
+            WasmResult::Reject(s) => panic!("{}", s),
+        }
+    }
+}
+
 
 pub fn set_up() -> PocketIc {
     let pic = PocketIcBuilder::new()
@@ -103,6 +131,7 @@ pub fn set_up() -> PocketIc {
     let _nns_subnet = pic.topology().get_nns().unwrap();
     let fid_subnet = pic.topology().get_fiduciary().unwrap();
     
+    // ICP-LEDGER
     let icp_minter = ICP_MINTER;
     let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
     let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
@@ -131,7 +160,8 @@ pub fn set_up() -> PocketIc {
         ).unwrap(), 
         None
     );
-     
+    
+    // CMC
     let nns_governance = NNS_GOVERNANCE;
     let cmc_wasm = std::fs::read(workspace_dir().join("pic_tests/cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz")).unwrap();
     let cmc = pic.create_canister_with_id(None, None, CMC).unwrap();
@@ -175,28 +205,56 @@ pub fn set_up() -> PocketIc {
     ).unwrap();
     r.unwrap();
     
+    // BANK
+    pic.create_canister_with_id(Some(CTS_CONTROLLER), None, BANK).unwrap();
+    pic.add_cycles(BANK, 1_000 * TRILLION);
+    pic.install_canister(
+        BANK, 
+        std::fs::read(wasms_dir().join("bank.wasm")).unwrap(), 
+        candid::encode_args(()).unwrap(), 
+        Some(CTS_CONTROLLER), 
+    );
+
+    // CM_MAIN
+    pic.create_canister_with_id(Some(CTS_CONTROLLER), None, CM_MAIN).unwrap();
+    pic.add_cycles(CM_MAIN, 1_000 * TRILLION);
+    pic.install_canister(
+        CM_MAIN, 
+        std::fs::read(wasms_dir().join("cm_main.wasm")).unwrap(), 
+        candid::encode_one(CMMainInit {
+            cts_id: CTS,
+            cycles_bank_id: BANK,
+        }).unwrap(), 
+        Some(CTS_CONTROLLER), 
+    );
+    
+    for (wasm_path, market_canister_type) in [
+        ("cm_tc.wasm", MarketCanisterType::TradeContract),
+        ("cm_positions_storage.wasm", MarketCanisterType::PositionsStorage),
+        ("cm_trades_storage.wasm", MarketCanisterType::TradesStorage),
+    ] {
+        let cc = CanisterCode::new(std::fs::read(wasms_dir().join(wasm_path)).unwrap());
+        call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
+    }
+    
     pic
 }
 
-pub fn set_up_bank(pic: &PocketIc) -> Principal {
-    let fid_subnet = pic.topology().get_fiduciary().unwrap();
-    let bank: Principal = pic.create_canister_on_subnet(Some(CTS_CONTROLLER), None, fid_subnet);
-    let bank_wasm: Vec<u8> = std::fs::read(wasms_dir().join("bank.wasm")).unwrap();
-    println!("bank: {bank}");    
-    pic.add_cycles(bank, 1_000 * TRILLION);
-    pic.install_canister(
-        bank, 
-        bank_wasm, 
-        candid::encode_args(()).unwrap(),
-        Some(CTS_CONTROLLER),
-    );
-    bank
+pub fn set_up_tc(pic: &PocketIc) -> Principal {
+    call_candid_as::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
+        &pic, CM_MAIN, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_create_trade_contract", (
+            ControllerCreateIcrc1TokenTradeContractQuest {
+                icrc1_ledger_id: ICP_LEDGER,
+                icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,
+            },
+        )
+    ).unwrap().0.unwrap().trade_contract_canister_id
 }
+
 
 pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     let canister_caller: Principal = pic.create_canister();
     let canister_caller_wasm: Vec<u8> = std::fs::read(wasms_dir().join("canister_caller.wasm")).unwrap();
-    println!("canister_caller: {canister_caller}");    
     pic.add_cycles(canister_caller, 1_000_000_000 * TRILLION);
     pic.install_canister(
         canister_caller, 
@@ -206,3 +264,4 @@ pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     );
     canister_caller
 }
+

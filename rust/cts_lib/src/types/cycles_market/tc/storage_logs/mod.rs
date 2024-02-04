@@ -17,4 +17,8 @@ pub trait StorageLogTrait {
 
 
 
-
+#[derive(CandidType, Deserialize, Clone)]
+pub struct ViewStorageLogsQuest<LogIndexKey> {
+    pub opt_start_before_id: Option<u128>,
+    pub index_key: Option<LogIndexKey>
+}

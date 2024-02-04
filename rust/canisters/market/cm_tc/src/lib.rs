@@ -910,54 +910,6 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
 
 
 
-
-
-
-// -----------
-// view trades in the trade_logs list
-// these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
-#[export_name = "canister_query view_position_pending_trades"]
-pub extern "C" fn view_position_pending_trades() {
-    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
-
-    with_mut(&CM_DATA, |cm_data| {
-        cm_data.trade_logs.make_contiguous();
-    });
-    with(&CM_DATA, |cm_data| {
-        let logs_b: Vec<Vec<u8>> = {
-            let till_i: usize = match q.opt_start_before_id {
-                None => cm_data.trade_logs.len(),
-                Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.log.id).unwrap_or_else(|i| i),
-            }; 
-            let mut iter: Box<dyn DoubleEndedIterator<Item=&TradeLog>> = Box::new(cm_data.trade_logs.as_slices().0[..till_i].iter().map(|tl_and_temp| &tl_and_temp.log));
-            if let Some(index_key) = q.index_key {
-                iter = Box::new(iter.filter(move |tl| {
-                    tl.position_id_matchee == index_key || tl.position_id_matcher == index_key
-                }));
-            }
-            iter
-                .rev()
-                .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE + 2)
-                .collect::<Vec<&TradeLog>>()
-                .into_iter()
-                .rev()
-                .map(|tl| {
-                    let mut v = Vec::new();
-                    v.extend(tl.stable_memory_serialize());
-                    v.extend_from_slice(&[tl.cycles_payout_data.is_some() as u8, tl.token_payout_data.is_some() as u8]);
-                    v
-                })
-                .collect()
-        };        
-        reply_raw(&logs_b.concat());
-    });
-}
-
-
-
-
-
 // ---------------
 // view user current positions
 
@@ -1057,6 +1009,53 @@ pub extern "C" fn view_void_positions_pending() {
     })
 }
 
+
+
+
+
+// -----------
+// view trades in the trade_logs list
+// these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
+// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+#[export_name = "canister_query view_position_pending_trades"]
+pub extern "C" fn view_position_pending_trades() {
+    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+
+    with_mut(&CM_DATA, |cm_data| {
+        cm_data.trade_logs.make_contiguous();
+    });
+    with(&CM_DATA, |cm_data| {
+        let logs_b: Vec<Vec<u8>> = {
+            let till_i: usize = match q.opt_start_before_id {
+                None => cm_data.trade_logs.len(),
+                Some(start_before_id) => cm_data.trade_logs.binary_search_by_key(&start_before_id, |tl| tl.log.id).unwrap_or_else(|i| i),
+            }; 
+            let mut iter: Box<dyn DoubleEndedIterator<Item=&TradeLog>> = Box::new(cm_data.trade_logs.as_slices().0[..till_i].iter().map(|tl_and_temp| &tl_and_temp.log));
+            if let Some(index_key) = q.index_key {
+                iter = Box::new(iter.filter(move |tl| {
+                    tl.position_id_matchee == index_key || tl.position_id_matcher == index_key
+                }));
+            }
+            iter
+                .rev()
+                .take((1*MiB + 512*KiB)/TradeLog::STABLE_MEMORY_SERIALIZE_SIZE + 2)
+                .collect::<Vec<&TradeLog>>()
+                .into_iter()
+                .rev()
+                .map(|tl| {
+                    let mut v = Vec::new();
+                    v.extend(tl.stable_memory_serialize());
+                    v.extend_from_slice(&[tl.cycles_payout_data.is_some() as u8, tl.token_payout_data.is_some() as u8]);
+                    v
+                })
+                .collect()
+        };        
+        reply_raw(&logs_b.concat());
+    });
+}
+
+
+
 // only the logs, does not return current positions data
 // frontend method with the custom serialization. // for the do: change name ..._frontend_method
 #[export_name = "canister_query view_user_positions_logs"]
@@ -1093,67 +1092,63 @@ pub extern "C" fn view_position_purchases_logs() {
 
 
 
-
-
-
 fn view_storage_logs_<'a, LogType: StorageLogTrait>(
     q: ViewStorageLogsQuest<LogType::LogIndexKey>, 
     log_storage_data: &'a LogStorageData,
     max_logs: usize,
 ) -> Option<Box<dyn Iterator<Item=&'a [u8]> + 'a>> { // none if empty
-        let log_storage_buffer = &log_storage_data.storage_buffer;
+    let log_storage_buffer = &log_storage_data.storage_buffer;
+    
+    if log_storage_buffer.len() >= LogType::STABLE_MEMORY_SERIALIZE_SIZE {
+        let first_log_id_in_the_storage_buffer: u128 = LogType::log_id_of_the_log_serialization(&log_storage_buffer[..LogType::STABLE_MEMORY_SERIALIZE_SIZE]);
         
-        if log_storage_buffer.len() >= LogType::STABLE_MEMORY_SERIALIZE_SIZE {
-            let first_log_id_in_the_storage_buffer: u128 = LogType::log_id_of_the_log_serialization(&log_storage_buffer[..LogType::STABLE_MEMORY_SERIALIZE_SIZE]);
+        let logs_storage_buffer_till_start_before_id: &[u8] = &log_storage_buffer[
+            ..
+            q.opt_start_before_id
+                .map(|start_before_id| {
+                    std::cmp::min(
+                        {
+                            start_before_id
+                                .checked_sub(first_log_id_in_the_storage_buffer)
+                                .unwrap_or(0) as usize
+                            * 
+                            LogType::STABLE_MEMORY_SERIALIZE_SIZE
+                        },
+                        log_storage_buffer.len()
+                    )
+                })
+                .unwrap_or(log_storage_buffer.len()) 
+        ];
             
-            let logs_storage_buffer_till_start_before_id: &[u8] = &log_storage_buffer[
+        let mut match_logs: Vec<&[u8]> = vec![];
+        
+        for i in 0..logs_storage_buffer_till_start_before_id.len() / LogType::STABLE_MEMORY_SERIALIZE_SIZE {
+            
+            let log_finish_i: usize = logs_storage_buffer_till_start_before_id.len() - i * LogType::STABLE_MEMORY_SERIALIZE_SIZE;
+            
+            let log: &[u8] = &logs_storage_buffer_till_start_before_id[
+                log_finish_i - LogType::STABLE_MEMORY_SERIALIZE_SIZE
                 ..
-                q.opt_start_before_id
-                    .map(|start_before_id| {
-                        std::cmp::min(
-                            {
-                                start_before_id
-                                    .checked_sub(first_log_id_in_the_storage_buffer)
-                                    .unwrap_or(0) as usize
-                                * 
-                                LogType::STABLE_MEMORY_SERIALIZE_SIZE
-                            },
-                            log_storage_buffer.len()
-                        )
-                    })
-                    .unwrap_or(log_storage_buffer.len()) 
+                log_finish_i
             ];
-                
-            let mut match_logs: Vec<&[u8]> = vec![];
             
-            for i in 0..logs_storage_buffer_till_start_before_id.len() / LogType::STABLE_MEMORY_SERIALIZE_SIZE {
-                
-                let log_finish_i: usize = logs_storage_buffer_till_start_before_id.len() - i * LogType::STABLE_MEMORY_SERIALIZE_SIZE;
-                
-                let log: &[u8] = &logs_storage_buffer_till_start_before_id[
-                    log_finish_i - LogType::STABLE_MEMORY_SERIALIZE_SIZE
-                    ..
-                    log_finish_i
-                ];
-                
-                if let Some(ref index_key) = q.index_key {
-                    if LogType::index_keys_of_the_log_serialization(log).contains(index_key) == false {
-                        continue;
-                    }
-                }
-                match_logs.push(log);
-                        
-                if match_logs.len() >= max_logs { //* LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
-                    break;
+            if let Some(ref index_key) = q.index_key {
+                if LogType::index_keys_of_the_log_serialization(log).contains(index_key) == false {
+                    continue;
                 }
             }
-            
-            return Some(Box::new(match_logs.into_iter().rev()));
-
-        } else {
-            return None;
+            match_logs.push(log);
+                    
+            if match_logs.len() >= max_logs { //* LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
+                break;
+            }
         }
+        
+        return Some(Box::new(match_logs.into_iter().rev()));
 
+    } else {
+        return None;
+    }
 }
 
 
