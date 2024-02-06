@@ -3,19 +3,14 @@ use candid::{Nat, Principal, CandidType, Deserialize};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
     consts::{TRILLION},
-    tools::{principal_token_subaccount, tokens_transform_cycles},
+    tools::principal_token_subaccount,
     types::{
-        CallError, 
-        cycles_market::{cm_main::*, tc as cm_tc} ,
-        cts::*,
-        CallCanisterQuest,
+        cm::cm_main::*,
         Cycles,
         CanisterCode,
     },
 };
 use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError, BlockIndex}};
-use more_asserts::*;
-
 
 
 pub mod bank; 
@@ -128,8 +123,8 @@ pub fn set_up() -> PocketIc {
         .with_nns_subnet()
         .with_fiduciary_subnet()
         .build();
-    let _nns_subnet = pic.topology().get_nns().unwrap();
-    let fid_subnet = pic.topology().get_fiduciary().unwrap();
+    //let _nns_subnet = pic.topology().get_nns().unwrap();
+    //let _fid_subnet = pic.topology().get_fiduciary().unwrap();
     
     // ICP-LEDGER
     let icp_minter = ICP_MINTER;
