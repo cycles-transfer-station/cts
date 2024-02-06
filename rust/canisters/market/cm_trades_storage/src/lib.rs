@@ -7,15 +7,7 @@ use cts_lib::{
         },
         stable_read_into_vec,
     },
-    ic_cdk::{
-        self,
-        update,
-        query,
-        init,
-        pre_upgrade,
-        post_upgrade
-    },
-    types::cycles_market::tc::{
+    types::cm::tc::{
         PositionId, 
         PurchaseId, 
         ViewLatestTradesQuest, 
@@ -25,10 +17,15 @@ use cts_lib::{
         storage_logs::{StorageLogTrait, trade_log::{self, TradeLog}},
     },
 };
+use ic_cdk::{
+    update,
+    query,
+    init,
+    pre_upgrade,
+    post_upgrade
+};
 use canister_tools::MemoryId;
-
 use cm_storage_lib::{
-    self,
     StorageData,
     OldStorageData,
     STORAGE_DATA,

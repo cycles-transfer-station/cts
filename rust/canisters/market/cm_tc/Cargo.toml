@@ -20,4 +20,5 @@ ic-cdk-timers = { workspace = true }
 canister-tools = { workspace = true }
 leb128 = { workspace = true }
 hex = { workspace = true }
+ic-cdk = { workspace = true }
 

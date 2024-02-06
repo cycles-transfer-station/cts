@@ -1,14 +1,14 @@
 use crate::{
     types::{Cycles, CallError},
     tools::call_error_as_u32_and_string,
-    ic_cdk::{
-        api::{
-            call::{
-                call_with_payment128,
-                call,
-            },
+};
+use ic_cdk::{
+    api::{
+        call::{
+            call_with_payment128,
+            call,
         },
-    }
+    },
 };
 use serde::Serialize;
 use candid::{

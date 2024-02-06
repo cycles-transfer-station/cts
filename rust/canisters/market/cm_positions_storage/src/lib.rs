@@ -6,20 +6,17 @@ use cts_lib::{
             refcell::{with, with_mut}
         },
     },
-    ic_cdk::{
-        self,
-        update,
-        query,
-        init,
-        pre_upgrade,
-        post_upgrade
-    },
-    types::cycles_market::tc::{PositionId, storage_logs::{StorageLogTrait, position_log::PositionLog}},
+    types::cm::tc::{PositionId, storage_logs::{StorageLogTrait, position_log::PositionLog}},
+};
+use ic_cdk::{
+    update,
+    query,
+    init,
+    pre_upgrade,
+    post_upgrade
 };
 use canister_tools::{self, MemoryId};
-
 use candid::Principal;
-
 use cm_storage_lib::{
     self,
     StorageData,

@@ -1,9 +1,9 @@
 use crate::{
-    ic_cdk::{
-        call,
-    },
     types::{CallError, Cycles},
     tools::call_error_as_u32_and_string,
+};
+use ic_cdk::{
+    call,
 };
 use candid::{CandidType, Deserialize, Principal};
 use serde_bytes::ByteBuf;

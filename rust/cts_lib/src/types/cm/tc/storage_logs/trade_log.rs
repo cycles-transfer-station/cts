@@ -1,7 +1,7 @@
 use crate::{
     icrc::Tokens,
     types::{
-        cycles_market::{
+        cm::{
             tc::{
                 CyclesPerToken,
                 PositionKind,

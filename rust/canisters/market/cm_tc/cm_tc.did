@@ -108,7 +108,7 @@ type UpgradeOutcome = record {
 type ViewLatestTradesQuest = record { opt_start_before_id : opt nat };
 type ViewLatestTradesSponse = record {
   is_last_chunk_on_this_canister : bool;
-  trades_data : vec record { nat; nat; nat; nat64; PositionKind };
+  trades_data : vec record { nat; nat; nat; nat64 };
 };
 type ViewPositionBookQuest = record { opt_start_greater_than_rate : opt nat };
 type ViewPositionBookSponse = record {

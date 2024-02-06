@@ -10,8 +10,7 @@ members = [
     "canisters/market/cm_storage_lib",
     "canisters/market/cm_trades_storage",
     "canisters/market/cm_positions_storage",
-    "cts_lib",    
-    "cts_lib/canister_authorizations",
+    "cts_lib",
     "pic_tests/canister_caller",
 ]
 
@@ -35,14 +34,6 @@ codegen-units = 1
 split-debuginfo= "packed"
 strip = "debuginfo"
 
-#[profile.test]
-#lto = false
-#opt-level = 0
-#codegen-units = 256
-#split-debuginfo= "off"
-#strip = "none"
-
-
 [workspace.dependencies]
 ic-cdk = "0.11.0"
 ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "4749f45a3f609dcf5dc1a32fe0d9131ddf02f495" } 
@@ -58,7 +49,6 @@ num-traits = "0.2.15"
 canister-tools = "0.2.1"
 ic0 = "0.18.11"
 ic-cdk-timers = "0.4"
-ic_principal = "0.1.1"
 rmp-serde = "1.1.2"
 leb128 = "0.2.5"
 hex = "0.4.3"

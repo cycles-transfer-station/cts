@@ -8,24 +8,23 @@ use cts_lib::{
         },
         caller_is_controller_gaurd,
     },
-    ic_cdk::{
-        self,
-        api::{
-            trap,
-            caller,
-            call::{
-                msg_cycles_available128,
-                msg_cycles_accept128,
-            },
-            stable::{
-                WASM_PAGE_SIZE_IN_BYTES
-            }
-        },
-        update,
-    },
     consts::GiB,
 };
-
+use ic_cdk::{
+    self,
+    api::{
+        trap,
+        caller,
+        call::{
+            msg_cycles_available128,
+            msg_cycles_accept128,
+        },
+        stable::{
+            WASM_PAGE_SIZE_IN_BYTES
+        }
+    },
+    update,
+};
 use candid::CandidType;
 
 use ic_stable_structures::{

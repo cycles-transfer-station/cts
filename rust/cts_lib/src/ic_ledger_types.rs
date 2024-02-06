@@ -1,4 +1,4 @@
-use crate::ic_cdk::{
+use ic_cdk::{
     api::call::{RejectionCode, CallResult},
 };
 

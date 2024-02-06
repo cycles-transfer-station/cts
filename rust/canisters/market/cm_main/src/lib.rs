@@ -1,28 +1,27 @@
-use cts_lib::{
-    ic_cdk::{
-        self,
-        api::{
-            trap,
-            caller,
-            call::{
-                reply,
-                call,
-                call_raw128,
-            },
-            canister_balance128,
+use ic_cdk::{
+    api::{
+        trap,
+        caller,
+        call::{
+            reply,
+            call,
+            call_raw128,
         },
-        init,
-        pre_upgrade,
-        post_upgrade,
-        update,
-        query
+        canister_balance128,
     },
+    init,
+    pre_upgrade,
+    post_upgrade,
+    update,
+    query
+};
+use cts_lib::{
     management_canister::*,
     types::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{*, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
+        cm::{*, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
     },
     tools::{
         localkey::{

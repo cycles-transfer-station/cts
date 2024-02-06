@@ -38,7 +38,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cycles_market::{*, tc::{*, storage_logs::{trade_log::*, position_log::*}}},
+        cm::{*, tc::{*, storage_logs::{trade_log::*, position_log::*}}},
     },
     management_canister,
     icrc::{
@@ -49,25 +49,24 @@ use cts_lib::{
         BlockId,
         icrc1_transfer,
     },
-    ic_cdk::{
-        self,
-        api::{
-            trap,
-            caller,
-            call::{
-                call,
-                call_raw128,
-                arg_data,
-                reply,
-                reply_raw,
-            },
+};
+use ic_cdk::{
+    api::{
+        trap,
+        caller,
+        call::{
+            call,
+            call_raw128,
+            arg_data,
+            reply,
+            reply_raw,
         },
-        update,
-        query,
-        init,
-        pre_upgrade,
-        post_upgrade
     },
+    update,
+    query,
+    init,
+    pre_upgrade,
+    post_upgrade
 };
 use canister_tools::{self, MemoryId};
 use candid::{

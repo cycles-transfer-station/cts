@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use cts_lib::{
-    ic_certified_map::{self, RbTree},
     tools::{
         localkey::refcell::{with},
     },
     types::http_request::*,
 };
+use ic_certified_map::{self, RbTree};
 
 use serde::Serialize;
 use serde_bytes::ByteBuf;

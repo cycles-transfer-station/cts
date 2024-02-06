@@ -17,8 +17,8 @@ use crate::{
         principal_icp_subaccount,
         time_nanos_u64,
     },
-    ic_cdk::api::call::{call_raw128},
 };
+use ic_cdk::api::call::{call_raw128};
 
 use candid::{CandidType, Deserialize, Principal, decode_one, encode_one};
 

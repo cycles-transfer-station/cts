@@ -15,15 +15,14 @@ use cts_lib::{
         time_nanos,
         call_error_as_u32_and_string,
     },
-    ic_cdk::{
-        self, 
-        api::{
-            call::{
-                call_raw128,
-                call_with_payment128,
-            },
-            canister_balance128,
-        }
+};
+use ic_cdk::{
+    api::{
+        call::{
+            call_raw128,
+            call_with_payment128,
+        },
+        canister_balance128,
     }
 };
 use serde::{Serialize};

@@ -18,3 +18,4 @@ serde = { workspace = true }
 serde_bytes = { workspace = true }
 ic-stable-structures = { workspace = true }
 canister-tools = { workspace = true }
+ic-cdk = { workspace = true }
