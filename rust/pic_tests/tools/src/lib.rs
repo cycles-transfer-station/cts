@@ -133,7 +133,7 @@ pub fn set_up() -> PocketIc {
     
     // ICP-LEDGER
     let icp_minter = ICP_MINTER;
-    let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
+    let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
     let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
     pic.add_cycles(icp_ledger, 1_000 * TRILLION);    
     pic.install_canister(
@@ -163,7 +163,7 @@ pub fn set_up() -> PocketIc {
     
     // CMC
     let nns_governance = NNS_GOVERNANCE;
-    let cmc_wasm = std::fs::read(workspace_dir().join("pic_tests/cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz")).unwrap();
+    let cmc_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/cmc-o-14e0b0adf6632a6225cb1b0a22d4bafce75eb81e.wasm.gz")).unwrap();
     let cmc = pic.create_canister_with_id(None, None, CMC).unwrap();
     pic.add_cycles(cmc, 1_000 * TRILLION);    
     pic.install_canister(
