@@ -16,6 +16,7 @@ use cts_lib::{
         BlockId,
         IcrcSubaccount,
         ICRC_DEFAULT_SUBACCOUNT,
+        IcrcMetadataValue,
     },
     tools::{
         localkey::refcell::{with, with_mut},
@@ -127,6 +128,10 @@ pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/;
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
 
+pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
+pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
+pub const ICRC1_DECIMALS: u8 = 12;
+
 // --------- GLOBAL-STATE ----------
 
 thread_local!{
@@ -197,17 +202,17 @@ fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut C
 
 #[query]
 pub fn icrc1_name() -> String {
-    "CTS-CYCLES-BANK".to_string()
+    ICRC1_NAME.to_string()
 }
 
 #[query]
 pub fn icrc1_symbol() -> String {
-    "CYCLES".to_string()
+    ICRC1_SYMBOL.to_string()
 }
 
 #[query]
 pub fn icrc1_decimals() -> u8 {
-    12
+    ICRC1_DECIMALS
 }
 
 #[query]
@@ -226,6 +231,34 @@ pub fn icrc1_total_supply() -> Cycles {
         cb_data.total_supply
     })
 }
+
+#[query]
+pub fn icrc1_metadata() -> Vec<(String, IcrcMetadataValue)> {
+    vec![
+        ("icrc1:name".to_string(), IcrcMetadataValue::Text(ICRC1_NAME.to_string())),
+        ("icrc1:symbol".to_string(), IcrcMetadataValue::Text(ICRC1_SYMBOL.to_string())),
+        ("icrc1:decimals".to_string(), IcrcMetadataValue::Nat(ICRC1_DECIMALS.into())),
+        ("icrc1:fee".to_string(), IcrcMetadataValue::Nat(BANK_TRANSFER_FEE.into())),
+        ("icrc1:logo".to_string(), IcrcMetadataValue::Text("".to_string())),
+    ]
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct SupportedStandard {
+    name: String,
+    url: String
+}
+
+#[query]
+pub fn icrc1_supported_standards() -> Vec<SupportedStandard> {
+    vec![
+        SupportedStandard{
+            name: "ICRC-1".to_string(),
+            url: "https://github.com/dfinity/ICRC-1".to_string(),
+        },
+    ]
+}
+
 
 #[query]
 pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
@@ -301,9 +334,6 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
 
 
 
-
-// icrc1_metadata
-// icrc1_supported_standards
 
 
 const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;

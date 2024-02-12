@@ -20,7 +20,8 @@ pub use icrc_ledger_types::{
             Memo as IcrcMemo,
             TransferError as Icrc1TransferError,
         }
-    }
+    },
+    icrc::generic_metadata_value::MetadataValue as IcrcMetadataValue,
 };
 
 #[derive(CandidType, Deserialize)]
