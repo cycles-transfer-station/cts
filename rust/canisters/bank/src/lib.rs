@@ -272,12 +272,12 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
         
     if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
-        return Err(Icrc1TransferError::GenericError{ error_code: 0.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });    
+        return Err(Icrc1TransferError::GenericError{ error_code: 0u32.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });
     }
         
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(Icrc1TransferError::GenericError{ error_code: 1.into(), message: "Max memo length is 32 bytes.".to_string() });
+            return Err(Icrc1TransferError::GenericError{ error_code: 1u32.into(), message: "Max memo length is 32 bytes.".to_string() });
         }
     }
     

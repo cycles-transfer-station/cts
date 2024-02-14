@@ -35,20 +35,20 @@ split-debuginfo= "packed"
 strip = "debuginfo"
 
 [workspace.dependencies]
-ic-cdk = "0.11.0"
-ic-certified-map = { git = "https://github.com/levifeldman/cdk-rs.git", rev = "4749f45a3f609dcf5dc1a32fe0d9131ddf02f495" } 
-ic-ledger-types = "0.7.0"
-candid = "0.9.10"
+ic-cdk = "0.12.1"
+ic-certified-map = { git = "https://github.com/dfinity/cdk-rs.git", rev = "1da310b58c3bcfa8f946da1d14bd49ee7c11a801" } 
+ic-ledger-types = "0.9.0"
+candid = "0.10.3"
 sha2 = "0.9.1"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_bytes = "0.11.6"
-icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } #icrc-ledger-types = #"0.1.4" #{ git = "https://github.com/cycles-transfer-station/ic.git", rev = "c74ce7317761e540d722d01fa6c26a046707f372" }
-ic-stable-structures = "0.6.1"
+icrc-ledger-types = "0.1.5"
+ic-stable-structures = "0.6.2"
 futures = "0.3.23"
 num-traits = "0.2.15"
-canister-tools = "0.2.1"
+canister-tools = "0.2.2"
 ic0 = "0.18.11"
-ic-cdk-timers = "0.4"
+ic-cdk-timers = "0.6.0"
 rmp-serde = "1.1.2"
 leb128 = "0.2.5"
 hex = "0.4.3"
