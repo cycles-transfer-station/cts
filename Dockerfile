@@ -32,10 +32,4 @@ WORKDIR /cts-system
 RUN export RUSTFLAGS="--remap-path-prefix ${CARGO_HOME}=/cargo"
 RUN just build
 
-RUN sha256sum rust/target/wasm32-unknown-unknown/release/cts.wasm \
-    && sha256sum rust/target/wasm32-unknown-unknown/release/cm_main.wasm \
-    && sha256sum rust/target/wasm32-unknown-unknown/release/cm_tc.wasm \
-    && sha256sum rust/target/wasm32-unknown-unknown/release/bank.wasm \
-    && sha256sum rust/target/wasm32-unknown-unknown/release/cm_trades_storage.wasm \
-    && sha256sum rust/target/wasm32-unknown-unknown/release/cm_positions_storage.wasm
-
+RUN just show-module-hashes

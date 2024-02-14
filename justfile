@@ -45,3 +45,11 @@ test: && test-unit test-pic
     @echo "test"
         
 
+show-module-hashes:
+    @sha256sum {{wasms_release_path / "cts.wasm"}}
+    @sha256sum {{wasms_release_path / "bank.wasm"}}
+    @sha256sum {{wasms_release_path / "cm_main.wasm"}}
+    @sha256sum {{wasms_release_path / "cm_tc.wasm"}}
+    @sha256sum {{wasms_release_path / "cm_trades_storage.wasm"}}
+    @sha256sum {{wasms_release_path / "cm_positions_storage.wasm"}}
+
