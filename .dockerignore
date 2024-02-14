@@ -1,0 +1,8 @@
+**/target
+Dockerfile
+*.wasm
+
+.git
+.gitignore
+
+
