@@ -76,6 +76,7 @@ use canister_tools::{
 pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
+    temp_fix_burn_amt_status: Option<bool>
 }
 
 impl CBData {
@@ -83,6 +84,7 @@ impl CBData {
         Self {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
+            temp_fix_burn_amt_status: None,
         }
     }
 }
@@ -159,8 +161,14 @@ fn pre_upgrade() {
 fn post_upgrade() { 
     canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
     canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);    
-
+    
     // temporary logic
+    with(&CB_DATA, |cb_data| { 
+        if let Some(_flag) = cb_data.temp_fix_burn_amt_status {
+            trap("already did this.")
+        }
+    });
+    
     with(&LOGS, |logs| {
         for i in 0..logs.len() {
             let mut log: Log = logs.get(i).unwrap();
@@ -171,6 +179,11 @@ fn post_upgrade() {
             }
         }
     });
+    
+    with_mut(&CB_DATA, |cb_data| { 
+        cb_data.temp_fix_burn_amt_status = Some(true);
+    });
+    
 } 
 
 // ------- FUNCTIONS -------
