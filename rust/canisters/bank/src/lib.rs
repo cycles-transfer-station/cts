@@ -159,6 +159,18 @@ fn pre_upgrade() {
 fn post_upgrade() { 
     canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
     canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);    
+
+    // temporary logic
+    with(&LOGS, |logs| {
+        for i in 0..logs.len() {
+            let mut log: Log = logs.get(i).unwrap();
+            if let Operation::Burn{..} = log.tx.op {
+                let fee_paid = log.fee.unwrap_or(log.tx.fee.unwrap());
+                log.tx.amt += fee_paid;
+                logs.set(i, &log);
+            }
+        }
+    });
 } 
 
 // ------- FUNCTIONS -------
@@ -488,7 +500,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                         tx: LogTX{
                             op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
-                            amt: q.cycles,
+                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // clude of the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account. // FOR THE DO, fix old logs that don't have this.
                             memo: q.memo,
                             ts: q.created_at_time,
                         }
