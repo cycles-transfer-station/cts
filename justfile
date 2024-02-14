@@ -17,7 +17,7 @@ cm_tc_test_did_path := rust_canisters_path / "market/cm_tc/cm_tc_test.did"
 
 
 cargo-build-wasms profile:
-    cd {{justfile_directory()}}/rust && cargo build --target wasm32-unknown-unknown --profile {{profile}}
+    cd {{justfile_directory()}}/rust && cargo build --locked --target wasm32-unknown-unknown --profile {{profile}}
     
 create-candid-files:
     candid-extractor {{wasms_release_path / bank_filename}} > {{bank_did_path}}
