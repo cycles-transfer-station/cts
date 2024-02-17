@@ -76,7 +76,6 @@ use canister_tools::{
 pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
-    temp_fix_burn_amt_status: Option<bool>
 }
 
 impl CBData {
@@ -84,7 +83,6 @@ impl CBData {
         Self {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
-            temp_fix_burn_amt_status: None,
         }
     }
 }
@@ -127,7 +125,7 @@ pub const CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
 pub const LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
 pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
-pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/;
+pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
@@ -161,29 +159,6 @@ fn pre_upgrade() {
 fn post_upgrade() { 
     canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
     canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);    
-    
-    // temporary logic
-    with(&CB_DATA, |cb_data| { 
-        if let Some(_flag) = cb_data.temp_fix_burn_amt_status {
-            trap("already did this.")
-        }
-    });
-    
-    with(&LOGS, |logs| {
-        for i in 0..logs.len() {
-            let mut log: Log = logs.get(i).unwrap();
-            if let Operation::Burn{..} = log.tx.op {
-                let fee_paid = log.fee.unwrap_or(log.tx.fee.unwrap());
-                log.tx.amt += fee_paid;
-                logs.set(i, &log);
-            }
-        }
-    });
-    
-    with_mut(&CB_DATA, |cb_data| { 
-        cb_data.temp_fix_burn_amt_status = Some(true);
-    });
-    
 } 
 
 // ------- FUNCTIONS -------
