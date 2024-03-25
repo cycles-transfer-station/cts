@@ -119,6 +119,12 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     canister_tools::post_upgrade(&CM_MAIN_DATA, HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID, None::<fn(CMMainData) -> CMMainData>);
+
+	with_mut(&CM_MAIN_DATA, |cm_main_data| {
+        let d: &mut (TradeContractIdAndLedgerId, TradeContractData) = cm_main_data.trade_contracts.iter_mut().find(|d| { d.0.trade_contract_canister_id == Principal::from_text("yufck-wqaaa-aaaar-qadva-cai").unwrap() }).unwrap();
+        d.0.icrc1_ledger_canister_id = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap();
+    });
+	
 }
 
 
