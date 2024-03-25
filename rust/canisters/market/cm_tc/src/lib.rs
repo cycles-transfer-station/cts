@@ -316,15 +316,6 @@ fn post_upgrade() {
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
-    
-    if ic_cdk::api::id() == Principal::from_text("yufck-wqaaa-aaaar-qadva-cai").unwrap() {
-        with_mut(&CM_DATA, |cm_data| {
-        	cm_data.icrc1_token_ledger = Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap();
-        	cm_data.icrc1_token_ledger_transfer_fee = 10;
-    	});
-    }
-
-    
     with(&CM_DATA, |cm_data| {
         localkey::cell::set(&TOKEN_LEDGER_ID, cm_data.icrc1_token_ledger);
         localkey::cell::set(&TOKEN_LEDGER_TRANSFER_FEE, cm_data.icrc1_token_ledger_transfer_fee);
@@ -332,7 +323,6 @@ fn post_upgrade() {
         localkey::cell::set(&CYCLES_BANK_TRANSFER_FEE, cm_data.cycles_bank_transfer_fee);
         localkey::cell::set(&CTS_ID, cm_data.cts_id);    
     });
-    
 }
 
 // -----------------
