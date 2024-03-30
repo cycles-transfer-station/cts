@@ -120,11 +120,13 @@ pub fn create_candles<'a>(candle_counter: &'a CandleCounter, q: ViewCandlesQuest
     }
     
     if s.len() == 0 {
-        return Cow::Borrowed(s);
+        return Cow::Owned(candles.into_iter().collect::<Vec<Candle>>());
     }
         
     if q.segment_length == ViewCandlesSegmentLength::OneMinute {
-        return Cow::Borrowed(s.rchunks(MAX_CANDLES_SPONSE).next().unwrap());
+        if candles.len() == 0 {
+        	return Cow::Borrowed(s.rchunks(MAX_CANDLES_SPONSE).next().unwrap());
+    	}
     }
     
     let mut iter = s.iter().rev();
@@ -192,9 +194,8 @@ pub fn create_view_volume_stats(candle_counter: &CandleCounter) -> ViewVolumeSta
             ..
         ]
         .iter()
-        .map(|c| (c.volume_cycles, c.volume_tokens))
-        .fold(start_count, |(count_cycles, count_tokens), (cvc, cvt)| {
-            (count_cycles.saturating_add(cvc), count_tokens.saturating_add(cvt))            
+        .fold(start_count, |(count_cycles, count_tokens), c| {
+            (count_cycles.saturating_add(c.volume_cycles), count_tokens.saturating_add(c.volume_tokens))            
         })
     };
     
