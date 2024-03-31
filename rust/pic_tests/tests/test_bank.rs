@@ -267,7 +267,7 @@ fn test_cycles_out() {
             tx: LogTX{
                 op: Operation::Burn{ from: IcrcId{owner: user, subaccount: Some(subaccount)}, for_canister: receiving_canister },
                 fee: Some(BANK_TRANSFER_FEE),
-                amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2,
+                amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
                 memo: None,
                 ts: None,
             }
