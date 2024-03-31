@@ -11,7 +11,4 @@ cts_lib = { workspace = true }
 serde = { workspace = true }
 icrc-ledger-types = { workspace = true }
 more-asserts = { workspace = true }
-icp-ledger = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
-cycles-minting-canister = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" }
-ic-nns-common = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
-ic-base-types = { git = "https://github.com/dfinity/ic", rev = "d1315a1b9b002f177526faa5ee6d7e1e1aa3a22a" } 
+ic-ledger-types = { workspace = true }

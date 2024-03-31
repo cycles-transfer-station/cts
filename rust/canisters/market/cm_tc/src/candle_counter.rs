@@ -3,23 +3,12 @@
 // when making this into 1-minute candlesticks, use the time_nanos as the id for an optional_start_before_id parameter since time_nanos are 1 minute between.  
 
 use crate::*;
-use cts_lib::consts::{SECONDS_IN_A_MINUTE, MINUTES_IN_A_HOUR, SECONDS_IN_A_DAY};
+use cts_lib::consts::{SECONDS_IN_A_MINUTE, SECONDS_IN_A_DAY};
 use std::borrow::Cow;
+
 
 const MAX_CANDLES_SPONSE: usize = (MiB as usize * 1 + KiB as usize * 512) / std::mem::size_of::<Candle>(); 
 
-
-
-#[derive(Default, Serialize, Deserialize, CandidType, Clone)]
-pub struct Candle {
-    time_nanos: u64, // of the time-period start
-    volume_cycles: Cycles,
-    volume_tokens: Tokens,
-    open_rate: CyclesPerToken,
-    high_rate: CyclesPerToken,
-    low_rate: CyclesPerToken,
-    close_rate: CyclesPerToken,
-}
 
 #[derive(Default, CandidType, Serialize, Deserialize)]
 pub struct CandleCounter {
@@ -45,7 +34,7 @@ impl CandleCounter {
                     close_rate: tl.cycles_per_token_rate,
                 }
             ); 
-            if complete_segment.time_nanos != 0 {
+            if complete_segment.time_nanos != 0 { // default latest_1_minute time_nanos is 0 so we don't use that
                 self.segments_1_minute.push(complete_segment);
             }               
         } else {
@@ -66,33 +55,6 @@ fn segment_start_time_nanos(segment_length: ViewCandlesSegmentLength, time_nanos
     time_nanos.saturating_sub(time_nanos % (NANOS_IN_A_SECOND as u64 * SECONDS_IN_A_MINUTE as u64 * segment_length as u64))
 }
 
-
-
-// [dis]criminant number is the length in minutes of this segment
-#[derive(CandidType, Deserialize, PartialEq, Eq, Copy, Clone)]
-#[repr(u64)]
-pub enum ViewCandlesSegmentLength {
-    OneMinute = 1,
-    FiveMinute = 5,
-    FifteenMinute = 15,
-    ThirtyMinute = 30,
-    OneHour = MINUTES_IN_A_HOUR as u64,
-    TwoHour = MINUTES_IN_A_HOUR as u64 * 2,
-    SixHour = MINUTES_IN_A_HOUR as u64 * 6,
-    TwentyFourHour = MINUTES_IN_A_HOUR as u64 * 24,    
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ViewCandlesQuest {
-    segment_length: ViewCandlesSegmentLength,
-    opt_start_before_time_nanos: Option<u64>,
-}
-
-#[derive(CandidType)]
-pub struct ViewCandlesSponse<'a> {
-    pub candles: &'a [Candle],
-    
-}
 
 
 pub fn create_candles<'a>(candle_counter: &'a CandleCounter, q: ViewCandlesQuest) -> Cow<'a, [Candle]> {
