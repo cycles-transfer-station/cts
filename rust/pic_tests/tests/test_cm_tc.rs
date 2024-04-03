@@ -336,7 +336,7 @@ fn test_1() {
 
 
 #[test]
-fn test_candle_counter() {
+fn test_candle_counter_1() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
     
@@ -344,7 +344,6 @@ fn test_candle_counter() {
         Principal::from_slice(&[1,1,1,1,1]),
         Principal::from_slice(&[2,2,2,2,2]),
     );
-    
     
     // trades
     let p1_trade_icp = 10000000000;
@@ -384,22 +383,18 @@ fn test_candle_counter() {
     
     assert_eq!(candles.len(), 1);
 	assert_eq!(candles[0], Candle{
-		time_nanos: pic_get_time_nanos(&pic) as u64 - (pic_get_time_nanos(&pic) as u64 % (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 1) as u64),
-    	volume_cycles: {
-    	    // only able to trade a cycles amount that is a multiple of the rate
-    	  	let trade_cycles_amount = p2_trade_cycles - (p2_trade_cycles % trade_rate);
-    	  	
-    	  	std::cmp::min(trade_cycles_amount, tokens_transform_cycles(p1_trade_icp, trade_rate))
-    	    
-    	},
-    	volume_tokens: std::cmp::min(p1_trade_icp, cycles_transform_tokens(p2_trade_cycles, trade_rate)),
-    	open_rate: trade_rate,
-    	high_rate: trade_rate,
-    	low_rate: trade_rate,
-    	close_rate: trade_rate,
-	});
+        time_nanos: pic_get_time_nanos(&pic) as u64 - (pic_get_time_nanos(&pic) as u64 % (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 1) as u64),
+        volume_cycles: {
+            // trade cycles amount is a multiple of the rate
+            let trade_cycles_amount = p2_trade_cycles - (p2_trade_cycles % trade_rate);
+            std::cmp::min(trade_cycles_amount, tokens_transform_cycles(p1_trade_icp, trade_rate))
+        },
+        volume_tokens: std::cmp::min(p1_trade_icp, cycles_transform_tokens(p2_trade_cycles, trade_rate)),
+        open_rate: trade_rate,
+        high_rate: trade_rate,
+        low_rate: trade_rate,
+        close_rate: trade_rate,
+    });    
+    
 }
-
-
-
 
