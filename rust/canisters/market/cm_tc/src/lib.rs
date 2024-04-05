@@ -311,8 +311,65 @@ fn pre_upgrade() {
 }
 
 #[post_upgrade]
-fn post_upgrade() {
-    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
+fn post_upgrade() {    
+    
+    // temporary code for the upgrade of the candle-counter.
+    #[derive(CandidType, Serialize, Deserialize)]
+    struct OldCMData {
+        cts_id: Principal,
+        cm_main_id: Principal,
+        icrc1_token_ledger: Principal,
+        icrc1_token_ledger_transfer_fee: Tokens,
+        cycles_bank_id: Principal,
+        cycles_bank_transfer_fee: Cycles,
+        positions_id_counter: u128,
+        trade_logs_id_counter: u128,
+        mid_call_user_cycles_balance_locks: HashSet<Principal>,
+        mid_call_user_token_balance_locks: HashSet<Principal>,
+        cycles_positions: Vec<CyclesPosition>,
+        token_positions: Vec<TokenPosition>,
+        trade_logs: VecDeque<TradeLogAndTemporaryData>,
+        void_cycles_positions: Vec<VoidCyclesPosition>,
+        void_token_positions: Vec<VoidTokenPosition>,
+        do_payouts_errors: Vec<CallError>,
+        candle_counter: OldCandleCounter, // old
+    }
+    
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, Some::<fn(OldCMData) -> CMData>(
+        |old| {
+            let mut new = CMData{
+                cts_id: old.cts_id,
+                cm_main_id: old.cm_main_id,
+                icrc1_token_ledger: old.icrc1_token_ledger,
+                icrc1_token_ledger_transfer_fee: old.icrc1_token_ledger_transfer_fee,
+                cycles_bank_id: old.cycles_bank_id,
+                cycles_bank_transfer_fee: old.cycles_bank_transfer_fee,
+                positions_id_counter: old.positions_id_counter,
+                trade_logs_id_counter: old.trade_logs_id_counter,
+                mid_call_user_cycles_balance_locks: old.mid_call_user_cycles_balance_locks,
+                mid_call_user_token_balance_locks: old.mid_call_user_token_balance_locks,
+                cycles_positions: old.cycles_positions,
+                token_positions: old.token_positions,
+                trade_logs: old.trade_logs,
+                void_cycles_positions: old.void_cycles_positions,
+                void_token_positions: old.void_token_positions,
+                do_payouts_errors: old.do_payouts_errors,
+                candle_counter: CandleCounter{
+                    segments_1_minute: old.candle_counter.segments_1_minute,
+                    volume_cycles: old.candle_counter.volume_cycles,
+                    volume_tokens: old.candle_counter.volume_tokens,
+                },
+            };
+            
+            if old.candle_counter.latest_1_minute.time_nanos != 0 {
+                new.candle_counter.segments_1_minute.push(old.candle_counter.latest_1_minute);
+            }                    
+            
+            new
+        }
+    ));
+    
+    
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
