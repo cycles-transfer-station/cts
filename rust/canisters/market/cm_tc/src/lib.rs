@@ -1202,11 +1202,10 @@ pub extern "C" fn view_candles() {
     let (q,): (ViewCandlesQuest,) = arg_data();
     
     with(&CM_DATA, |cm_data| {
-        reply::<(ViewCandlesSponse,)>((ViewCandlesSponse{
-            candles: &create_candles(&cm_data.candle_counter, q)[..],
-        },))
-    })
+        reply::<(ViewCandlesSponse,)>((create_candles(&cm_data.candle_counter, q),));
+    });
 }
+
 #[query]
 pub fn view_volume_stats() -> ViewVolumeStatsSponse {
     with(&CM_DATA, |cm_data| {

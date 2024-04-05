@@ -1,7 +1,7 @@
 use candid::{Principal, CandidType, Deserialize};
 use crate::icrc::{IcrcId, Tokens, Icrc1TransferError, BlockId, IcrcSubaccount};
 use crate::types::{Cycles, CallError, canister_code::CanisterCode};
-use crate::consts::{KiB, MINUTES_IN_A_HOUR};
+use crate::consts::KiB;
 use serde::Serialize;
 
 
@@ -145,34 +145,21 @@ pub struct Candle {
     pub close_rate: CyclesPerToken,
 }
 
-// number is the length in minutes of this segment
-#[derive(CandidType, Deserialize, PartialEq, Eq, Copy, Clone)]
-#[repr(u64)]
-pub enum ViewCandlesSegmentLength {
-    OneMinute = 1,
-    FiveMinute = 5,
-    FifteenMinute = 15,
-    ThirtyMinute = 30,
-    OneHour = MINUTES_IN_A_HOUR as u64,
-    TwoHour = MINUTES_IN_A_HOUR as u64 * 2,
-    SixHour = MINUTES_IN_A_HOUR as u64 * 6,
-    TwentyFourHour = MINUTES_IN_A_HOUR as u64 * 24,    
-}
-
 #[derive(CandidType, Deserialize)]
 pub struct ViewCandlesQuest {
-    pub segment_length: ViewCandlesSegmentLength,
     pub opt_start_before_time_nanos: Option<u64>,
 }
 
 #[derive(CandidType)]
 pub struct ViewCandlesSponse<'a> {
     pub candles: &'a [Candle],
+    pub is_earliest_chunk: bool,
 }
 
 #[derive(CandidType, Deserialize)]
 pub struct ViewCandlesSponseOwned {
     pub candles: Vec<Candle>,   
+    pub is_earliest_chunk: bool,
 }
 
 // ---------
