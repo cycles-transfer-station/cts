@@ -134,3 +134,32 @@ pub struct ViewLatestTradesSponse {
 
 // ---------
 
+#[derive(Default, Serialize, Deserialize, CandidType, Clone, Debug, PartialEq, Eq)]
+pub struct Candle {
+    pub time_nanos: u64, // of the time-period start
+    pub volume_cycles: Cycles,
+    pub volume_tokens: Tokens,
+    pub open_rate: CyclesPerToken,
+    pub high_rate: CyclesPerToken,
+    pub low_rate: CyclesPerToken,
+    pub close_rate: CyclesPerToken,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewCandlesQuest {
+    pub opt_start_before_time_nanos: Option<u64>,
+}
+
+#[derive(CandidType)]
+pub struct ViewCandlesSponse<'a> {
+    pub candles: &'a [Candle],
+    pub is_earliest_chunk: bool,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ViewCandlesSponseOwned {
+    pub candles: Vec<Candle>,   
+    pub is_earliest_chunk: bool,
+}
+
+// ---------

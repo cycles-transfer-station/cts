@@ -1,4 +1,4 @@
-use pic_tools::{*, bank::mint_cycles};
+use pic_tools::{*, bank::mint_cycles, tc::*};
 use candid::Principal;
 use cts_lib::{
     types::{
@@ -9,7 +9,12 @@ use cts_lib::{
             
         },
     },
-    tools::principal_token_subaccount,
+    tools::{
+        principal_token_subaccount,
+        tokens_transform_cycles,
+        cycles_transform_tokens,
+    },
+    consts::{NANOS_IN_A_SECOND, SECONDS_IN_A_MINUTE},
 };
 use icrc_ledger_types::icrc1::account::Account;
 use core::time::Duration;
@@ -328,3 +333,68 @@ fn test_1() {
     
     // cancel p1 position.
 }
+
+
+#[test]
+fn test_candle_counter_1() {
+    let pic = set_up();
+    let tc = set_up_tc(&pic);
+    
+    let (p1,p2): (Principal,Principal) = (
+        Principal::from_slice(&[1,1,1,1,1]),
+        Principal::from_slice(&[2,2,2,2,2]),
+    );
+    
+    // trades
+    let p1_trade_icp = 10000000000;
+    let trade_rate = 77777;
+    mint_icp(&pic, &Account{owner: tc, subaccount: Some(principal_token_subaccount(&p1))}, p1_trade_icp + ICP_LEDGER_TRANSFER_FEE);
+    
+    call_candid_as_::<_, (TradeResult,)>(&pic, tc, p1, "trade_tokens", (
+        TradeTokensQuest{
+            tokens: p1_trade_icp,
+            cycles_per_token_rate: trade_rate,
+            posit_transfer_ledger_fee: Some(ICP_LEDGER_TRANSFER_FEE),
+            return_tokens_to_subaccount: None,
+            payout_cycles_to_subaccount: None,
+        },
+    )).unwrap().0.unwrap();
+    
+    let p2_mint_cycles = mint_cycles(&pic, &Account{owner: tc, subaccount: Some(principal_token_subaccount(&p2))}, 500000000);
+    let p2_trade_cycles = p2_mint_cycles - BANK_TRANSFER_FEE;
+    
+    call_candid_as_::<_, (TradeResult,)>(&pic, tc, p2, "trade_cycles", (
+        TradeCyclesQuest{
+            cycles: p2_trade_cycles,
+            cycles_per_token_rate: trade_rate,
+            posit_transfer_ledger_fee: Some(BANK_TRANSFER_FEE),
+            return_cycles_to_subaccount: None,
+            payout_tokens_to_subaccount: None,
+        },
+    )).unwrap().0.unwrap();    
+
+    // -
+    let candles: Vec<Candle> = view_candles(&pic, tc, 
+        ViewCandlesQuest{
+    		segment_length: ViewCandlesSegmentLength::OneMinute,
+    		opt_start_before_time_nanos: None,
+    	}
+    ).candles;
+    
+    assert_eq!(candles.len(), 1);
+	assert_eq!(candles[0], Candle{
+        time_nanos: pic_get_time_nanos(&pic) as u64 - (pic_get_time_nanos(&pic) as u64 % (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 1) as u64),
+        volume_cycles: {
+            // trade cycles amount is a multiple of the rate
+            let trade_cycles_amount = p2_trade_cycles - (p2_trade_cycles % trade_rate);
+            std::cmp::min(trade_cycles_amount, tokens_transform_cycles(p1_trade_icp, trade_rate))
+        },
+        volume_tokens: std::cmp::min(p1_trade_icp, cycles_transform_tokens(p2_trade_cycles, trade_rate)),
+        open_rate: trade_rate,
+        high_rate: trade_rate,
+        low_rate: trade_rate,
+        close_rate: trade_rate,
+    });    
+    
+}
+

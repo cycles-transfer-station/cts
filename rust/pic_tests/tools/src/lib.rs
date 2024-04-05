@@ -14,6 +14,7 @@ use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, Transfe
 
 
 pub mod bank; 
+pub mod tc;
 
 pub const ICP_LEDGER_TRANSFER_FEE: u128 = 10_000;
 pub const CMC_RATE: u128 = 55555;
@@ -105,6 +106,19 @@ where
     call_candid_as(env, canister_id, RawEffectivePrincipal::None, sender, method, input)
 }
 
+pub fn call_candid_<Input, Output>(
+    env: &PocketIc,
+    canister_id: Principal,
+    method: &str,
+    input: Input
+) -> Result<Output, pocket_ic::CallError>
+where
+    Input: candid::utils::ArgumentEncoder,
+    Output: for<'a> candid::utils::ArgumentDecoder<'a>,
+{
+    call_candid(env, canister_id, RawEffectivePrincipal::None, method, input)
+}
+
 pub trait WasmResultUnwrap {
     fn unwrap(self) -> Vec<u8>;
 }
@@ -131,30 +145,48 @@ pub fn set_up() -> PocketIc {
     let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
     let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
     pic.add_cycles(icp_ledger, 1_000 * TRILLION);    
+    
+    #[derive(CandidType, Deserialize)]
+    enum IcpLedgerPayload {
+        Init(IcpLedgerInitArgs)
+    }
+    #[derive(CandidType, Deserialize)]
+    struct IcpLedgerFeatureFlags {
+        icrc2: bool
+    }
+    #[derive(CandidType, Deserialize)]
+    struct IcpLedgerInitArgs {
+        minting_account: String,
+        icrc1_minting_account: Option<Account>,
+        initial_values: HashMap<String, ic_ledger_types::Tokens>,
+        send_whitelist: HashSet<Principal>,
+        transfer_fee: Option<ic_ledger_types::Tokens>,
+        token_symbol: Option<String>,
+        token_name: Option<String>,
+        feature_flags: Option<IcpLedgerFeatureFlags>,
+    }
     pic.install_canister(
         icp_ledger, 
         icp_ledger_wasm, 
         candid::encode_one(
-            icp_ledger::LedgerCanisterPayload::Init(
-                icp_ledger::InitArgs{
-                    minting_account: icp_ledger::AccountIdentifier::from(Account{owner: icp_minter, subaccount: None}),
-                    icrc1_minting_account: Some(Account{owner: icp_minter, subaccount: None}),
-                    initial_values: HashMap::new(),
-                    send_whitelist: HashSet::new(),
-                    transfer_fee: Some(icp_ledger::Tokens::from_e8s(ICP_LEDGER_TRANSFER_FEE as u64)),
-                    token_symbol: Some("ICP".to_string()),
-                    token_name: Some("Internet-Computer".to_string()),
-                    feature_flags: Some(icp_ledger::FeatureFlags{ icrc2: true }),
-                    max_message_size_bytes: None,
-                    transaction_window: None, //Option<Duration>,
-                    archive_options: None, //,Option<ArchiveOptions>,
-                    maximum_number_of_accounts: None, //Option<usize>,
-                    accounts_overflow_trim_quantity: None //Option<usize>,
+            IcpLedgerPayload::Init(
+                IcpLedgerInitArgs{
+        			minting_account: ic_ledger_types::AccountIdentifier::new(&icp_minter, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex(),
+        			icrc1_minting_account: Some(Account{owner: icp_minter, subaccount: None}),
+        			initial_values: HashMap::new(),
+        			send_whitelist: HashSet::new(),
+        			transfer_fee: Some(ic_ledger_types::Tokens::from_e8s(ICP_LEDGER_TRANSFER_FEE as u64)),
+        			token_symbol: Some("ICP".to_string()),
+    				token_name: Some("Internet-Computer".to_string()),
+    				feature_flags: Some(IcpLedgerFeatureFlags{ icrc2: true }),
                 }   
             )
         ).unwrap(), 
         None
     );
+    
+    
+    
     
     // CMC
     let nns_governance = NNS_GOVERNANCE;
@@ -170,13 +202,13 @@ pub fn set_up() -> PocketIc {
                 struct Ia {
                     ledger_canister_id: Option<Principal>,
                     governance_canister_id: Option<Principal>,
-                    minting_account_id: Option<icp_ledger::AccountIdentifier>,
+                    minting_account_id: Option<String>,
                     last_purged_notification: Option<u64>,
                 }
                 Ia{
                     ledger_canister_id: Some(icp_ledger),
                     governance_canister_id: Some(nns_governance),
-                    minting_account_id: Some(icp_ledger::AccountIdentifier::from(Account{owner: icp_minter, subaccount: None})),   
+                    minting_account_id: Some(ic_ledger_types::AccountIdentifier::new(&icp_minter, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex()),   
                     last_purged_notification: Some(0),
                 }
             }
@@ -185,17 +217,22 @@ pub fn set_up() -> PocketIc {
     );
        
     let cmc_rate: u128 = CMC_RATE;
+    #[derive(CandidType, Deserialize)]
+    struct UpdateIcpXdrConversionRatePayload {
+        data_source: String,
+        timestamp_seconds: u64,
+        xdr_permyriad_per_icp: u64,
+    }
     let (r,): (Result<(), String>,) = call_candid_as(
         &pic,
         cmc,
         RawEffectivePrincipal::None,
         nns_governance,
         "set_icp_xdr_conversion_rate",
-        (ic_nns_common::types::UpdateIcpXdrConversionRatePayload {
+        (UpdateIcpXdrConversionRatePayload {
             data_source: "".to_string(),
             timestamp_seconds: u64::MAX, //pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 5*60,
             xdr_permyriad_per_icp: cmc_rate as u64,
-            reason: None, //Option<UpdateIcpXdrConversionRatePayloadReason>,,)
         },)
     ).unwrap();
     r.unwrap();
