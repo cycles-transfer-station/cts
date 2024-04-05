@@ -8,20 +8,12 @@ use cts_lib::consts::{SECONDS_IN_A_MINUTE, SECONDS_IN_A_DAY};
 
 const MAX_CANDLES_SPONSE: usize = (MiB as usize * 1 + KiB as usize * 512) / std::mem::size_of::<Candle>(); 
 
-// pub fields for the temporary candle-counter upgrade in the post_upgrade
-#[derive(Default, CandidType, Serialize, Deserialize)]
-pub struct CandleCounter {
-    pub segments_1_minute: Vec<Candle>,   // last item is the latest_one_minute
-    pub volume_cycles: Cycles,            // all-time
-    pub volume_tokens: Tokens,            // all-time
-}
 
 #[derive(Default, CandidType, Serialize, Deserialize)]
-pub struct OldCandleCounter {
-    pub latest_1_minute: Candle, 
-    pub segments_1_minute: Vec<Candle>,
-    pub volume_cycles: Cycles,            // all-time
-    pub volume_tokens: Tokens,            // all-time
+pub struct CandleCounter {
+    segments_1_minute: Vec<Candle>,   // last item is the latest_one_minute
+    volume_cycles: Cycles,            // all-time
+    volume_tokens: Tokens,            // all-time
 }
 
 impl CandleCounter {
