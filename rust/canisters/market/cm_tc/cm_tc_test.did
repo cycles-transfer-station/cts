@@ -140,7 +140,6 @@ type Volume = record {
   volume_30_day : nat;
 };
 service : (CMIcrc1TokenTradeContractInit) -> {
-  controller_set_stop_calls_flag : (bool) -> ();
   controller_upgrade_log_storage_canisters : (
       ControllerUpgradeCSQuest,
       LogStorageType,
@@ -166,7 +165,6 @@ service : (CMIcrc1TokenTradeContractInit) -> {
       ViewLatestTradesSponse,
     ) query;
   view_positions_storage_canisters : () -> (vec StorageCanister) query;
-  view_stop_calls_flag : () -> (bool) query;
   view_tokens_position_book : (ViewPositionBookQuest) -> (
       ViewPositionBookSponse,
     ) query;

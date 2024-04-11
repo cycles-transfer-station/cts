@@ -97,7 +97,7 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
         for chunk_size in chunk_sizes.into_iter() {
 
             match with(&LOG_STORAGE_DATA, |data| { 
-                call_raw128( // <(FlushQuestForward,), (FlushResult,)>
+                call_raw128(
                     storage_canister_id,
                     "flush",
                     encode_one(&

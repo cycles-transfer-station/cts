@@ -262,12 +262,10 @@ thread_local! {
         LogStorageInit{ log_size: TradeLog::STABLE_MEMORY_SERIALIZE_SIZE as u32 }
     ));
     
-    // not save through the upgrades
     static TOKEN_LEDGER_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static TOKEN_LEDGER_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
     static CYCLES_BANK_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[]));
     static CYCLES_BANK_TRANSFER_FEE: Cell<Tokens> = Cell::new(0);
-    static STOP_CALLS: Cell<bool> = Cell::new(false);   
     pub static CTS_ID: Cell<Principal> = Cell::new(Principal::from_slice(&[])); 
 }
 
@@ -353,13 +351,7 @@ pub async fn trade_cycles(q: TradeCyclesQuest) -> TradeResult {
 }
 
 #[update]
-pub async fn trade_tokens(mut q: TradeTokensQuest) -> TradeResult {
-    if caller() == Principal::from_text("2jvtu-yqaaa-aaaaq-aaama-cai").unwrap() { // openchat governance
-        if q.cycles_per_token_rate == 613700000000 {
-            trap("This request has an incorrect value for the cycles_per_token_rate field")
-        }
-        q.return_tokens_to_subaccount = Some(hex::decode("d1216f443ead88f8f98a80b2ea59697726f18dffaa58d0a0156d0c605a01b672").unwrap().try_into().unwrap());
-    }
+pub async fn trade_tokens(q: TradeTokensQuest) -> TradeResult {
     _trade(caller(), q).await
 }
 
@@ -389,8 +381,7 @@ async fn _trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType
             .saturating_sub(TradeQuestType::matcher_void_positions(cm_data).len())
             .saturating_sub(TradeQuestType::matcher_positions(cm_data).len())
             .saturating_sub(TradeQuestType::mid_call_balance_locks(cm_data).len())
-             < 10 {
-            // check for a bump? 30/90-days of positions without matches get cancel/void. 
+             < 10 { 
             return Err(TradeError::CyclesMarketIsBusy);
         }
         if TradeQuestType::mid_call_balance_locks(cm_data).contains(&caller) {
@@ -480,152 +471,116 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         trap("MatcherPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
     }
         
-    let mut matcher_position_i: usize = start_matcher_positions_i;
+    let matcher_position_i: usize = start_matcher_positions_i;
         
     let matcher_position_id: PositionId = matcher_positions[matcher_position_i].id();
-    let mut match_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
+    let match_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
           
-    'outer: loop {
-        let mut i: usize = 0;
-        while i < matchee_positions.len() {
-            if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
-                if trade_logs.len() >= MAX_TRADE_LOGS {
-                    break 'outer; // log that this matcher-position still needs matching.
-                }
-                
-                let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
-                
-                let matchee_position_vailable_rate_before_trade: CyclesPerToken = matchee_position.current_position_available_cycles_per_token_rate();
-                
-                let matcher_position: &mut MatcherPositionType = &mut matcher_positions[matcher_position_i];
-                                                                                        
-                let purchase_tokens: Tokens = std::cmp::min(matcher_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
-                let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
-                let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
-                                                
-                let tokens_payout_fee: Tokens = {
-                    cycles_transform_tokens(
-                        if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
-                            matcher_position_payout_fee_cycles
-                        } else {
-                            matchee_position_payout_fee_cycles
-                        },
-                        trade_rate
-                    )
-                };
-                let cycles_payout_fee: Cycles = {
-                    if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+    let mut i: usize = 0;
+    while i < matchee_positions.len() {
+        if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
+            if trade_logs.len() >= MAX_TRADE_LOGS {
+                break; // we can put a timer to continue looking for matches for this position once there is space in the trade-logs queue, for now it will wait till another compatible position comes.
+            }
+            
+            let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
+                            
+            let matcher_position: &mut MatcherPositionType = &mut matcher_positions[matcher_position_i];
+                                                                                    
+            let purchase_tokens: Tokens = std::cmp::min(matcher_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
+            let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
+            let matchee_position_payout_fee_cycles: Cycles = matchee_position.subtract_tokens(purchase_tokens, trade_rate);
+                                            
+            let tokens_payout_fee: Tokens = {
+                cycles_transform_tokens(
+                    if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
                         matcher_position_payout_fee_cycles
                     } else {
                         matchee_position_payout_fee_cycles
-                    }
-                };
-                
-                let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
-                trade_logs.push_back(
-                    TradeLogAndTemporaryData{
-                        log: TradeLog{
-                            position_id_matcher: matcher_position.id(),
-                            position_id_matchee: matchee_position.id(),
-                            id: trade_log_id,
-                            matchee_position_positor: matchee_position.positor(),
-                            matcher_position_positor: matcher_position.positor(),
-                            tokens: purchase_tokens,
-                            cycles: tokens_transform_cycles(purchase_tokens, trade_rate),
-                            cycles_per_token_rate: trade_rate,
-                            matchee_position_kind: MatcheePositionType::POSITION_KIND,
-                            timestamp_nanos: time_nanos(),
-                            tokens_payout_fee,
-                            cycles_payout_fee,
-                            cycles_payout_data: None,
-                            token_payout_data: None,
-                        },
-                        temporary_data: TradeLogTemporaryData{
-                            cycles_payout_lock: false,
-                            token_payout_lock: false,
-                            payout_cycles_to_subaccount: if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
-                                matcher_position.payout_to_subaccount()
-                            } else {
-                                matchee_position.payout_to_subaccount()
-                            },
-                            payout_tokens_to_subaccount: if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
-                                matcher_position.payout_to_subaccount()
-                            } else {
-                                matchee_position.payout_to_subaccount()
-                            },
-                        }
-                    }
-                );
-                
-                candle_counter.count_trade(&trade_logs.back().unwrap().log);
-                
-                let mut matcher_position_is_void: bool = false;
-                if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
-                || tokens_transform_cycles(matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()), matcher_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() { 
-                    let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
-                    matcher_void_positions.insert(
-                        matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
-                        matcher_position.into_void_position_type(PositionTerminationCause::Fill)
-                    );
-                    matcher_position_is_void = true;
-                }    
-                
-                if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
-                || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
-                    let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
-                    let position_for_the_void_void_positions_insertion_i: usize = { 
-                        matchee_void_positions.binary_search_by_key(
-                            &position_for_the_void.id(),
-                            |void_position| { void_position.position_id() }
-                        ).unwrap_err()
-                    };
-                    matchee_void_positions.insert(
-                        position_for_the_void_void_positions_insertion_i,
-                        position_for_the_void.into_void_position_type(PositionTerminationCause::Fill)
-                    );
-                } else if matchee_position.current_position_available_cycles_per_token_rate() != matchee_position_vailable_rate_before_trade { 
-                    match_trades(
-                        i,
-                        matchee_positions,  
-                        matcher_positions, 
-                        matchee_void_positions,
-                        matcher_void_positions,
-                        trade_logs, 
-                        trade_logs_id_counter,
-                        candle_counter,
-                    );
-                    matcher_position_i = match matcher_positions.binary_search_by_key(&matcher_position_id, |p| p.id()) {
-                        Ok(matcher_position_i) => matcher_position_i,
-                        Err(_) => break 'outer,
-                    };
-                    i = 0;
-                    match_rate = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
+                    },
+                    trade_rate
+                )
+            };
+            let cycles_payout_fee: Cycles = {
+                if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+                    matcher_position_payout_fee_cycles
                 } else {
-                    i = i + 1;
+                    matchee_position_payout_fee_cycles
                 }
-                
-                if matcher_position_is_void {
-                    break 'outer;
+            };
+            
+            let trade_log_id: PurchaseId = new_id(trade_logs_id_counter);
+            trade_logs.push_back(
+                TradeLogAndTemporaryData{
+                    log: TradeLog{
+                        position_id_matcher: matcher_position.id(),
+                        position_id_matchee: matchee_position.id(),
+                        id: trade_log_id,
+                        matchee_position_positor: matchee_position.positor(),
+                        matcher_position_positor: matcher_position.positor(),
+                        tokens: purchase_tokens,
+                        cycles: tokens_transform_cycles(purchase_tokens, trade_rate),
+                        cycles_per_token_rate: trade_rate,
+                        matchee_position_kind: MatcheePositionType::POSITION_KIND,
+                        timestamp_nanos: time_nanos(),
+                        tokens_payout_fee,
+                        cycles_payout_fee,
+                        cycles_payout_data: None,
+                        token_payout_data: None,
+                    },
+                    temporary_data: TradeLogTemporaryData{
+                        cycles_payout_lock: false,
+                        token_payout_lock: false,
+                        payout_cycles_to_subaccount: if let PositionKind::Token = MatcherPositionType::POSITION_KIND {
+                            matcher_position.payout_to_subaccount()
+                        } else {
+                            matchee_position.payout_to_subaccount()
+                        },
+                        payout_tokens_to_subaccount: if let PositionKind::Cycles = MatcherPositionType::POSITION_KIND {
+                            matcher_position.payout_to_subaccount()
+                        } else {
+                            matchee_position.payout_to_subaccount()
+                        },
+                    }
                 }
-                
+            );
+            
+            candle_counter.count_trade(&trade_logs.back().unwrap().log);
+            
+            let mut matcher_position_is_void: bool = false;
+            if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
+            || tokens_transform_cycles(matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()), matcher_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() { 
+                let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
+                matcher_void_positions.insert(
+                    matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
+                    matcher_position.into_void_position_type(PositionTerminationCause::Fill)
+                );
+                matcher_position_is_void = true;
+            }    
+            
+            if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
+            || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
+                let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
+                let position_for_the_void_void_positions_insertion_i: usize = { 
+                    matchee_void_positions.binary_search_by_key(
+                        &position_for_the_void.id(),
+                        |void_position| { void_position.position_id() }
+                    ).unwrap_err()
+                };
+                matchee_void_positions.insert(
+                    position_for_the_void_void_positions_insertion_i,
+                    position_for_the_void.into_void_position_type(PositionTerminationCause::Fill)
+                );
             } else {
                 i = i + 1;
             }
-        }
-        
-        let balance_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
-        match MatcheePositionType::POSITION_KIND {
-            PositionKind::Token => {
-                assert!(balance_rate >= match_rate);
-            },
-            PositionKind::Cycles => {
-                assert!(balance_rate <= match_rate);
-            } 
-        }
-        if balance_rate == match_rate {
-            break 'outer;
+            
+            if matcher_position_is_void {
+                break;
+            }
+            
         } else {
-            match_rate = balance_rate;
+            i = i + 1;
         }
     }
 }
@@ -911,7 +866,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
 // ---------------
 // view user current positions
 
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+// frontend method with the custom serialization.
 #[export_name = "canister_query view_user_current_positions"]
 pub extern "C" fn view_user_current_positions() {
     let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
@@ -961,9 +916,8 @@ fn _view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTra
 }
 
 
-// extra byte for if the void-position-payout is complete
 // positions pending a void-position-payout and/or update-storage-logs-performance
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+// extra byte for if the void-position-payout is complete
 #[export_name = "canister_query view_void_positions_pending"]
 pub extern "C" fn view_void_positions_pending() {
     let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
@@ -1014,7 +968,6 @@ pub extern "C" fn view_void_positions_pending() {
 // -----------
 // view trades in the trade_logs list
 // these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
 #[export_name = "canister_query view_position_pending_trades"]
 pub extern "C" fn view_position_pending_trades() {
     let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
@@ -1054,8 +1007,7 @@ pub extern "C" fn view_position_pending_trades() {
 
 
 
-// only the logs, does not return current positions data
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+// The position-storage-logs in the buffer on this canister, does not return current positions data or pending-void-positions.
 #[export_name = "canister_query view_user_positions_logs"]
 pub extern "C" fn view_user_positions_logs() {
     let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
@@ -1071,8 +1023,7 @@ pub extern "C" fn view_user_positions_logs() {
     reply_raw(&v);
 } 
 
-// only the payout-complete logs, does not return trade-logs pending payouts or other tasks
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
+// The trades-storage-logs in the buffer on this canister. the payout-complete logs, does not return trade-logs pending payouts.
 #[export_name = "canister_query view_position_purchases_logs"]
 pub extern "C" fn view_position_purchases_logs() {
     let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
@@ -1137,7 +1088,7 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
             }
             match_logs.push(log);
                     
-            if match_logs.len() >= max_logs { //* LogType::STABLE_MEMORY_SERIALIZE_SIZE >= 1*MiB + 512*KiB {
+            if match_logs.len() >= max_logs {
                 break;
             }
         }
@@ -1155,10 +1106,9 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
 pub struct StorageCanister {
     // The id of the first log in this storage-canister
     first_log_id : u128,
-    // The numbe8r of logs in this storage-canister
+    // The number of logs in this storage-canister
     length : u128,
-    // the size of the log-serialization-format in this storage-canister. // backwards compatible bc the log will be extended by appending new bytes.
-    // so clients can know where each log starts and finishes but if only knows about previous versions will still be able to decode the begining data of each log. 
+    // the size of the log-serialization-format in this storage-canister.  
     log_size: u32,
     canister_id : Principal,
 }
@@ -1196,7 +1146,6 @@ fn view_log_storage_canisters_(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'stati
 use candle_counter::*;
 
 
-// frontend method with the custom serialization. // for the do: change name ..._frontend_method
 #[export_name = "canister_query view_candles"]
 pub extern "C" fn view_candles() {
     let (q,): (ViewCandlesQuest,) = arg_data();
@@ -1211,25 +1160,6 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
     with(&CM_DATA, |cm_data| {
         create_view_volume_stats(&cm_data.candle_counter)
     })
-}
-
-
-
-
-
-
-// --------------- STOP-CALLS-FLAG --------------------
-
-#[update]
-pub fn controller_set_stop_calls_flag(stop_calls_flag: bool) {
-    caller_is_controller_gaurd(&caller());
-    
-    localkey::cell::set(&STOP_CALLS, stop_calls_flag);
-}
-
-#[query]
-pub fn view_stop_calls_flag() -> bool {
-    localkey::cell::get(&STOP_CALLS)
 }
 
 
@@ -1356,32 +1286,6 @@ pub extern "C" fn controller_call_canister() {
 
 
 
-/*
-#[query]
-pub fn http_request(q: HttpRequest) -> HttpResponse {
-    
-    let path: &str = q.url.split("?").next().unwrap();
-    
-    if &path == "/logs" {
-        return with(&CM_DATA, |cm_data| {
-            HttpResponse {
-                status_code: 200,
-                headers: vec![], 
-                body: ByteBuf::new(
-                    format!("{:?}", cm_data).to_bytes()
-                ),
-            }
-        });
-    }
-    
-    return HttpResponse {
-        status_code: 404,
-        headers: vec![],
-        body: &ByteBuf::from(vec![]),
-        streaming_strategy: None
-    };
-}
-*/
 
 
 ic_cdk::export_candid!();
