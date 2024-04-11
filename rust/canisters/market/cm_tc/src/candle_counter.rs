@@ -1,6 +1,4 @@
-// keep 1 minute segments forever. bout 57 MiB per year
-
-// when making this into 1-minute candlesticks, use the time_nanos as the id for an optional_start_before_id parameter since time_nanos are 1 minute between.  
+// keep 1 minute segments forever. bout max 57 MiB per year if there is at least one trade per minute. move to stable-memory soon.
 
 use crate::*;
 use cts_lib::consts::{SECONDS_IN_A_MINUTE, SECONDS_IN_A_DAY};
@@ -18,7 +16,7 @@ pub struct CandleCounter {
 
 impl CandleCounter {
     pub fn count_trade(&mut self, tl: &TradeLog) {
-        let current_segment_start_time_nanos = segment_start_time_nanos(tl.timestamp_nanos as u64);  /*good for the next 500 years. change when nanos goes over u64::max*/
+        let current_segment_start_time_nanos = segment_start_time_nanos(tl.timestamp_nanos as u64);
         
         if self.segments_1_minute.len() == 0 || self.segments_1_minute.last().unwrap().time_nanos < current_segment_start_time_nanos {
             self.segments_1_minute.push(

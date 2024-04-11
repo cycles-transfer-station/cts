@@ -299,7 +299,6 @@ pub fn http_request() {
 
 
 
-//#[query(manual_reply = true)]
 #[export_name = "canister_query http_request_stream_callback"]
 fn http_request_stream_callback() {
     let (token,): (StreamCallbackTokenBackwards,) = arg_data::<(StreamCallbackTokenBackwards,)>(); 

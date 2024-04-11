@@ -160,7 +160,7 @@ where
         }
           
         if data.logs_memory_i == 0 {
-            data.first_log_id = log_id_of_the_log_serialization(&q.bytes);//u128::from_be_bytes(q.bytes[16..32].try_into().unwrap());   
+            data.first_log_id = log_id_of_the_log_serialization(&q.bytes);   
         }
                             
         log_storage_memory.write(
@@ -172,7 +172,6 @@ where
         
         for i in 0..(q.bytes.len() / log_size) {
             let log_slice: &[u8] = &q.bytes[(i*log_size)..(i*log_size+log_size)];
-            //ic_cdk::print(&format!("flush_logs id: {:?}", log_id_of_the_log_serialization(log_slice)));            
             for index_key in index_keys_of_the_log_serialization(log_slice).into_iter() {
                 map.entry(index_key)
                 .or_insert(Vec::new())

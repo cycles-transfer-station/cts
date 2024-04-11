@@ -21,7 +21,7 @@ use candid::Principal;
 
 pub type DoUpdateStoragePositionResult = Result<(), CallError>;
 
-pub async fn do_update_storage_position(position_id: PositionId, log_serialization_b: Vec<u8> /* const generics[u8; PositionLog::STABLE_MEMORY_SERIALIZE_SIZE]*/) -> DoUpdateStoragePositionResult {
+pub async fn do_update_storage_position(position_id: PositionId, log_serialization_b: Vec<u8>) -> DoUpdateStoragePositionResult {
     // find if position is on a storage-canister or still in the flush_buffer.
     let mut call_storage_canister_id: Option<Principal> = None;
     

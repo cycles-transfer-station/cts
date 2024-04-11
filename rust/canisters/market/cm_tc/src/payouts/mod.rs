@@ -80,12 +80,12 @@ pub extern "C" fn do_payouts_public_method() {
 
 async fn _do_payouts() {
 
-    let mut void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new();
-    let mut void_token_positions_token_payouts_chunk: Vec<(VoidTokenPositionId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
+    let mut void_cycles_positions_cycles_payouts_chunk: Vec<(VoidCyclesPositionId, _)> = Vec::new();
+    let mut void_token_positions_token_payouts_chunk: Vec<(VoidTokenPositionId, _)> = Vec::new();
     let mut void_cycles_positions_update_storage_positions_chunk: Vec<(VoidCyclesPositionId, _)> = Vec::new();
     let mut void_token_positions_update_storage_positions_chunk: Vec<(VoidTokenPositionId, _)> = Vec::new();    
-    let mut trade_logs_cycles_payouts_chunk: Vec<(PurchaseId, _/*anonymous-future of the do_cycles_payout-async-function*/)> = Vec::new(); 
-    let mut trade_logs_token_payouts_chunk: Vec<(PurchaseId, _/*anonymous-future of the do_token_payout-async-function*/)> = Vec::new();
+    let mut trade_logs_cycles_payouts_chunk: Vec<(PurchaseId, _)> = Vec::new(); 
+    let mut trade_logs_token_payouts_chunk: Vec<(PurchaseId, _)> = Vec::new();
     
     with_mut(&CM_DATA, |cm_data| {
         
@@ -159,14 +159,14 @@ async fn _do_payouts() {
         
     });
 
-    let (vcps_ids_cycles_payouts, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_cycles_payout-future*/>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
-    let (vips_ids_token_payouts, vips_do_token_payouts_futures): (Vec<VoidTokenPositionId>, Vec<_/*do_token_payout-future*/>) = void_token_positions_token_payouts_chunk.into_iter().unzip();
+    let (vcps_ids_cycles_payouts, vcps_do_cycles_payouts_futures): (Vec<VoidCyclesPositionId>, Vec<_>) = void_cycles_positions_cycles_payouts_chunk.into_iter().unzip();
+    let (vips_ids_token_payouts, vips_do_token_payouts_futures): (Vec<VoidTokenPositionId>, Vec<_>) = void_token_positions_token_payouts_chunk.into_iter().unzip();
     
-    let (vcps_ids_update_storage_positions, vcps_do_update_storage_positions_futures): (Vec<VoidCyclesPositionId>, Vec<_/*do_update_storage_position-future*/>) = void_cycles_positions_update_storage_positions_chunk.into_iter().unzip();
-    let (vips_ids_update_storage_positions, vips_do_update_storage_positions_futures): (Vec<VoidTokenPositionId>, Vec<_/*do_update_storage_position-future*/>) = void_token_positions_update_storage_positions_chunk.into_iter().unzip();
+    let (vcps_ids_update_storage_positions, vcps_do_update_storage_positions_futures): (Vec<VoidCyclesPositionId>, Vec<_>) = void_cycles_positions_update_storage_positions_chunk.into_iter().unzip();
+    let (vips_ids_update_storage_positions, vips_do_update_storage_positions_futures): (Vec<VoidTokenPositionId>, Vec<_>) = void_token_positions_update_storage_positions_chunk.into_iter().unzip();
     
-    let (tls_cycles_payouts_ids, tls_do_cycles_payouts_futures): (Vec<PurchaseId>, Vec<_/*do_cycles_payout-future*/>) = trade_logs_cycles_payouts_chunk.into_iter().unzip();
-    let (tls_token_payouts_ids, tls_do_token_payouts_futures): (Vec<PurchaseId>, Vec<_/*do_token_payout-future*/>) = trade_logs_token_payouts_chunk.into_iter().unzip();
+    let (tls_cycles_payouts_ids, tls_do_cycles_payouts_futures): (Vec<PurchaseId>, Vec<_>) = trade_logs_cycles_payouts_chunk.into_iter().unzip();
+    let (tls_token_payouts_ids, tls_do_token_payouts_futures): (Vec<PurchaseId>, Vec<_>) = trade_logs_token_payouts_chunk.into_iter().unzip();
     
     let (
         vcps_do_cycles_payouts_rs,

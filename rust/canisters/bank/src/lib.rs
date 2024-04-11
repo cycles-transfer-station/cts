@@ -488,12 +488,12 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                         tx: LogTX{
                             op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
-                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // clude of the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account. // FOR THE DO, fix old logs that don't have this.
+                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account. // FOR THE DO, fix old logs that don't have this.
                             memo: q.memo,
                             ts: q.created_at_time,
                         }
                     }
-                ).unwrap(); // what to do if grow-fail here?
+                ).unwrap(); // what to do if grow-fail here? For now there is a lot of space on the fiduciary subnet so it is ok for now but either put in a buffer wait on a timer or create archives.
                 logs.len() - 1
             });
             
@@ -632,7 +632,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                     ts: mid_call_data.quest.created_at_time,
                 }
             }
-        ).unwrap(); // if growfailed then trap and roll back.
+        ).unwrap(); // look at comment for cycles_out logs.push 
         logs.len() - 1
     });
     
