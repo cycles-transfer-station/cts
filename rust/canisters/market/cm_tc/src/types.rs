@@ -67,15 +67,6 @@ impl CurrentPositionTrait for CyclesPosition {
     fn positor(&self) -> Principal { self.positor }
     fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
         self.quest.cycles_per_token_rate
-        /*
-        let total_position_cycles: Cycles = tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate);
-        find_current_position_available_rate(
-            self.purchases_rates_times_cycles_quantities_sum,
-            self.match_tokens_quest.cycles_per_token_rate,
-            total_position_cycles,
-            self.current_position_cycles
-        )
-        */
     }
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
@@ -102,7 +93,6 @@ impl CurrentPositionTrait for CyclesPosition {
     fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens {
         if rate == 0 { return 0; }
         self.current_position_cycles / rate
-        //self.match_tokens_quest.tokens.saturating_sub(self.fill_quantity_tokens)
     }
     
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
@@ -151,7 +141,7 @@ impl CurrentPositionTrait for CyclesPosition {
                 }
             }),
             void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.
-            void_position_payout_ledger_transfer_fee: 0, // this field is not used for the cycles-positions.
+            void_position_payout_ledger_transfer_fee: 0,
         }
     }
     
@@ -173,31 +163,12 @@ pub struct TokenPosition {
     pub cycles_payouts_fees_sum: Cycles,
     pub timestamp_nanos: u128,
 }
-/*
-impl TokenPosition {
-    fn cycles_left_for_the_buy(&self) -> Cycles { // private, just a helper function cause we need this in two places in the impl CurrentPositionTrait for TokenPosition.
-        tokens_transform_cycles(self.match_tokens_quest.tokens, self.match_tokens_quest.cycles_per_token_rate)
-        .saturating_sub(self.purchases_rates_times_token_quantities_sum)
-    }
-}
-*/
+
 impl CurrentPositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
     fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
         self.quest.cycles_per_token_rate
-        /*
-        let mut rate = find_current_position_available_rate(
-            self.purchases_rates_times_token_quantities_sum,
-            self.match_tokens_quest.cycles_per_token_rate,
-            self.match_tokens_quest.tokens,
-            self.current_position_tokens
-        ); // if too low due to mainder-cutoff during division, add a couple here to make sure we don't take too low of a cycles-per-token-rate.
-        while rate * self.current_position_tokens < self.cycles_left_for_the_buy() {
-            rate += 1;
-        }
-        rate
-        */
     }
     fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
     
@@ -223,7 +194,6 @@ impl CurrentPositionTrait for TokenPosition {
     }
     fn current_position_tokens(&self, _rate: CyclesPerToken) -> Tokens {
         self.current_position_tokens
-        //self.cycles_left_for_the_buy() / rate
     }
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
         self.current_position_tokens = self.current_position_tokens.saturating_sub(sub_tokens);
@@ -268,7 +238,7 @@ impl CurrentPositionTrait for TokenPosition {
                 }
             }),
             void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.   
-            void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-token-position-payout is done.                    
+            void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-position-payout is done.                    
         }
     }
     
@@ -280,22 +250,6 @@ impl CurrentPositionTrait for TokenPosition {
     }
 }
 
-/*
-fn find_current_position_available_rate(
-    position_purchases_rates_times_quantities_sum: u128,
-    match_quest_cycles_per_token_rate: CyclesPerToken,
-    match_quest_quantity: u128, 
-    current_position_quantity: u128,
-) -> CyclesPerToken {
-    let position_purchases_quantity_sum: u128 = match_quest_quantity - current_position_quantity;   
-    if position_purchases_quantity_sum == 0 || current_position_quantity == 0 {
-        return match_quest_cycles_per_token_rate;
-    }
-    let average_position_purchases_rate = position_purchases_rates_times_quantities_sum / position_purchases_quantity_sum;
-    let rate_for_current_position = ((match_quest_cycles_per_token_rate * match_quest_quantity).saturating_sub(average_position_purchases_rate * position_purchases_quantity_sum)) / current_position_quantity;
-    rate_for_current_position
-}
-*/
 
 // -----------------
 
@@ -355,7 +309,7 @@ pub struct VoidCyclesPosition {
     pub position_id: PositionId,
     pub positor: Principal,
     pub cycles: Cycles,
-    pub cycles_payout_lock: bool,  // lock for the payout
+    pub cycles_payout_lock: bool,
     pub cycles_payout_data: Option<PayoutData>,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,
@@ -402,7 +356,7 @@ pub struct VoidTokenPosition {
     pub position_id: PositionId,
     pub tokens: Tokens,
     pub positor: Principal,
-    pub token_payout_lock: bool,  // lock for the payout
+    pub token_payout_lock: bool,
     pub token_payout_data: Option<PayoutData>,
     pub timestamp_nanos: u128,
     pub update_storage_position_data: VPUpdateStoragePositionData,    

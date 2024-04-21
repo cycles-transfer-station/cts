@@ -1,7 +1,7 @@
 use super::*;
 
 struct TradeFeeTier {
-    // the max volume (in-clusive) of the trade fees of this tier. anything over this amount is the next tier
+    // the max volume (inclusive) of the trade fees of this tier. anything over this amount is the next tier
     volume_tcycles: u128,
     trade_fee_ten_thousandths: u128,   
 }
