@@ -3,10 +3,7 @@ use cts_lib::{
     types::{
         Cycles,
         bank::BANK_TRANSFER_FEE,
-        cm::{
-            tc::{*, storage_logs::{*, position_log::*, trade_log::*}},
-            cm_main::TradeContractIdAndLedgerId,
-        },
+        cm::tc::{*, storage_logs::{*, position_log::*, trade_log::*}},
     },
     tools::principal_token_subaccount,
     consts::{KiB, TRILLION},
@@ -32,8 +29,9 @@ fn test_500() {
     );
     
     let p_burn_icp = 50_000 * TRILLION / CMC_RATE;
+    #[allow(non_snake_case)]
     let P_START_CYCLES_BALANCE: Cycles  = mint_cycles(&pic, &Account{owner: p1, subaccount: None}, p_burn_icp);
-                                          pic.advance_time(Duration::from_secs(4000));
+                                          pic.advance_time(Duration::from_secs(4000)); // for the cmc limit
                                           pic.tick();
                                           mint_cycles(&pic, &Account{owner: p2, subaccount: None}, p_burn_icp);
                                           
@@ -42,17 +40,9 @@ fn test_500() {
     mint_icp(&pic, &Account{owner: p1, subaccount: None}, P_START_TOKEN_BALANCE);
     mint_icp(&pic, &Account{owner: p2, subaccount: None}, P_START_TOKEN_BALANCE);
     
-    let tc_id_and_ledger_id = TradeContractIdAndLedgerId{
-        icrc1_ledger_canister_id: ICP_LEDGER,
-        trade_contract_canister_id: tc,    
-    };
     let tc_p1_subaccount = Account{
         owner: tc,
         subaccount: Some(principal_token_subaccount(&p1))
-    };
-    let tc_p2_subaccount = Account{
-        owner: tc,
-        subaccount: Some(principal_token_subaccount(&p2))
     };
     let tc_positions_subaccount = Account{
         owner: tc,
@@ -385,7 +375,7 @@ fn test_500() {
         pic.advance_time(Duration::from_secs(31)); // for the updatestoragepositionlog
         pic.tick();
         
-        for (p, pl) in [(p1, &token_position_position_log), (p2, &cycles_position_position_log)] {
+        for p in [p1, p2] {
         
             let view_positions_storage_logs: Vec<u8> = pic.query_call(
                 tc,
