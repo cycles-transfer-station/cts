@@ -2,8 +2,7 @@ use std::thread::LocalKey;
 use std::cell::RefCell;
 use crate::*;
 use cts_lib::icrc::IcrcSubaccount;
-use serde::Serialize;
-pub use cts_lib::types::cm::tc::storage_logs::{*, position_log::PositionLog, trade_log::{TradeLog, PayoutData}};
+pub use cts_lib::types::cm::tc::storage_logs::{position_log::PositionLog, trade_log::{TradeLog, PayoutData}};
 
 // -------
 
@@ -50,17 +49,6 @@ pub trait CurrentPositionTrait {
     fn payout_to_subaccount(&self) -> Option<IcrcSubaccount>;
 }
 
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct CyclesPosition {
-    pub id: PositionId,   
-    pub positor: Principal,
-    pub quest: TradeCyclesQuest,
-    pub current_position_cycles: Cycles,
-    pub purchases_rates_times_cycles_quantities_sum: u128,
-    pub fill_quantity_tokens: Tokens,
-    pub tokens_payouts_fees_sum: Tokens,
-    pub timestamp_nanos: u128,
-}
 
 impl CurrentPositionTrait for CyclesPosition {
     fn id(&self) -> PositionId { self.id }
@@ -153,16 +141,6 @@ impl CurrentPositionTrait for CyclesPosition {
     }
 }
 
-#[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub struct TokenPosition {
-    pub id: PositionId,   
-    pub positor: Principal,
-    pub quest: TradeTokensQuest,
-    pub current_position_tokens: Tokens,
-    pub purchases_rates_times_token_quantities_sum: u128,
-    pub cycles_payouts_fees_sum: Cycles,
-    pub timestamp_nanos: u128,
-}
 
 impl CurrentPositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
@@ -250,36 +228,10 @@ impl CurrentPositionTrait for TokenPosition {
     }
 }
 
-
 // -----------------
-
 
 impl LocalKeyRefCellLogStorageDataTrait for TradeLog {
     const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
-}
-
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct TradeLogTemporaryData {
-    pub cycles_payout_lock: bool,
-    pub token_payout_lock: bool,
-    pub payout_cycles_to_subaccount: Option<IcrcSubaccount>,
-    pub payout_tokens_to_subaccount: Option<IcrcSubaccount>,
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct TradeLogAndTemporaryData {
-    pub log: TradeLog,
-    pub temporary_data: TradeLogTemporaryData,
-}
-
-impl TradeLogAndTemporaryData {
-    pub fn can_move_into_the_stable_memory_for_the_long_term_storage(&self) -> bool {
-        self.temporary_data.cycles_payout_lock == false
-        && self.temporary_data.token_payout_lock == false
-        && self.log.cycles_payout_data.is_some()
-        && self.log.token_payout_data.is_some()
-    }
 }
 
 // --------
@@ -297,24 +249,6 @@ pub trait VoidPositionTrait: Clone {
     fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
 }
 
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct VPUpdateStoragePositionData {
-    pub lock: bool,
-    pub status: bool,
-    pub update_storage_position_log: PositionLog,
-}
-
-#[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct VoidCyclesPosition {
-    pub position_id: PositionId,
-    pub positor: Principal,
-    pub cycles: Cycles,
-    pub cycles_payout_lock: bool,
-    pub cycles_payout_data: Option<PayoutData>,
-    pub timestamp_nanos: u128,
-    pub update_storage_position_data: VPUpdateStoragePositionData,
-    pub return_cycles_to_subaccount: Option<IcrcSubaccount>,
-}
 
 impl VoidPositionTrait for VoidCyclesPosition {
     fn position_id(&self) -> PositionId {
@@ -350,18 +284,6 @@ impl VoidPositionTrait for VoidCyclesPosition {
 }
 
 // --------
-
-#[derive(CandidType, Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct VoidTokenPosition {
-    pub position_id: PositionId,
-    pub tokens: Tokens,
-    pub positor: Principal,
-    pub token_payout_lock: bool,
-    pub token_payout_data: Option<PayoutData>,
-    pub timestamp_nanos: u128,
-    pub update_storage_position_data: VPUpdateStoragePositionData,    
-    pub return_tokens_to_subaccount: Option<IcrcSubaccount>,
-}
 
 impl VoidPositionTrait for VoidTokenPosition {
     fn position_id(&self) -> PositionId {

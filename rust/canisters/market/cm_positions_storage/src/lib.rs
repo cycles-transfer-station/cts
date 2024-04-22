@@ -6,7 +6,7 @@ use cts_lib::{
             refcell::{with, with_mut}
         },
     },
-    types::cm::tc::{PositionId, storage_logs::{StorageLogTrait, position_log::PositionLog}},
+    types::cm::tc::{PositionId, storage_logs::{LogStorageInit, StorageLogTrait, position_log::PositionLog}},
 };
 use ic_cdk::{
     update,
@@ -23,7 +23,6 @@ use cm_storage_lib::{
     OldStorageData,
     STORAGE_DATA,
     STORAGE_DATA_MEMORY_ID,
-    LogStorageInit,
     FlushQuest,
     FlushSuccess,
     FlushError,    

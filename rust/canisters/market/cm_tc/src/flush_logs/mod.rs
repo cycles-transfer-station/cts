@@ -7,7 +7,7 @@ use crate::{
 };
 use cm_storage_lib::{FlushQuestForward, FlushResult, FlushError};
 use cts_lib::{
-    types::{CallError, Cycles},
+    types::{cm::tc::{FlushLogsStorageError, CreateStorageCanisterError}},
     consts::TRILLION,
     tools::{
         localkey::refcell::{with,with_mut},
@@ -25,9 +25,8 @@ use ic_cdk::{
         canister_balance128,
     }
 };
-use serde::{Serialize};
 use serde_bytes::Bytes;
-use candid::{Principal, CandidType, Deserialize, encode_one, decode_one};
+use candid::{Principal, encode_one, decode_one};
 use std::{
     thread::LocalKey,
     cell::RefCell,
@@ -35,14 +34,6 @@ use std::{
 
 
 
-
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub enum FlushLogsStorageError {
-    CreateStorageCanisterError(CreateStorageCanisterError),
-    StorageCanisterCallError(CallError),
-    NewStorageCanisterIsFull, // when a *new* trade-log-storage-canister returns StorageIsFull on the first flush call. 
-}
 
        
 
@@ -145,15 +136,6 @@ pub async fn flush_logs(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static Local
 
 
 
-
-
-#[derive(CandidType, Serialize, Deserialize, Debug)]
-pub enum CreateStorageCanisterError {
-    CyclesBalanceTooLow{ cycles_balance: Cycles },
-    CreateCanisterCallError(CallError),
-    InstallCodeCandidError(String),
-    InstallCodeCallError(CallError),
-}
 
 async fn create_storage_canister(#[allow(non_snake_case)]LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>) -> Result<Principal/*saves the trade-log-storage-canister-data in the LOG_STORAGE_DATA*/, CreateStorageCanisterError> {
     use crate::management_canister::*;

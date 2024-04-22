@@ -91,12 +91,6 @@ pub fn get_logs_storage_memory() -> VirtualMemory<DefaultMemoryImpl> {
 }
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]
-pub struct LogStorageInit {
-    pub log_size: u32,
-}
-
-
 
 #[derive(CandidType)]
 pub struct FlushQuestForward<'a> {

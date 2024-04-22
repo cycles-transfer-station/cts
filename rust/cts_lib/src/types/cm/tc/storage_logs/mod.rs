@@ -1,8 +1,24 @@
 use super::*;
-
+use crate::consts::MiB;
 
 pub mod trade_log; 
 pub mod position_log;
+
+
+#[cfg(not(debug_assertions))]
+pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
+
+#[cfg(debug_assertions)]
+pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 1 * KiB;
+
+pub const MAX_STORAGE_BUFFER_SIZE: usize = FLUSH_STORAGE_BUFFER_AT_SIZE + 1*MiB;
+
+#[cfg(not(debug_assertions))]
+pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
+
+#[cfg(debug_assertions)]
+pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 512; 
+
 
 
 pub trait StorageLogTrait {
@@ -15,10 +31,14 @@ pub trait StorageLogTrait {
     fn index_keys_of_the_log_serialization(log_b: &[u8]) -> Vec<Self::LogIndexKey>;
 }
 
-
-
 #[derive(CandidType, Deserialize, Clone)]
 pub struct ViewStorageLogsQuest<LogIndexKey> {
     pub opt_start_before_id: Option<u128>,
     pub index_key: Option<LogIndexKey>
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct LogStorageInit {
+    pub log_size: u32,
+}
+

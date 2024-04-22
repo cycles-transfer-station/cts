@@ -14,7 +14,7 @@ use cts_lib::{
         ViewLatestTradesSponse, 
         LatestTradesDataItem, 
         MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA,
-        storage_logs::{StorageLogTrait, trade_log::{self, TradeLog}},
+        storage_logs::{LogStorageInit, StorageLogTrait, trade_log::{self, TradeLog}},
     },
 };
 use ic_cdk::{
@@ -31,7 +31,6 @@ use cm_storage_lib::{
     STORAGE_DATA,
     STORAGE_DATA_MEMORY_ID,
     get_logs_storage_memory,    
-    LogStorageInit,
     FlushQuest,
     FlushSuccess,
     FlushError,

@@ -18,7 +18,7 @@ pub mod tc;
 
 pub const ICP_LEDGER_TRANSFER_FEE: u128 = 10_000;
 pub const CMC_RATE: u128 = 55555;
-pub const ICP_MINTER: Principal = Principal::from_slice(&[1,1,1,1,1]);
+pub const ICP_MINTER: Principal = Principal::from_slice(b"icp-minter");
 pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
@@ -74,10 +74,9 @@ pub fn icrc1_balance(pic: &PocketIc, ledger: Principal, countid: &Account) -> u1
 }
 
 pub fn mint_icp(pic: &PocketIc, to: &Account, amount: u128) {
-    let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
+    let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as_(
         pic,
         ICP_LEDGER,
-        RawEffectivePrincipal::None,
         ICP_MINTER,            
         "icrc1_transfer",
         (TransferArg{
