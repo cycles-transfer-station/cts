@@ -38,7 +38,7 @@ use cts_lib::{
         Cycles,
         CallError,
         canister_code::CanisterCode,
-        cm::{*, tc::{*, storage_logs::{trade_log::*, position_log::*}}},
+        cm::{*, tc::{*, storage_logs::{*, trade_log::*, position_log::*}}},
     },
     management_canister,
     icrc::{
@@ -74,9 +74,7 @@ use candid::{
     CandidType,
     Deserialize,
 };
-use cm_storage_lib::LogStorageInit;
 use serde_bytes::{ByteBuf};
-use serde::Serialize;
 
 // -------
 
@@ -87,10 +85,8 @@ mod payouts;
 use payouts::do_payouts;
 
 mod flush_logs;
-use flush_logs::FlushLogsStorageError;
 
 mod candle_counter;
-use candle_counter::CandleCounter;
 
 mod trade_quest;
 use trade_quest::TradeQuest;
@@ -105,88 +101,6 @@ mod transfer_memo;
 use transfer_memo::*;
 
 // ---------------
-
-
-
-#[derive(CandidType, Serialize, Deserialize)]
-struct CMData {
-    cts_id: Principal,
-    cm_main_id: Principal,
-    icrc1_token_ledger: Principal,
-    icrc1_token_ledger_transfer_fee: Tokens,
-    cycles_bank_id: Principal,
-    cycles_bank_transfer_fee: Cycles,
-    positions_id_counter: u128,
-    trade_logs_id_counter: u128,
-    mid_call_user_cycles_balance_locks: HashSet<Principal>,
-    mid_call_user_token_balance_locks: HashSet<Principal>,
-    cycles_positions: Vec<CyclesPosition>,
-    token_positions: Vec<TokenPosition>,
-    trade_logs: VecDeque<TradeLogAndTemporaryData>,
-    void_cycles_positions: Vec<VoidCyclesPosition>,
-    void_token_positions: Vec<VoidTokenPosition>,
-    do_payouts_errors: Vec<CallError>,
-    candle_counter: CandleCounter,
-}
-
-impl CMData {
-    fn new() -> Self {
-        Self {
-            cts_id: Principal::from_slice(&[]),
-            cm_main_id: Principal::from_slice(&[]),
-            icrc1_token_ledger: Principal::from_slice(&[]),
-            icrc1_token_ledger_transfer_fee: 0,
-            cycles_bank_id: Principal::from_slice(&[]),
-            cycles_bank_transfer_fee: 0,
-            positions_id_counter: 0,
-            trade_logs_id_counter: 0,
-            mid_call_user_cycles_balance_locks: HashSet::new(),
-            mid_call_user_token_balance_locks: HashSet::new(),
-            cycles_positions: Vec::new(),
-            token_positions: Vec::new(),
-            trade_logs: VecDeque::new(),
-            void_cycles_positions: Vec::new(),
-            void_token_positions: Vec::new(),
-            do_payouts_errors: Vec::new(),
-            candle_counter: CandleCounter::default(),
-        }
-    }
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct LogStorageData {
-    storage_canisters: Vec<StorageCanisterData>,
-    #[serde(with = "serde_bytes")]
-    storage_buffer: Vec<u8>,
-    storage_flush_lock: bool,
-    create_storage_canister_temp_holder: Option<Principal>,
-    flush_storage_errors: Vec<(FlushLogsStorageError, u64/*timestamp_nanos*/)>,
-    storage_canister_code: CanisterCode,
-    storage_canister_init: LogStorageInit,
-}
-impl LogStorageData {
-    fn new(storage_canister_init: LogStorageInit) -> Self {
-        Self {
-            storage_canisters: Vec::new(),
-            storage_buffer: Vec::new(),
-            storage_flush_lock: false,
-            create_storage_canister_temp_holder: None,
-            flush_storage_errors: Vec::new(),
-            storage_canister_code: CanisterCode::empty(),
-            storage_canister_init,
-        }
-    }
-}
-#[derive(CandidType, Serialize, Deserialize)]
-pub struct StorageCanisterData {
-    log_size: u32,
-    first_log_id: u128,
-    length: u64, // number of logs current store on this storage canister
-    is_full: bool,
-    canister_id: Principal,
-    creation_timestamp: u128, // set once when storage canister is create.
-    module_hash: [u8; 32] // update this field when upgrading the storage canisters.
-}
 
 
 #[allow(non_upper_case_globals)]
@@ -230,20 +144,6 @@ const DO_TRADE_LOGS_TOKEN_PAYOUTS_CHUNK_SIZE: usize = 10;
 const MAX_MID_CALL_USER_BALANCE_LOCKS: usize = 500;
 
 pub const VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS: u128 = 0;
-
-#[cfg(not(debug_assertions))]
-pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 5 * MiB;
-
-#[cfg(debug_assertions)]
-pub const FLUSH_STORAGE_BUFFER_AT_SIZE: usize = 1 * KiB;
-
-pub const MAX_STORAGE_BUFFER_SIZE: usize = FLUSH_STORAGE_BUFFER_AT_SIZE + 1*MiB;
-
-#[cfg(not(debug_assertions))]
-pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 1*MiB+512*KiB; 
-
-#[cfg(debug_assertions)]
-pub const FLUSH_STORAGE_BUFFER_CHUNK_SIZE_BEFORE_MODULO: usize = 512; 
 
 const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
@@ -1101,17 +1001,6 @@ fn view_storage_logs_<'a, LogType: StorageLogTrait>(
 }
 
 
-
-#[derive(CandidType, Deserialize, Debug)]
-pub struct StorageCanister {
-    // The id of the first log in this storage-canister
-    first_log_id : u128,
-    // The number of logs in this storage-canister
-    length : u128,
-    // the size of the log-serialization-format in this storage-canister.  
-    log_size: u32,
-    canister_id : Principal,
-}
 
 #[query]
 pub fn view_positions_storage_canisters() -> Vec<StorageCanister> {

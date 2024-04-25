@@ -376,7 +376,6 @@ fn test_candle_counter_1() {
     // -
     let candles: Vec<Candle> = view_candles(&pic, tc, 
         ViewCandlesQuest{
-    		segment_length: ViewCandlesSegmentLength::OneMinute,
     		opt_start_before_time_nanos: None,
     	}
     ).candles;
@@ -397,4 +396,6 @@ fn test_candle_counter_1() {
     });    
     
 }
+
+
 
