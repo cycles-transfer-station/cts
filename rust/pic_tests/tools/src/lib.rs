@@ -2,7 +2,7 @@ use pocket_ic::{*, common::rest::RawEffectivePrincipal};
 use candid::{Nat, Principal, CandidType, Deserialize};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
-    consts::{TRILLION},
+    consts::{TRILLION, KiB},
     tools::principal_token_subaccount,
     types::{
         cm::cm_main::*,
@@ -18,7 +18,7 @@ pub mod tc;
 
 pub const ICP_LEDGER_TRANSFER_FEE: u128 = 10_000;
 pub const CMC_RATE: u128 = 55555;
-pub const ICP_MINTER: Principal = Principal::from_slice(&[1,1,1,1,1]);
+pub const ICP_MINTER: Principal = Principal::from_slice(b"icp-minter");
 pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
@@ -74,10 +74,9 @@ pub fn icrc1_balance(pic: &PocketIc, ledger: Principal, countid: &Account) -> u1
 }
 
 pub fn mint_icp(pic: &PocketIc, to: &Account, amount: u128) {
-    let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as(
+    let (mint_icp_r,): (Result<Nat, TransferError>,) = call_candid_as_(
         pic,
         ICP_LEDGER,
-        RawEffectivePrincipal::None,
         ICP_MINTER,            
         "icrc1_transfer",
         (TransferArg{
@@ -90,6 +89,22 @@ pub fn mint_icp(pic: &PocketIc, to: &Account, amount: u128) {
         },)
     ).unwrap();
     mint_icp_r.unwrap();
+}
+
+pub fn create_and_download_state_snapshot<T: candid::CandidType + for<'a> Deserialize<'a>>(pic: &PocketIc, caller: Principal, canister: Principal, memory_id: u8) -> T {
+    let (snapshot_len,): (u64,) = call_candid_as(&pic, canister, RawEffectivePrincipal::None, caller, "controller_create_state_snapshot", (memory_id,)).unwrap();
+    let mut v = Vec::<u8>::new();
+    let mut i = 0;
+    let chunk_size_bytes = 512 * KiB * 3; 
+    while (v.len() as u64) < snapshot_len {
+        let (chunk,): (Vec<u8>,) = query_candid_as(&pic, canister, caller, "controller_download_state_snapshot", 
+            (memory_id, v.len() as u64, std::cmp::min(chunk_size_bytes as u64, snapshot_len - v.len() as u64))
+        ).unwrap(); 
+        i = i + chunk.len();
+        v.extend(chunk);
+    }  
+    assert_eq!(v.len(), snapshot_len as usize);
+    candid::decode_one(&v).unwrap()    
 }
 
 pub fn call_candid_as_<Input, Output>(

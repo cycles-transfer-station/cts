@@ -7,15 +7,12 @@ use cts_lib::consts::{SECONDS_IN_A_MINUTE, SECONDS_IN_A_DAY};
 const MAX_CANDLES_SPONSE: usize = (MiB as usize * 1 + KiB as usize * 512) / std::mem::size_of::<Candle>(); 
 
 
-#[derive(Default, CandidType, Serialize, Deserialize)]
-pub struct CandleCounter {
-    segments_1_minute: Vec<Candle>,   // last item is the latest_one_minute
-    volume_cycles: Cycles,            // all-time
-    volume_tokens: Tokens,            // all-time
+pub trait CandleCounterImplTrait {
+    fn count_trade(&mut self, tl: &TradeLog);
 }
 
-impl CandleCounter {
-    pub fn count_trade(&mut self, tl: &TradeLog) {
+impl CandleCounterImplTrait for CandleCounter {
+    fn count_trade(&mut self, tl: &TradeLog) {
         let current_segment_start_time_nanos = segment_start_time_nanos(tl.timestamp_nanos as u64);
         
         if self.segments_1_minute.len() == 0 || self.segments_1_minute.last().unwrap().time_nanos < current_segment_start_time_nanos {
@@ -75,18 +72,6 @@ pub fn create_candles<'a>(candle_counter: &'a CandleCounter, q: ViewCandlesQuest
 }
     
 
-#[derive(CandidType, Deserialize)]
-pub struct ViewVolumeStatsSponse {
-    volume_cycles: Volume,
-    volume_tokens: Volume,
-}
-#[derive(CandidType, Deserialize)]
-pub struct Volume{
-    volume_24_hour: u128,
-    volume_7_day: u128,
-    volume_30_day: u128,
-    volume_sum: u128,
-}
 
 
 
