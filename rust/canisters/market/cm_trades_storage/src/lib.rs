@@ -177,3 +177,4 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
 
 
 
+ic_cdk::export_candid!();

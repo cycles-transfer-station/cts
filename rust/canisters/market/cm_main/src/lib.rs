@@ -514,3 +514,12 @@ pub async fn controller_call_canister(q: ControllerCallCanisterQuest) -> Result<
     .map_err(call_error_as_u32_and_string)
 }
 
+
+
+
+
+
+
+
+
+ic_cdk::export_candid!();

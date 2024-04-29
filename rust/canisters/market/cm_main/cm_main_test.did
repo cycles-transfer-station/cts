@@ -1,0 +1,89 @@
+type CMMainInit = record { cycles_bank_id : principal; cts_id : principal };
+type CanisterCode = record { module_hash : vec nat8; module : vec nat8 };
+type ContinueControllerCreateIcrc1TokenTradeContractError = variant {
+  ControllerCreateIcrc1TokenTradeContractError : ControllerCreateIcrc1TokenTradeContractError;
+  ControllerIsNotInTheMiddleOfAControllerCreateIcrc1TokenTradeContractCall;
+};
+type ControllerCallCanisterQuest = record {
+  cycles : nat;
+  method_name : text;
+  callee : principal;
+  arg_raw : vec nat8;
+};
+type ControllerCreateIcrc1TokenTradeContractError = variant {
+  TradeContractForTheLedgerAlreadyCreated : TradeContractIdAndLedgerId;
+  MidCallError : ControllerCreateIcrc1TokenTradeContractMidCallError;
+  CreateCanisterIcrc1TokenTradeContractCallError : record { nat32; text };
+  ControllerIsInTheMiddleOfADifferentCall : ControllerIsInTheMiddleOfADifferentCall;
+  CyclesBalanceTooLow : record { cycles_balance : nat };
+};
+type ControllerCreateIcrc1TokenTradeContractMidCallError = variant {
+  InstallCodeIcrc1TokenTradeContractCallError : record { nat32; text };
+  TCInitCandidEncodeError : text;
+};
+type ControllerCreateIcrc1TokenTradeContractQuest = record {
+  icrc1_ledger_id : principal;
+  icrc1_ledger_transfer_fee : nat;
+};
+type ControllerCreateIcrc1TokenTradeContractSuccess = record {
+  trade_contract_canister_id : principal;
+};
+type ControllerIsInTheMiddleOfADifferentCall = record {
+  kind : ControllerIsInTheMiddleOfADifferentCallKind;
+  must_call_continue : bool;
+};
+type ControllerIsInTheMiddleOfADifferentCallKind = variant {
+  ControllerCreateIcrc1TokenTradeContract;
+};
+type ControllerUpgradeCSQuest = record {
+  new_canister_code : opt CanisterCode;
+  post_upgrade_quest : vec nat8;
+  specific_cs : opt vec principal;
+};
+type LogStorageType = variant { Positions; Trades };
+type MarketCanisterType = variant {
+  TradesStorage;
+  PositionsStorage;
+  TradeContract;
+};
+type Result = variant {
+  Ok : ControllerCreateIcrc1TokenTradeContractSuccess;
+  Err : ContinueControllerCreateIcrc1TokenTradeContractError;
+};
+type Result_1 = variant { Ok : vec nat8; Err : record { nat32; text } };
+type Result_2 = variant {
+  Ok : ControllerCreateIcrc1TokenTradeContractSuccess;
+  Err : ControllerCreateIcrc1TokenTradeContractError;
+};
+type Result_3 = variant { Ok; Err : record { nat32; text } };
+type Result_4 = variant {
+  Ok : vec record { principal; UpgradeOutcome };
+  Err : record { nat32; text };
+};
+type TradeContractIdAndLedgerId = record {
+  icrc1_ledger_canister_id : principal;
+  trade_contract_canister_id : principal;
+};
+type UpgradeOutcome = record {
+  install_code_result : opt Result_3;
+  start_canister_result : opt Result_3;
+  stop_canister_result : opt Result_3;
+};
+service : (CMMainInit) -> {
+  continue_controller_create_trade_contract : () -> (Result);
+  controller_call_canister : (ControllerCallCanisterQuest) -> (Result_1);
+  controller_create_trade_contract : (
+      ControllerCreateIcrc1TokenTradeContractQuest,
+    ) -> (Result_2);
+  controller_upgrade_tc_log_storage_canisters : (
+      principal,
+      ControllerUpgradeCSQuest,
+      LogStorageType,
+    ) -> (Result_4);
+  controller_upgrade_tcs : (ControllerUpgradeCSQuest) -> (
+      vec record { principal; UpgradeOutcome },
+    );
+  controller_upload_canister_code : (CanisterCode, MarketCanisterType) -> ();
+  controller_view_tc_payouts_errors : (principal, nat32) -> (Result_1);
+  view_icrc1_token_trade_contracts : () -> () query;
+}
