@@ -89,3 +89,9 @@ pub fn map_logs_rchunks(k: UserPositionsKey, opt_start_before_id: Option<u128>, 
 }
 
 
+
+
+
+
+
+ic_cdk::export_candid!();

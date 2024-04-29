@@ -1,0 +1,16 @@
+type FlushError = variant { StorageIsFull };
+type FlushQuest = record { bytes : vec nat8 };
+type LogStorageInit = record { log_size : nat32 };
+type Result = variant { Ok : record {}; Err : FlushError };
+type ViewLatestTradesQuest = record { opt_start_before_id : opt nat };
+type ViewLatestTradesSponse = record {
+  is_last_chunk_on_this_canister : bool;
+  trades_data : vec record { nat; nat; nat; nat64 };
+};
+service : (LogStorageInit) -> {
+  flush : (FlushQuest) -> (Result);
+  map_logs_rchunks : (nat, opt nat, nat32) -> () query;
+  view_latest_trades : (ViewLatestTradesQuest) -> (
+      ViewLatestTradesSponse,
+    ) query;
+}

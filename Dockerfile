@@ -2,7 +2,7 @@ FROM ubuntu@sha256:bcc511d82482900604524a8e8d64bf4c53b2461868dac55f4d04d660e6198
 
 RUN apt -yq update && \
     apt -yqq install --no-install-recommends curl ca-certificates \
-        build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake rsync micro
+        build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake rsync
 
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
@@ -16,10 +16,8 @@ RUN curl --fail https://sh.rustup.rs -sSf \
     cargo install candid-extractor --version 0.1.2 --force && \
     cargo install just --version 1.24.0 --force
 
-COPY . /cts-system
-WORKDIR /cts-system
+COPY . /cts
+WORKDIR /cts
 
-#RUN export RUSTFLAGS="--remap-path-prefix $(readlink -f $(dirname ${0}))=/build"
 RUN export RUSTFLAGS="--remap-path-prefix ${CARGO_HOME}=/cargo"
-RUN just build
-RUN just show-module-hashes
+RUN just build release
