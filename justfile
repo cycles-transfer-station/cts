@@ -38,8 +38,9 @@ build: && (cargo-build-wasms "dev") (cargo-build-wasms "release") create-candid-
 test-unit:
     cd {{justfile_directory()}}/rust && cargo test
     
-test-pic:
-    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test
+test-pic: build
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test | grep -v "Non-increasing batch time at height"
+    
 
 test: && test-unit test-pic
     @echo "test"
