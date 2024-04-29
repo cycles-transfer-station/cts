@@ -1,7 +1,7 @@
 # CYCLES-TRANSFER-STATION
 
 ### Build
-This build aims to be reproducible on Fedora and Ubuntu Linux. On a reproducible build, the build output files in the `build` folder have the same hash as the canister modules running on the CTS, therefore the CTS canisters' code is verifiable.
+This build aims to be reproducible on Ubuntu Linux. On a reproducible build, the build output files in the `build` folder have the same hash as the canister modules running on the CTS, therefore the CTS canisters' code is verifiable.
 
 > `bash scripts/podman_build.sh`
 
