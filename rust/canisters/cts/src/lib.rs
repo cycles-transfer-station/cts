@@ -84,7 +84,7 @@ thread_local! {
 
 #[derive(CandidType, Deserialize)]
 struct CTSInit {
-    batch_creators: HashSet<Principal>,
+    batch_creators: Option<HashSet<Principal>>,
 }
 
 #[init]
@@ -92,7 +92,9 @@ fn init(cts_init: CTSInit) {
     canister_tools::init(&CTS_DATA, CTS_DATA_MEMORY_ID);
     
     with_mut(&CTS_DATA, |d| {
-        d.batch_creators = cts_init.batch_creators;
+        if let Some(batch_creators) = cts_init.batch_creators {
+            d.batch_creators = batch_creators;
+        }
     });
 } 
 

@@ -1,3 +1,4 @@
+type CTSInit = record { batch_creators : vec principal };
 type CTSMetrics = record { cycles_balance : nat; stable_size : nat64 };
 type UploadFile = record {
   headers : vec record { text; text };
@@ -5,11 +6,17 @@ type UploadFile = record {
   chunks : nat32;
   first_chunk : vec nat8;
 };
-service : (record {}) -> {
+service : (CTSInit) -> {
+  controller_add_batch_creators : (vec principal) -> ();
   controller_clear_file : (text) -> ();
   controller_clear_files : () -> ();
-  controller_get_file_hashes : () -> (vec record { text; vec nat8 }) query;
-  controller_upload_file : (UploadFile) -> ();
-  controller_upload_file_chunks : (text, nat32, vec nat8) -> ();
+  controller_commit_batch : () -> ();
+  controller_remove_batch_creators : (vec principal) -> ();
   controller_view_metrics : () -> (CTSMetrics) query;
+  create_batch : (record {}) -> ();
+  upload_file : (UploadFile) -> ();
+  upload_file_chunks : (text, nat32, vec nat8) -> ();
+  view_batch_creators : () -> (vec principal) query;
+  view_current_batch_file_hashes : () -> (vec record { text; vec nat8 }) query;
+  view_file_hashes : () -> (vec record { text; vec nat8 }) query;
 }
