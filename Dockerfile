@@ -13,8 +13,12 @@ RUN curl --fail https://sh.rustup.rs -sSf \
     rustup default ${RUST_VERSION}-x86_64-unknown-linux-gnu && \
     rustup target add wasm32-unknown-unknown && \
     cargo install ic-wasm --version 0.7.0 --force && \
-    cargo install candid-extractor --version 0.1.2 --force && \
-    cargo install just --version 1.24.0 --force
+    cargo install candid-extractor --version 0.1.2 --force
+    
+ENV JUST_DIR=/opt/just_dir
+RUN mkdir -p $JUST_DIR && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to $JUST_DIR
+ENV PATH=${PATH}:${JUST_DIR}
+    
 
 COPY . /cts
 WORKDIR /cts
