@@ -60,6 +60,10 @@ type Result_4 = variant {
   Ok : vec record { principal; UpgradeOutcome };
   Err : record { nat32; text };
 };
+type TradeContractData = record {
+  tc_module_hash : vec nat8;
+  latest_upgrade_timestamp_nanos : nat64;
+};
 type TradeContractIdAndLedgerId = record {
   icrc1_ledger_canister_id : principal;
   trade_contract_canister_id : principal;
@@ -85,5 +89,7 @@ service : (CMMainInit) -> {
     );
   controller_upload_canister_code : (CanisterCode, MarketCanisterType) -> ();
   controller_view_tc_payouts_errors : (principal, nat32) -> (Result_1);
-  view_icrc1_token_trade_contracts : () -> () query;
+  view_icrc1_token_trade_contracts : () -> (
+      vec record { TradeContractIdAndLedgerId; TradeContractData },
+    ) query;
 }

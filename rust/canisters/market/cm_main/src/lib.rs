@@ -3,7 +3,6 @@ use ic_cdk::{
         trap,
         caller,
         call::{
-            reply,
             call,
             call_raw128,
         },
@@ -55,7 +54,7 @@ use candid::{
 
 
 #[derive(CandidType, Serialize, Deserialize, Clone)]        
-struct TradeContractData {
+pub struct TradeContractData {
     tc_module_hash: [u8; 32],
     latest_upgrade_timestamp_nanos: u64,
 }
@@ -379,11 +378,11 @@ async fn continue_controller_create_icrc1token_trade_contract_()
 
 // ------------
 
-#[query(manual_reply = true)]
-pub fn view_icrc1_token_trade_contracts() {
+#[query]
+pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, TradeContractData)> {
     with(&CM_MAIN_DATA, |cm_main_data| {
-        reply::<(&Vec<(TradeContractIdAndLedgerId, TradeContractData)>,)>((&(cm_main_data.trade_contracts),));
-    });
+        cm_main_data.trade_contracts.clone()
+    })
 }
 
 // ----------------
