@@ -12,7 +12,7 @@ url: https://cycles-transfer-station.com
 NnsProposal:
     title: "Create SNS for the CYCLES-TRANSFER-STATION." 
 
-    url: "https://change-this.com"
+    url: "https://cycles-transfer-station.com"
 
     summary: "Hi summary"
 
@@ -61,7 +61,7 @@ Distribution:
         stake: 1_000_000 tokens
         memo: 0
         dissolve_delay: 5 years
-        vesting_period: 0 years
+        vesting_period: 5 years
       - principal: 6mmfo-3g7mh-pjrig-sgliy-zkemc-gxr4w-lvppb-4gi5x-sictd-c6ip7-bae
         stake: 500_000 tokens
         memo: 1
@@ -87,7 +87,7 @@ Distribution:
         memo: 5
         dissolve_delay: 3 months
         vesting_period: 3 months
-      - principal: 6mmfo-3g7mh-pjrig-sgliy-zkemc-gxr4w-lvppb-4gi5x-sictd-c6ip7-bae
+      - principal: 2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe
         stake: 416_000 tokens
         memo: 6
         dissolve_delay: 1 months
@@ -109,8 +109,8 @@ Distribution:
         vesting_period: 0 years
         
     InitialBalances:
-        governance: 11_000_000 tokens
-        swap: 5_000_000 tokens
+        governance: 10_000_000 tokens
+        swap: 6_000_000 tokens
 
     total: 20_000_000 tokens
 
