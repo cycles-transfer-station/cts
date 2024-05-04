@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use sha2::Digest;
 use cts_lib::{
     tools::{
         localkey::refcell::{with},
@@ -21,6 +21,17 @@ pub struct File {
     pub headers: Vec<(String, String)>,
     pub content_chunks: Vec<ByteBuf>
 }
+impl File {
+    pub fn sha256_hash(&self) -> [u8; 32] {
+        let mut hasher = sha2::Sha256::new();
+        for chunk in self.content_chunks.iter() {
+            hasher.update(chunk);    
+        }
+        hasher.finalize().into()
+    }
+}
+
+
 pub type Files = HashMap<String, File>;
 pub type FilesHashes = RbTree<String, ic_certified_map::Hash>;
 
