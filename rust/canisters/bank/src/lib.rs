@@ -69,6 +69,8 @@ use canister_tools::{
     get_virtual_memory,
 };
 
+mod manage_logs_memory;
+use manage_logs_memory::*;
 
 // --------- TYPES -----------
 
@@ -127,6 +129,7 @@ pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
+pub const MAX_LOGS_LEN_BEFORE_SCALING: u64 = 134217728; //  1*GiB / (4 * 2) // bc of the users_logs_pointers
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
 pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
@@ -139,7 +142,7 @@ thread_local!{
     pub static USER_LOGS_POINTERS: RefCell<UserLogsPointers> = RefCell::new(UserLogsPointers::new());
     // stable-structures
     pub static CYCLES_BALANCES: RefCell<CyclesBalances> = RefCell::new(CyclesBalances::init(get_virtual_memory(CYCLES_BALANCES_MEMORY_ID)));
-    pub static LOGS: RefCell<Logs> = RefCell::new(Logs::init(get_virtual_memory(LOGS_MEMORY_ID)).unwrap());
+    // LOGS private in the manage_logs_memory.rs module
 }
 
 // ---------- LIFECYCLE ---------
@@ -196,6 +199,11 @@ fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut C
     cb_data.total_supply = cb_data.total_supply.saturating_sub(sub_cycles);    
 }
 
+fn check_logs_len() {
+    if logs_len() >= MAX_LOGS_LEN_BEFORE_SCALING {
+        trap("logs_len() >= MAX_LOGS_LEN_BEFORE_SCALING");
+    }
+}
 
 
 // ------- METHODS ---------
@@ -269,6 +277,9 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
 
 #[update]
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
+
+    check_logs_len();
+    
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
         
     if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
@@ -301,8 +312,8 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         Ok(())
     })?;
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
+    let block_height: u64 = {
+        push_log(
             &Log{
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
@@ -313,10 +324,11 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
                     memo: q.memo,
                     ts: q.created_at_time,
                 }
-            }
+            },
+            false,
         ).unwrap(); // if growfailed then trap and roll back the transfer.
-        logs.len() - 1
-    });
+        logs_len() - 1
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(caller_icrc_id)
@@ -356,11 +368,10 @@ pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>)
         };
         let start_i: usize = end_i.saturating_sub(LOGS_CHUNK_SIZE);
         is_last_chunk = start_i == 0; 
-        with(&LOGS, |logs| {
-            for block_height in list[start_i..end_i].iter() {
-                v.push((block_height.clone() as u128, logs.get(block_height.clone() as u64).unwrap()));     
-            }
-        });
+        
+        for block_height in list[start_i..end_i].iter() {
+            v.push((block_height.clone() as u128, get_log(block_height.clone() as u64).unwrap()));     
+        }
     });
     GetLogsBackwardsSponse {
         logs: v,
@@ -388,6 +399,9 @@ fn controller_clear_user_logs_pointers_cache() {
 
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
+    
+    check_logs_len();
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -413,8 +427,8 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
+    let block_height: u64 = {
+        push_log(
             &Log{
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
@@ -425,10 +439,11 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
                     memo: q.memo,
                     ts: q.created_at_time,
                 }
-            }
+            },
+            false
         ).unwrap(); // if growfailed then trap and roll back.
-        logs.len() - 1
-    });
+        logs_len() - 1
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(q.to)
@@ -446,6 +461,9 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
+    
+    check_logs_len();
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -471,6 +489,8 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
         Ok(())
     })?;
     
+    hold_space_for_a_log().unwrap(); // hold space or rollback here before any async messages.    
+                
     let r = call_with_payment128::<_, ()>(
         Principal::management_canister(),
         "deposit_cycles",
@@ -480,8 +500,8 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     match r {
         Ok(()) => {
-            let block_height: u64 = with_mut(&LOGS, |logs| {
-                logs.push(
+            let block_height: u64 = {
+                push_log(
                     &Log{
                         ts: time_nanos_u64(),
                         fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
@@ -492,10 +512,11 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                             memo: q.memo,
                             ts: q.created_at_time,
                         }
-                    }
-                ).unwrap(); // what to do if grow-fail here? For now there is a lot of space on the fiduciary subnet so it is ok for now but either put in a buffer wait on a timer or create archives.
-                logs.len() - 1
-            });
+                    },
+                    true
+                ).unwrap();     // will not trap here since the space was reserved beforehand using the hold_space_for_a_log_function.
+                logs_len() - 1
+            };
             
             with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
                 user_logs_pointers.entry(caller_icrc_id)
@@ -511,6 +532,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                     add_cycles_balance(cycles_balances, cb_data, caller_icrc_id, q.cycles.saturating_add(BANK_TRANSFER_FEE));
                 })
             });
+            cancel_hold_space_for_a_log();
             Err(CyclesOutError::DepositCyclesCallError(call_error_as_u32_and_string(call_error)))
         }
     }
@@ -533,6 +555,8 @@ struct MintCyclesMidCallData {
 
 #[update]
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
+    
+    check_logs_len();
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
     
@@ -571,7 +595,9 @@ pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
         cb_data.users_mint_cycles.insert(user_id.clone(), mid_call_data.clone());
         Ok(mid_call_data)
     })?;
-
+    
+    hold_space_for_a_log().unwrap(); // before any async
+    
     mint_cycles_(user_id, mid_call_data).await
 }
 
@@ -589,6 +615,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
             },
             Err(ledger_topup_cycles_cmc_icp_transfer_error) => {
                 with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.remove(&user_id); });
+                cancel_hold_space_for_a_log();
                 return Err(MintCyclesError::LedgerTopupCyclesCmcIcpTransferError(ledger_topup_cycles_cmc_icp_transfer_error));
             }
         }
@@ -602,6 +629,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
             Err(ledger_topup_cycles_cmc_notify_error) => {
                 if let LedgerTopupCyclesCmcNotifyError::CmcNotifyError(CmcNotifyError::Refunded{ block_index: Some(b), reason: r }) = ledger_topup_cycles_cmc_notify_error {
                     with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.remove(&user_id); });
+                    cancel_hold_space_for_a_log();
                     return Err(MintCyclesError::LedgerTopupCyclesCmcNotifyRefund{ block_index: b, reason: r});
                 } else {
                     mid_call_data.lock = false;
@@ -619,8 +647,8 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
+    let block_height: u64 = {
+        push_log(
             &Log{
                 ts: time_nanos_u64(),
                 fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
@@ -631,10 +659,11 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                     memo: mid_call_data.quest.memo,
                     ts: mid_call_data.quest.created_at_time,
                 }
-            }
-        ).unwrap(); // look at comment for cycles_out logs.push 
-        logs.len() - 1
-    });
+            },
+            true
+        ).unwrap();  // will not fail because we hold space before. 
+        logs_len() - 1
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(mid_call_data.quest.to)

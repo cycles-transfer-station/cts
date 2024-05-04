@@ -51,3 +51,19 @@ impl Storable for Log {
     };
 }
     
+impl Log {
+    pub fn placeholder() -> Self {
+        Self {
+            ts: 0,
+            fee: None,
+            tx: LogTX{
+                op: Operation::Burn{ from: IcrcId{owner: Principal::anonymous(), subaccount: None}, for_canister: Principal::anonymous() },
+                fee: None,
+                amt: 0,
+                memo: None,
+                ts: None,
+            },
+        }
+    }
+}
+    
