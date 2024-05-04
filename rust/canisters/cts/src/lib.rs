@@ -109,27 +109,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() { 
-    
-    #[derive(CandidType, Deserialize)]
-    struct OldCTSData {
-        frontcode_files: Files,
-        frontcode_files_hashes: FilesHashes,
-    }
-    
-    
-    canister_tools::post_upgrade(&CTS_DATA, CTS_DATA_MEMORY_ID, Some::<fn(OldCTSData) -> CTSData>(
-        |od| {
-            CTSData{
-                frontcode_files: od.frontcode_files,
-                frontcode_files_hashes: od.frontcode_files_hashes,
-                batch_creators: HashSet::from([
-                    Principal::from_text("35bfm-o3l6o-2stfb-kr2p3-qvvw5-dtdjq-q5nly-rqv4r-p7vtd-fs2mg-6qe").unwrap(),
-                    Principal::from_text("2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe").unwrap(),
-                ]),
-                current_batch: Files::new(),
-            } 
-        }
-    ));
+    canister_tools::post_upgrade(&CTS_DATA, CTS_DATA_MEMORY_ID, None::<fn(CTSData) -> CTSData>);
     
     with(&CTS_DATA, |cts_data| {
         set_root_hash(&cts_data);
