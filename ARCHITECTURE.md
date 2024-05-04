@@ -16,15 +16,15 @@ Each cm_tc canister creates two types of storage canisters, one for storing the 
 
 ## CANISTERS
 
-### cts
+### cts - em3jm-bqaaa-aaaar-qabxa-cai
 The canister referred to in this codebase as the 'cts' canister is the frontend "asset" canister, serving certified frontend files to the browser. 
 At this time this is it's only purpose and has no connection to the trading market. The code for this 'cts' canister is located at `rust/canisters/cts` in this repo. This is a top-level canister and will be controlled by the SNS root canister.
 
-### bank
+### bank - wwikr-gqaaa-aaaar-qacva-cai
 The `bank` canister is the CTS-CYCLES-BANK and is located at `rust/canisters/bank` in this repo. This canister is an ICRC-1 ledger (ICRC-2 and ICRC-3 coming soon) that holds cycles for the users 1:1.
 The bank can be used to mint cycles using ICP straight into the user's ledger account, and send-out and receive cycles to and from canisters. This is a top-level canister and will be controlled by the SNS root canister.
 
-### cm_main
+### cm_main - el2py-miaaa-aaaar-qabxq-cai
 The market starts with the canister referred to in this codebase as the 'cm_main' canister located at `rust/canisters/market/cm_main`. This canister creates and manages the trade-contract canisters of each token/ledger listed on the market. This is a top-level canister and will be controlled by the SNS root canister.
 To create a new trade-contract, the cm_main has a method that only the controller can call. The wasm-modules for the trade-contract canister and positions-storage and trades-storage canisters are held on this canister, the cm_main.
 
