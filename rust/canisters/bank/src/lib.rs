@@ -353,30 +353,43 @@ const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;
 
 
 #[query]
-pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
+pub fn get_logs_backwards(opt_icrc_id: Option<IcrcId>, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
     let mut v: Vec<(BlockId, Log)> = Vec::new();
     let mut is_last_chunk = true;
-    with(&USER_LOGS_POINTERS, |user_logs_pointers| {
-        let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id) {
-            Some(list) => list,
-            None => return,
-        };
-        let end_i: usize = if let Some(start_before_block) = opt_start_before_block {
-            list.binary_search(&(start_before_block as u32)).unwrap_or_else(|i|i)  
-        } else {
-            list.len()
-        };
-        let start_i: usize = end_i.saturating_sub(LOGS_CHUNK_SIZE);
-        is_last_chunk = start_i == 0; 
-        
-        for block_height in list[start_i..end_i].iter() {
-            v.push((block_height.clone() as u128, get_log(block_height.clone() as u64).unwrap()));     
+    if let Some(icrc_id) = opt_icrc_id {
+        with(&USER_LOGS_POINTERS, |user_logs_pointers| {
+            let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id) {
+                Some(list) => list,
+                None => return,
+            };
+            let end_i: usize = if let Some(start_before_block) = opt_start_before_block {
+                list.binary_search(&(start_before_block as u32)).unwrap_or_else(|i|i)  
+            } else {
+                list.len()
+            };
+            let start_i: usize = end_i.saturating_sub(LOGS_CHUNK_SIZE);
+            is_last_chunk = start_i == 0; 
+            
+            for block_height in list[start_i..end_i].iter() {
+                v.push((block_height.clone() as u128, get_log(block_height.clone() as u64).unwrap()));     
+            }
+        });
+    } else {
+        let mut finish_i = logs_len();
+        if let Some(start_before_block) = opt_start_before_block {
+            finish_i = std::cmp::min(finish_i, start_before_block as u64);
         }
-    });
+        let start_i = finish_i.saturating_sub(LOGS_CHUNK_SIZE as u64);
+        is_last_chunk = start_i == 0; 
+            
+        for block_height in start_i..finish_i {
+            v.push((block_height.clone() as u128, get_log(block_height.clone() as u64).unwrap()));                 
+        }
+    }    
     GetLogsBackwardsSponse {
         logs: v,
         is_last_chunk,
-    }    
+    }
 }
 
 
