@@ -1,11 +1,10 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use serde_bytes::ByteBuf;
 use num_traits::cast::ToPrimitive;
-use sha2::Digest;
 use cts_lib::{
     types::http_request::*,
     tools::{
-        sha256,
         localkey::{
             refcell::{
                 with, 
@@ -31,6 +30,7 @@ use ic_cdk::{
     post_upgrade
 };
 use candid::{
+    Principal,
     CandidType,
     Deserialize,
     Func,
@@ -56,12 +56,16 @@ use certification::*;
 pub struct CTSData {
     frontcode_files: Files,
     frontcode_files_hashes: FilesHashes,
+    batch_creators: HashSet<Principal>,
+    current_batch: Files,
 }
 impl CTSData {
     fn new() -> Self {
         Self {
             frontcode_files: Files::new(),
             frontcode_files_hashes: FilesHashes::new(),
+            batch_creators: HashSet::new(),
+            current_batch: Files::new(),
         }
     }
 }
@@ -79,11 +83,19 @@ thread_local! {
 
 
 #[derive(CandidType, Deserialize)]
-struct CTSInit {} 
+struct CTSInit {
+    batch_creators: Option<HashSet<Principal>>,
+}
 
 #[init]
-fn init(_cts_init: CTSInit) {
+fn init(cts_init: CTSInit) {
     canister_tools::init(&CTS_DATA, CTS_DATA_MEMORY_ID);
+    
+    with_mut(&CTS_DATA, |d| {
+        if let Some(batch_creators) = cts_init.batch_creators {
+            d.batch_creators = batch_creators;
+        }
+    });
 } 
 
 
@@ -97,7 +109,27 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() { 
-    canister_tools::post_upgrade(&CTS_DATA, CTS_DATA_MEMORY_ID, None::<fn(CTSData) -> CTSData>);
+    
+    #[derive(CandidType, Deserialize)]
+    struct OldCTSData {
+        frontcode_files: Files,
+        frontcode_files_hashes: FilesHashes,
+    }
+    
+    
+    canister_tools::post_upgrade(&CTS_DATA, CTS_DATA_MEMORY_ID, Some::<fn(OldCTSData) -> CTSData>(
+        |od| {
+            CTSData{
+                frontcode_files: od.frontcode_files,
+                frontcode_files_hashes: od.frontcode_files_hashes,
+                batch_creators: HashSet::from([
+                    Principal::from_text("35bfm-o3l6o-2stfb-kr2p3-qvvw5-dtdjq-q5nly-rqv4r-p7vtd-fs2mg-6qe").unwrap(),
+                    Principal::from_text("2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe").unwrap(),
+                ]),
+                current_batch: Files::new(),
+            } 
+        }
+    ));
     
     with(&CTS_DATA, |cts_data| {
         set_root_hash(&cts_data);
@@ -129,6 +161,27 @@ pub fn controller_view_metrics() -> CTSMetrics {
 
 // ---------------------------- :FRONTCODE. -----------------------------------
 
+
+fn caller_is_batch_creator_gaurd(d: &CTSData) {
+    if d.batch_creators.contains(&caller()) == false {
+        trap("Caller must be a batch-creator");
+    } 
+}
+
+
+#[derive(CandidType, Deserialize)]
+pub struct CreateBatch {}
+
+#[update]
+pub fn create_batch(_q: CreateBatch) {
+    with(&CTS_DATA, caller_is_batch_creator_gaurd);
+    
+    with_mut(&CTS_DATA, |d| {
+        d.current_batch = Files::new();        
+    }); 
+}
+
+
 #[derive(CandidType, Deserialize)]
 pub struct UploadFile {
     pub filename: String,
@@ -138,22 +191,15 @@ pub struct UploadFile {
 }
 
 #[update]
-pub fn controller_upload_file(q: UploadFile) {
-    caller_is_controller_gaurd(&caller());
+pub fn upload_file(q: UploadFile) {
+    with(&CTS_DATA, caller_is_batch_creator_gaurd);
     
     if q.chunks == 0 {
         trap("there must be at least 1 chunk.");
     }
     
     with_mut(&CTS_DATA, |cts_data| {
-        if q.chunks == 1 {
-            cts_data.frontcode_files_hashes.insert(
-                q.filename.clone(), 
-                sha256(&q.first_chunk)
-            );
-            set_root_hash(&cts_data);
-        }
-        cts_data.frontcode_files.insert(
+        cts_data.current_batch.insert(
             q.filename, 
             File{
                 headers: q.headers,
@@ -165,49 +211,93 @@ pub fn controller_upload_file(q: UploadFile) {
             }
         ); 
     });
-
-
 }
 
 #[update]
-pub fn controller_upload_file_chunks(file_path: String, chunk_i: u32, chunk: ByteBuf) -> () {
-    caller_is_controller_gaurd(&caller());
+pub fn upload_file_chunks(file_path: String, chunk_i: u32, chunk: ByteBuf) -> () {
+    with(&CTS_DATA, caller_is_batch_creator_gaurd);
     
     with_mut(&CTS_DATA, |cts_data| {
-        match cts_data.frontcode_files.get_mut(&file_path) {
+        match cts_data.current_batch.get_mut(&file_path) {
             Some(file) => {
                 file.content_chunks[chunk_i as usize] = chunk;
-                
-                let mut is_upload_complete: bool = true;
-                for c in file.content_chunks.iter() {
-                    if c.len() == 0 {
-                        is_upload_complete = false;
-                        break;
-                    }
-                }
-                if is_upload_complete == true {
-                    cts_data.frontcode_files_hashes.insert(
-                        file_path.clone(), 
-                        {
-                            let mut hasher: sha2::Sha256 = sha2::Sha256::new();
-                            for chunk in file.content_chunks.iter() {
-                                hasher.update(chunk);    
-                            }
-                            hasher.finalize().into()
-                        }
-                    );
-                    set_root_hash(&cts_data);
-                }
             },
             None => {
-                trap("file not found. call the controller_upload_file method to upload a new file.");
+                trap("File not found. Call the upload_file method to upload a new file.");
             }
         }
-    });
-    
-    
-    
+    });    
 }
+
+#[query]
+pub fn view_current_batch_file_hashes() -> Vec<(String, [u8; 32])> {
+    with(&CTS_DATA, |cts_data| { 
+        let mut vec = Vec::<(String, [u8; 32])>::new();
+        for (k,file) in cts_data.current_batch.iter() {
+            vec.push((k.clone(), file.sha256_hash()));
+        }
+        vec
+    })
+}
+
+#[update]
+pub fn controller_commit_batch() {
+    caller_is_controller_gaurd(&caller());
+
+    with_mut(&CTS_DATA, |d| {
+        d.frontcode_files = std::mem::take(&mut d.current_batch);
+        d.frontcode_files_hashes = FilesHashes::new();        
+        for (filename, file) in d.frontcode_files.iter() {
+            d.frontcode_files_hashes.insert(
+                filename.clone(),
+                file.sha256_hash(), 
+            );
+        }
+        set_root_hash(&d);
+    });
+}
+
+#[query]
+pub fn view_file_hashes() -> Vec<(String, [u8; 32])> {
+    with(&CTS_DATA, |cts_data| { 
+        let mut vec = Vec::<(String, [u8; 32])>::new();
+        cts_data.frontcode_files_hashes.for_each(|k,v| {
+            vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
+        });
+        vec
+    })
+}
+
+#[query]
+pub fn view_batch_creators() -> HashSet<Principal> {
+    with(&CTS_DATA, |d| {
+        d.batch_creators.clone()
+    })
+}
+
+#[update]
+pub fn controller_add_batch_creators(batch_creators: HashSet<Principal>) {
+    caller_is_controller_gaurd(&caller());
+
+    with_mut(&CTS_DATA, |d| {
+        for p in batch_creators.into_iter() {
+            d.batch_creators.insert(p);
+        }
+    });
+}
+
+#[update]
+pub fn controller_remove_batch_creators(batch_creators: HashSet<Principal>) {
+    caller_is_controller_gaurd(&caller());
+
+    with_mut(&CTS_DATA, |d| {
+        for p in batch_creators.into_iter() {
+            d.batch_creators.remove(&p);
+        }
+    });
+}
+
+
 
 
 #[update]
@@ -232,22 +322,7 @@ pub fn controller_clear_file(filename: String) {
     });
 }
 
-
-
-#[query]
-pub fn controller_get_file_hashes() -> Vec<(String, [u8; 32])> {
-    caller_is_controller_gaurd(&caller());
-    
-    with(&CTS_DATA, |cts_data| { 
-        let mut vec = Vec::<(String, [u8; 32])>::new();
-        cts_data.frontcode_files_hashes.for_each(|k,v| {
-            vec.push((std::str::from_utf8(k).unwrap().to_string(), *v));
-        });
-        vec
-    })
-}
-
-
+// -------
 
 #[export_name = "canister_query http_request"]
 pub fn http_request() {
