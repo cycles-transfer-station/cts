@@ -10,8 +10,6 @@ const MAX_NUMBER_OF_LOG_SPACES_ON_HOLD: u64 = 200;
 thread_local!{
     //this should be reset every upgrade. all async calls should finish before an upgrade using the stop_canister method.
     static LOGS_MEMORY_MANAGER: RefCell<LogsMemoryManager> = RefCell::new(LogsMemoryManager::new());
-    
-    static LOGS: RefCell<Logs> = RefCell::new(Logs::init(get_virtual_memory(LOGS_MEMORY_ID)).unwrap());
 }
 
 
