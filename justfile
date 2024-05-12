@@ -47,8 +47,9 @@ create-candid-files profile: (cargo-build-wasms profile)
     
 build profile="release": (cargo-build-wasms profile) (create-candid-files profile)
     #!/usr/bin/env sh
+    rm -rf build
     if [ {{profile}} = release ]; then
-        mkdir -p build
+        mkdir build
         for filename in \
             "{{cts_filename}}" \
             "{{bank_filename}}" \
