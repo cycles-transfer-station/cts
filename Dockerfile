@@ -1,5 +1,8 @@
 FROM ubuntu@sha256:bcc511d82482900604524a8e8d64bf4c53b2461868dac55f4d04d660e61983cb
 
+ARG git_commit_id
+ENV GIT_COMMIT_ID=$git_commit_id
+
 RUN apt -yq update && \
     apt -yqq install --no-install-recommends curl ca-certificates \
         build-essential pkg-config libssl-dev llvm-dev liblmdb-dev clang cmake rsync
@@ -24,4 +27,4 @@ COPY . /cts
 WORKDIR /cts
 
 RUN export RUSTFLAGS="--remap-path-prefix ${CARGO_HOME}=/cargo"
-RUN just build release
+RUN just build release $GIT_COMMIT_ID

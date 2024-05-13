@@ -25,10 +25,31 @@ cm_trades_storage_did_path := rust_canisters_path / "market/cm_trades_storage/cm
 
 
 cargo-build-wasms profile:
+    rm -rf build && mkdir build
     cd {{justfile_directory()}}/rust && cargo build --locked --target wasm32-unknown-unknown --profile {{profile}}
     
-create-candid-files profile: (cargo-build-wasms profile)
+build profile *git_commit_id: (cargo-build-wasms profile)
     #!/usr/bin/env sh
+    set -eu
+    
+    if [ -d "{{justfile_directory() / ".git"}}" ]; 
+    then
+        if ! [ "{{git_commit_id}}" = "" ]; 
+        then
+            echo "Error: .git directory is found and git_commit_id parameter is set. When there is a .git dir, do not pass the git_commit_id parameter, you can git checkout to the commit you want."
+            exit 1
+        fi
+        GIT_COMMIT_ID=$(git rev-parse HEAD)
+    else
+        if [ "{{git_commit_id}}" = "" ]; 
+        then
+            echo "Error: .git directory not found and git_commit_id parameter not set. When there is no .git dir, pass the git_commit_id as a parameter in the build task."
+            exit 1
+        fi
+        GIT_COMMIT_ID={{git_commit_id}}
+    fi
+    echo "git_commit_id: $GIT_COMMIT_ID"
+    
     for i in \
         "{{cts_filename}}","{{cts_did_path}}" \
         "{{bank_filename}}","{{bank_did_path}}" \
@@ -43,24 +64,11 @@ create-candid-files profile: (cargo-build-wasms profile)
         DID_PATH=$([ "{{profile}}" = "release" ] && echo $2 || echo $(echo "$2" | sed -e 's/.did/_test.did/g') )
         candid-extractor $FILE_PATH > $DID_PATH
         ic-wasm $FILE_PATH -o $FILE_PATH metadata candid:service -f $DID_PATH -v public
+        ic-wasm $FILE_PATH -o $FILE_PATH metadata git_commit_id -d $GIT_COMMIT_ID -v public
+        if [ {{profile}} = release ]; then
+            cp $FILE_PATH build/
+        fi
     done
-    
-build profile="release": (cargo-build-wasms profile) (create-candid-files profile)
-    #!/usr/bin/env sh
-    rm -rf build
-    if [ {{profile}} = release ]; then
-        mkdir build
-        for filename in \
-            "{{cts_filename}}" \
-            "{{bank_filename}}" \
-            "{{cm_main_filename}}" \
-            "{{cm_tc_filename}}" \
-            "{{cm_positions_storage_filename}}" \
-            "{{cm_trades_storage_filename}}"; \
-        do
-            cp {{target_wasm32_path}}/release/$filename build/
-        done
-    fi
 
 test-unit:
     cd {{justfile_directory()}}/rust && cargo test
@@ -73,6 +81,7 @@ test: && test-unit test-pic
 
 show-build-hashes:
     #!/usr/bin/env sh
+    set -eu
     mkdir -p build
     for file in `ls build`; 
     do

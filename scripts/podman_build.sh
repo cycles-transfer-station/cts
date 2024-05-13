@@ -4,7 +4,10 @@ cd $SCRIPTS_DIR/..
 BUILD_DIR=build
 rm -rf $BUILD_DIR
 
-podman build --no-cache -t cts .
+GIT_COMMIT_ID=$(git rev-parse HEAD)
+echo "git_commit_id: $GIT_COMMIT_ID"
+
+podman build --no-cache -t cts --build-arg git_commit_id=$GIT_COMMIT_ID .
 
 container_id=$(podman create cts)
 podman cp $container_id:/cts/$BUILD_DIR $BUILD_DIR
