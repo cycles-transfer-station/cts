@@ -32,6 +32,7 @@ use cts_lib::{
         KiB,
         MiB,
         NANOS_IN_A_SECOND,
+        BILLION,
         TRILLION,
     },
     types::{
@@ -149,6 +150,7 @@ const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
 const POSITIONS_SUBACCOUNT: &[u8; 32] = &[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5];
 
+const MAX_INSTRUCTIONS_IN_THE_MATCH_TRADES_FN: u64 = 30 * BILLION;
 
 
 thread_local! {
@@ -381,6 +383,9 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
             if trade_logs.len() >= MAX_TRADE_LOGS {
                 break; // we can put a timer to continue looking for matches for this position once there is space in the trade-logs queue, for now it will wait till another compatible position comes.
+            }
+            if ic_cdk::api::instruction_counter() >= MAX_INSTRUCTIONS_IN_THE_MATCH_TRADES_FN {
+                break; // ..
             }
             
             let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
