@@ -26,7 +26,8 @@ use cts_lib::{
             upgrade_canisters, 
             ControllerUpgradeCSQuest, 
             UpgradeOutcome,
-        },        
+        },       
+        sns_validation_string 
     },
     consts::{
         KiB,
@@ -490,9 +491,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     }
 }
 
-fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
-    format!("{:#?}", q)
-}
+
 
 #[query]
 pub fn sns_validate_trade_cycles(q: TradeCyclesQuest) -> Result<String,String> {

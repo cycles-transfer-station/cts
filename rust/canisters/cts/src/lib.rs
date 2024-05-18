@@ -12,6 +12,7 @@ use cts_lib::{
             }
         },
         caller_is_controller_gaurd,
+        sns_validation_string,
     },
 };
 use ic_cdk::{
@@ -43,6 +44,7 @@ use frontcode::{
     Files, 
     FilesHashes, 
     create_opt_stream_callback_token,
+    hash_of_files,
 };
 
 mod certification;
@@ -220,19 +222,36 @@ pub fn view_current_batch_file_hashes() -> Vec<(String, [u8; 32])> {
     })
 }
 
+#[derive(CandidType, Deserialize, Debug)]
+pub struct ControllerCommitBatchQuest{
+    batch_hash: [u8; 32], // the representation-independent-hash of the current_batch map
+}
+
+#[query]
+pub fn sns_validate_controller_commit_batch(q: ControllerCommitBatchQuest) -> Result<String,String> {
+    Ok(sns_validation_string(q))
+}
+
 #[update]
-pub fn controller_commit_batch() {
+pub fn controller_commit_batch(q: ControllerCommitBatchQuest) {
     caller_is_controller_gaurd(&caller());
 
     with_mut(&CTS_DATA, |d| {
-        d.frontcode_files = std::mem::take(&mut d.current_batch);
-        d.frontcode_files_hashes = FilesHashes::new();        
-        for (filename, file) in d.frontcode_files.iter() {
-            d.frontcode_files_hashes.insert(
+        let batch_hash = hash_of_files(&d.current_batch);
+        if q.batch_hash != batch_hash {
+            trap(&format!("The batch_hash does not match the current batch.\nCurrent batch hash: {:?}\n", batch_hash));
+        }
+        
+        let mut files_hashes = FilesHashes::new();
+        for (filename, file) in d.current_batch.iter() {
+            files_hashes.insert(
                 filename.clone(),
                 file.sha256_hash(), 
             );
-        }
+        }        
+        
+        d.frontcode_files = std::mem::take(&mut d.current_batch);
+        d.frontcode_files_hashes = files_hashes;        
         set_root_hash(&d);
     });
 }
