@@ -38,7 +38,7 @@ use cts_lib::{
         CmcNotifyError
     },
     ic_ledger_types::{IcpBlockHeight, IcpTokens},
-    consts::{MiB, KiB},
+    consts::{MiB, KiB, TRILLION},
 };
 use ic_cdk::{
     init,
@@ -54,6 +54,7 @@ use ic_cdk::{
             call_with_payment128,
         },
         is_controller,
+        canister_balance128,
     },
     trap
 };
@@ -127,6 +128,8 @@ pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
+pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles = 2 * TRILLION;
+pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
 pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
@@ -538,6 +541,9 @@ struct MintCyclesMidCallData {
 
 #[update]
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
+    if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL {
+        trap("This canister is low on cycles.");
+    }
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
     
@@ -600,6 +606,11 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     }
     
     if mid_call_data.cmc_cycles.is_none() {
+        if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL {
+            mid_call_data.lock = false;
+            with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+            return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles));
+        }
         match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
             Ok(cmc_cycles) => { 
                 mid_call_data.cmc_cycles = Some(cmc_cycles); 
@@ -686,6 +697,14 @@ async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, 
             CompleteMintCyclesError::MintCyclesError(mint_cycles_error) 
         })
 }
+
+
+#[query]
+pub fn canister_cycles_balance_minus_total_supply() -> i128 {
+    (canister_balance128() as i128).saturating_sub(with(&CB_DATA, |cb_data| { cb_data.total_supply }) as i128)
+}
+
+
 
 
 ic_cdk::export_candid!();

@@ -85,6 +85,7 @@ type MintCyclesError = variant {
 };
 type MintCyclesMidCallError = variant {
   LedgerTopupCyclesCmcNotifyError : LedgerTopupCyclesCmcNotifyError;
+  CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles;
 };
 type MintCyclesQuest = record {
   to : Account;
@@ -135,6 +136,7 @@ type UserIsInTheMiddleOfADifferentCall = variant {
   MintCyclesCall : record { must_call_complete : bool };
 };
 service : () -> {
+  canister_cycles_balance_minus_total_supply : () -> (int) query;
   complete_mint_cycles : (opt principal) -> (Result);
   controller_clear_user_logs_pointers_cache : () -> ();
   cycles_in : (CyclesInQuest) -> (Result_1);

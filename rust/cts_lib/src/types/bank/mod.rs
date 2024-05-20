@@ -68,6 +68,7 @@ pub enum MintCyclesError {
 #[derive(CandidType, Deserialize, Debug)]
 pub enum MintCyclesMidCallError {
     LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+    CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles,
 }
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
