@@ -3,7 +3,7 @@ use crate::icrc::{IcrcId, Tokens, Icrc1TransferError, BlockId, IcrcSubaccount};
 use crate::types::{Cycles, CallError, canister_code::CanisterCode};
 use crate::consts::KiB;
 use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque, BTreeMap};
 
 pub mod storage_logs;
 use storage_logs::{
@@ -195,7 +195,7 @@ pub struct Volume{
 // ---------
 
 #[derive(CandidType, Serialize, Deserialize)]
-pub struct CMData {
+pub struct OldCMData {
     pub cts_id: Principal,
     pub cm_main_id: Principal,
     pub icrc1_token_ledger: Principal,
@@ -215,6 +215,27 @@ pub struct CMData {
     pub candle_counter: CandleCounter,
 }
 
+#[derive(CandidType, Serialize, Deserialize)]
+pub struct CMData {
+    pub cts_id: Principal,
+    pub cm_main_id: Principal,
+    pub icrc1_token_ledger: Principal,
+    pub icrc1_token_ledger_transfer_fee: Tokens,
+    pub cycles_bank_id: Principal,
+    pub cycles_bank_transfer_fee: Cycles,
+    pub positions_id_counter: u128,
+    pub trade_logs_id_counter: u128,
+    pub mid_call_user_cycles_balance_locks: HashSet<Principal>,
+    pub mid_call_user_token_balance_locks: HashSet<Principal>,
+    pub cycles_positions: BTreeMap<PositionId, CyclesPosition>,
+    pub token_positions: BTreeMap<PositionId, TokenPosition>,
+    pub trade_logs: VecDeque<TradeLogAndTemporaryData>,
+    pub void_cycles_positions: BTreeMap<PositionId, VoidCyclesPosition>,
+    pub void_token_positions: BTreeMap<PositionId, VoidTokenPosition>,
+    pub do_payouts_errors: Vec<CallError>,
+    pub candle_counter: CandleCounter,
+}
+
 impl CMData {
     pub fn new() -> Self {
         Self {
@@ -228,11 +249,11 @@ impl CMData {
             trade_logs_id_counter: 0,
             mid_call_user_cycles_balance_locks: HashSet::new(),
             mid_call_user_token_balance_locks: HashSet::new(),
-            cycles_positions: Vec::new(),
-            token_positions: Vec::new(),
+            cycles_positions: BTreeMap::new(),
+            token_positions: BTreeMap::new(),
             trade_logs: VecDeque::new(),
-            void_cycles_positions: Vec::new(),
-            void_token_positions: Vec::new(),
+            void_cycles_positions: BTreeMap::new(),
+            void_token_positions: BTreeMap::new(),
             do_payouts_errors: Vec::new(),
             candle_counter: CandleCounter::default(),
         }

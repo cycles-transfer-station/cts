@@ -1,6 +1,6 @@
 use super::*;
 use core::future::Future;
-
+use std::collections::BTreeMap;
 
 pub trait TradeQuest {
     
@@ -17,9 +17,9 @@ pub trait TradeQuest {
     fn mid_call_balance_locks(cm_data: &mut CMData) -> &mut HashSet<Principal>;
     fn posit_transfer(q: Icrc1TransferQuest) -> impl Future<Output=LedgerTransferReturnType>;
     fn create_current_position(self, id: PositionId, positor: Principal) -> Self::MatcherPositionType;
-    fn matcher_positions(cm_data: &mut CMData) -> &mut Vec<Self::MatcherPositionType>;
-    fn matcher_void_positions(cm_data: &mut CMData) -> &mut Vec<<Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType>;
-    fn match_trades(cm_data: &mut CMData, start_matcher_positions_i: usize);
+    fn matcher_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, Self::MatcherPositionType>;
+    fn matcher_void_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, <Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType>;
+    fn match_trades(cm_data: &mut CMData, matcher_position_id: PositionId);
 } 
 
 
@@ -50,11 +50,11 @@ impl TradeQuest for TradeCyclesQuest {
             timestamp_nanos: time_nanos(),
         }
     }
-    fn matcher_positions(cm_data: &mut CMData) -> &mut Vec<Self::MatcherPositionType> { &mut cm_data.cycles_positions }    
-    fn matcher_void_positions(cm_data: &mut CMData) -> &mut Vec<<Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_cycles_positions }
-    fn match_trades(cm_data: &mut CMData, start_matcher_positions_i: usize) {
+    fn matcher_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, Self::MatcherPositionType> { &mut cm_data.cycles_positions }    
+    fn matcher_void_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, <Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_cycles_positions }
+    fn match_trades(cm_data: &mut CMData, matcher_position_id: PositionId) {
         match_trades(
-            start_matcher_positions_i,
+            matcher_position_id,
             &mut cm_data.cycles_positions,
             &mut cm_data.token_positions,
             &mut cm_data.void_cycles_positions,
@@ -92,11 +92,11 @@ impl TradeQuest for TradeTokensQuest {
             timestamp_nanos: time_nanos(),                
         }
     }
-    fn matcher_positions(cm_data: &mut CMData) -> &mut Vec<Self::MatcherPositionType> { &mut cm_data.token_positions }
-    fn matcher_void_positions(cm_data: &mut CMData) -> &mut Vec<<Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_token_positions }     
-    fn match_trades(cm_data: &mut CMData, start_matcher_positions_i: usize) {
+    fn matcher_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, Self::MatcherPositionType> { &mut cm_data.token_positions }
+    fn matcher_void_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, <Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_token_positions }     
+    fn match_trades(cm_data: &mut CMData, matcher_position_id: PositionId) {
         match_trades(
-            start_matcher_positions_i,
+            matcher_position_id,
             &mut cm_data.token_positions,
             &mut cm_data.cycles_positions,
             &mut cm_data.void_token_positions,

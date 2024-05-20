@@ -2,7 +2,7 @@ use super::*;
 
 
 pub fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture: Future<Output=Option<PayoutData>>, F: Fn(DoPayoutQuest)->DoPayoutFuture>(
-    void_positions: &mut Vec<VoidPosition>, 
+    void_positions: &mut BTreeMap<PositionId, VoidPosition>, 
     do_payout_fn: F,
     update_storage_positions_yes_or_no: bool,
 ) 
@@ -15,10 +15,11 @@ pub fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture: F
     let mut payouts_chunk: Vec<(PositionId, _)> = Vec::new();
     let mut update_storage_positions_chunk: Vec<(PositionId, _)> = Vec::new();
     
-    let mut i: usize = 0;
-    while i < void_positions.len() 
-    && (payouts_chunk.len() < DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE || update_storage_positions_chunk.len() < DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE) {
-        let vp: &mut VoidPosition = &mut void_positions[i];
+    for vp in void_positions.values_mut() {
+        if payouts_chunk.len() >= DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE 
+        && update_storage_positions_chunk.len() >= DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE {
+            break;
+        }
         
         if payouts_chunk.len() < DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE
         && vp.payout_data().is_none()
@@ -46,8 +47,6 @@ pub fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture: F
                 do_update_storage_position(vp.position_id(), vp.update_storage_position_data().update_storage_position_log.stable_memory_serialize())
             ));
         }
-        
-        i += 1;
     }
     
     (payouts_chunk, update_storage_positions_chunk)
