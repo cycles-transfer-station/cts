@@ -73,8 +73,8 @@ build profile *git_commit_id: (cargo-build-wasms profile)
 test-unit:
     cd {{justfile_directory()}}/rust && cargo test
     
-test-pic: (build "dev")
-    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test | grep -v "Non-increasing batch time at height"
+test-pic *cargo_test_params: (build "dev")
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}} | grep -v "Non-increasing batch time at height"
     
 test: && test-unit test-pic
     @echo "test"
