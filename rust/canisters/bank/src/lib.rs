@@ -417,7 +417,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(CyclesInError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -486,7 +486,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(CyclesOutError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -594,7 +594,7 @@ pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(MintCyclesError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
