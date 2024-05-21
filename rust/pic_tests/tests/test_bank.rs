@@ -321,8 +321,132 @@ fn test_cycles_out_fails_when_invalid_for_canister() {
 
 
 
+// icrc1-test-suite
+use icrc1_test_env::LedgerEnv;
+use std::{
+    sync::{Arc, atomic::{AtomicU64, Ordering}},
+    pin::Pin,
+    boxed::Box,
+    time::SystemTime,
+    fmt::{self, Display, Debug, Formatter},
+    future::Future,
+};
+use candid::utils::{ArgumentEncoder, ArgumentDecoder};
+
+/*
+fn new_principal(n: u64) -> Principal {
+    let mut bytes = n.to_le_bytes().to_vec();
+    bytes.push(0xfe);
+    bytes.push(0x01);
+    Principal::try_from_slice(&bytes[..]).unwrap()
+}
+*/
+fn new_principal(n: u64) -> Principal {
+    Principal::self_authenticating(&n.to_be_bytes())
+}
+
+#[derive(Debug)]
+struct PICCallErrorNewType(pocket_ic::CallError);
+
+impl From<pocket_ic::CallError> for PICCallErrorNewType {
+    fn from(e: pocket_ic::CallError) -> Self {
+        Self(e)
+    }
+}
+
+impl Display for PICCallErrorNewType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        <Self as Debug>::fmt(self, f)      
+    }
+}
+
+impl std::error::Error for PICCallErrorNewType {}
 
 
+#[derive(Clone)]
+struct PICLedgerEnv {
+    pic: Arc<PocketIc>,
+    count: Arc<AtomicU64>,
+    caller: Principal
+}
+
+impl PICLedgerEnv {
+    fn new(pic: Arc<PocketIc>, start_caller_count: u64) -> Self {
+        Self {
+            pic,
+            count: Arc::new(AtomicU64::new(start_caller_count)),
+            caller: new_principal(start_caller_count)
+        }
+    }
+}
+
+impl LedgerEnv for PICLedgerEnv {
+    fn fork(&self) -> Self {
+        Self {
+            pic: self.pic.clone(),
+            count: self.count.clone(),
+            caller: new_principal(self.count.fetch_add(1, Ordering::Relaxed) + 1)
+        }
+    }
+    fn principal(&self) -> Principal {
+        self.caller
+    }
+    fn time(&self) -> SystemTime {
+        self.pic.get_time()
+    }
+    fn query<'life0, 'life1, 'a, Input, Output>(
+        &'life0 self,
+        method: &'life1 str,
+        input: Input
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Output>> + 'a>>
+        where Input: ArgumentEncoder + Debug + 'a,
+        Output: for<'b> ArgumentDecoder<'b> + 'a,
+        Self: 'a,
+        'life0: 'a,
+        'life1: 'a 
+    {
+        Box::pin(std::future::ready(
+            pocket_ic::query_candid_as(&self.pic, BANK, self.caller, method, input)  
+            .map_err(|e| anyhow::Error::from(PICCallErrorNewType::from(e)))
+        ))
+    }
+    fn update<'life0, 'life1, 'a, Input, Output>(
+        &'life0 self,
+        method: &'life1 str,
+        input: Input
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Output>> + 'a>>
+        where Input: ArgumentEncoder + Debug + 'a,
+        Output: for<'b> ArgumentDecoder<'b> + 'a,
+        Self: 'a,
+        'life0: 'a,
+        'life1: 'a 
+    {
+        Box::pin(std::future::ready(
+            pocket_ic::call_candid_as(&self.pic, BANK, RawEffectivePrincipal::None, self.caller, method, input)  
+            .map_err(|e| anyhow::Error::from(PICCallErrorNewType::from(e)))
+        ))
+    }
+}
+
+
+#[test]
+fn icrc1_test_suite_crate() {
+    let pic = set_up();
+    let start_count: u64 = 5;
+    let p1 = new_principal(start_count);
+    mint_cycles(&pic, &Account{owner: p1, subaccount: None}, 100_000_000_000);    
+    
+    let pic_ledger_env = PICLedgerEnv::new(Arc::new(pic), start_count);
+    
+    futures::executor::block_on(async {    
+        let tests: Vec<icrc1_test_suite::Test> = icrc1_test_suite::test_suite(pic_ledger_env).await;
+        let is_success: bool = icrc1_test_suite::execute_tests(tests).await;
+        if is_success == false {
+            std::process::exit(1);
+        }                                        
+    });
+    
+}
 
 
 

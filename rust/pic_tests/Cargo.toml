@@ -18,3 +18,7 @@ candid = "0.10.3"
 cts_lib = { path = "../cts_lib" }
 serde = { version = "1.0.193", features = ["derive"] }
 ic-ledger-types = "0.9.0"
+icrc1-test-suite = "0.1.2"
+icrc1-test-env = "0.1.11"
+futures = "0.3.30"
+anyhow = "1.0.86"
