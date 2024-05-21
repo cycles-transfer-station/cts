@@ -398,6 +398,17 @@ fn controller_clear_user_logs_pointers_cache() {
 
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
+    
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                CyclesInError::TooOld
+            } else {
+                CyclesInError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
+    }
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -456,6 +467,17 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
+    
+     if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                CyclesOutError::TooOld
+            } else {
+                CyclesOutError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
+    }
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -545,6 +567,16 @@ struct MintCyclesMidCallData {
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL {
         trap("This canister is low on cycles.");
+    }
+    
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                MintCyclesError::TooOld
+            } else {
+                MintCyclesError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
     }
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
