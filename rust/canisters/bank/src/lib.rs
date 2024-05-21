@@ -219,8 +219,8 @@ pub fn icrc1_decimals() -> u8 {
 }
 
 #[query]
-pub fn icrc1_minting_account() -> IcrcId {
-    IcrcId{owner: ic_cdk::api::id(), subaccount: None}
+pub fn icrc1_minting_account() -> Option<IcrcId> {
+    None
 }
 
 #[query]
@@ -275,12 +275,14 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
         
     // temporary while waiting to implement transaction-deduplication.
-    if q.created_at_time.is_some() {
-        return Err(Icrc1TransferError::TooOld);
-    }
-
-    if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
-        return Err(Icrc1TransferError::BadBurn{ min_burn_amount: u128::MAX.into() });
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                Icrc1TransferError::TooOld
+            } else {
+                Icrc1TransferError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
     }
         
     if let Some(ref memo) = q.memo {

@@ -146,7 +146,7 @@ service : () -> {
   icrc1_decimals : () -> (nat8) query;
   icrc1_fee : () -> (nat) query;
   icrc1_metadata : () -> (vec record { text; MetadataValue }) query;
-  icrc1_minting_account : () -> (Account) query;
+  icrc1_minting_account : () -> (opt Account) query;
   icrc1_name : () -> (text) query;
   icrc1_supported_standards : () -> (vec SupportedStandard) query;
   icrc1_symbol : () -> (text) query;
