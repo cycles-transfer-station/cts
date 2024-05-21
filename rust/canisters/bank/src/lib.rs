@@ -280,7 +280,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     }
 
     if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
-        trap("Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.");
+        return Err(Icrc1TransferError::BadBurn{ min_burn_amount: u128::MAX.into() });
     }
         
     if let Some(ref memo) = q.memo {
@@ -496,7 +496,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                         tx: LogTX{
                             op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
-                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account. // FOR THE DO, fix old logs that don't have this.
+                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
                             memo: q.memo,
                             ts: q.created_at_time,
                         }
