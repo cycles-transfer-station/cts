@@ -17,7 +17,7 @@ pub fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture: F
     
     for vp in void_positions.values_mut() {
         if payouts_chunk.len() >= DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE 
-        && update_storage_positions_chunk.len() >= DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE {
+        && (update_storage_positions_chunk.len() >= DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE || update_storage_positions_yes_or_no == false) {
             break;
         }
         

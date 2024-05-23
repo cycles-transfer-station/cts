@@ -98,7 +98,7 @@ async fn _do_payouts() {
             = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no);
                         
         if void_cycles_positions_update_storage_positions_chunk.len() > 0 
-        || void_token_positions_update_storage_positions_chunk.len()  > 0 {
+        || void_token_positions_update_storage_positions_chunk.len() > 0 {
             with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| { 
                 positions_storage_data.storage_flush_lock = true; 
             });
