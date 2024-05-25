@@ -1,3 +1,5 @@
+set -euo pipefail
+
 SCRIPTS_DIR=$(readlink -f $(dirname ${0}))
 cd $SCRIPTS_DIR/..
 
