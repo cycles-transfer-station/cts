@@ -2,9 +2,10 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashSet, VecDeque},
+    collections::{HashSet, VecDeque, BTreeMap},
     time::Duration,
     thread::LocalKey,
+    ops::Bound
 };
 use std::iter::DoubleEndedIterator;
 use cts_lib::{
@@ -26,12 +27,14 @@ use cts_lib::{
             upgrade_canisters, 
             ControllerUpgradeCSQuest, 
             UpgradeOutcome,
-        },        
+        },       
+        sns_validation_string 
     },
     consts::{
         KiB,
         MiB,
         NANOS_IN_A_SECOND,
+        BILLION,
         TRILLION,
     },
     types::{
@@ -149,6 +152,7 @@ const CREATE_STORAGE_CANISTER_CYCLES: Cycles = 20 * TRILLION;
 
 const POSITIONS_SUBACCOUNT: &[u8; 32] = &[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5];
 
+const MAX_INSTRUCTIONS_IN_THE_MATCH_TRADES_FN: u64 = 30 * BILLION;
 
 
 thread_local! {
@@ -340,11 +344,9 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
             positions_storage_data.storage_buffer.extend(position.as_stable_memory_position_log(None).stable_memory_serialize());  
         });
         
-        TradeQuestType::matcher_positions(cm_data).push(position);
-        
-        let start_matcher_positions_i: usize = TradeQuestType::matcher_positions(cm_data).len() - 1;
-        
-        TradeQuestType::match_trades(cm_data, start_matcher_positions_i);
+        TradeQuestType::matcher_positions(cm_data).insert(position_id, position);
+                
+        TradeQuestType::match_trades(cm_data, position_id);
         
         TradeSuccess{
             position_id: position_id,
@@ -357,11 +359,11 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
 
 
 fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: CurrentPositionTrait>(
-    start_matcher_positions_i: usize,
-    matcher_positions: &mut Vec<MatcherPositionType>,  
-    matchee_positions: &mut Vec<MatcheePositionType>, 
-    matcher_void_positions: &mut Vec<MatcherPositionType::VoidPositionType>,
-    matchee_void_positions: &mut Vec<MatcheePositionType::VoidPositionType>,
+    matcher_position_id: PositionId,
+    matcher_positions: &mut BTreeMap<PositionId, MatcherPositionType>,  
+    matchee_positions: &mut BTreeMap<PositionId, MatcheePositionType>, 
+    matcher_void_positions: &mut BTreeMap<PositionId, MatcherPositionType::VoidPositionType>,
+    matchee_void_positions: &mut BTreeMap<PositionId, MatcheePositionType::VoidPositionType>,
     trade_logs: &mut VecDeque<TradeLogAndTemporaryData>, 
     trade_logs_id_counter: &mut PurchaseId,
     candle_counter: &mut CandleCounter,
@@ -371,21 +373,23 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
         trap("MatcherPositionType::POSITION_KIND must be the opposite side of the MatcheePositionType::POSITION_KIND");
     }
         
-    let matcher_position_i: usize = start_matcher_positions_i;
-        
-    let matcher_position_id: PositionId = matcher_positions[matcher_position_i].id();
-    let match_rate: CyclesPerToken = matcher_positions[matcher_position_i].current_position_available_cycles_per_token_rate();
-          
-    let mut i: usize = 0;
-    while i < matchee_positions.len() {
-        if let Some(trade_rate) = matchee_positions[i].is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
+    let matcher_position: &mut MatcherPositionType = match matcher_positions.get_mut(&matcher_position_id) {
+        Some(p) => p,
+        None => return,
+    };
+    
+    let match_rate: CyclesPerToken = matcher_position.current_position_available_cycles_per_token_rate();
+    
+    let mut remove_matchee_positions_fill: Vec<PositionId> = Vec::new();
+    
+    for matchee_position in matchee_positions.values_mut() {
+        if let Some(trade_rate) = matchee_position.is_this_position_better_than_or_equal_to_the_match_rate(match_rate) {
             if trade_logs.len() >= MAX_TRADE_LOGS {
                 break; // we can put a timer to continue looking for matches for this position once there is space in the trade-logs queue, for now it will wait till another compatible position comes.
             }
-            
-            let matchee_position: &mut MatcheePositionType = &mut matchee_positions[i];
-                            
-            let matcher_position: &mut MatcherPositionType = &mut matcher_positions[matcher_position_i];
+            if ic_cdk::api::instruction_counter() >= MAX_INSTRUCTIONS_IN_THE_MATCH_TRADES_FN {
+                break; // ..
+            }
                                                                                     
             let purchase_tokens: Tokens = std::cmp::min(matcher_position.current_position_tokens(trade_rate), matchee_position.current_position_tokens(trade_rate));
             let matcher_position_payout_fee_cycles: Cycles = matcher_position.subtract_tokens(purchase_tokens, trade_rate);
@@ -447,47 +451,36 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
             
             candle_counter.count_trade(&trade_logs.back().unwrap().log);
             
-            let mut matcher_position_is_void: bool = false;
-            if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
-            || tokens_transform_cycles(matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()), matcher_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() { 
-                let matcher_position: MatcherPositionType = matcher_positions.remove(matcher_position_i);
-                matcher_void_positions.insert(
-                    matcher_void_positions.binary_search_by_key(&matcher_position_id, |vp| vp.position_id()).unwrap_err(),
-                    matcher_position.into_void_position_type(PositionTerminationCause::Fill)
-                );
-                matcher_position_is_void = true;
-            }    
-            
             if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
             || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
-                let position_for_the_void: MatcheePositionType = matchee_positions.remove(i);
-                let position_for_the_void_void_positions_insertion_i: usize = { 
-                    matchee_void_positions.binary_search_by_key(
-                        &position_for_the_void.id(),
-                        |void_position| { void_position.position_id() }
-                    ).unwrap_err()
-                };
-                matchee_void_positions.insert(
-                    position_for_the_void_void_positions_insertion_i,
-                    position_for_the_void.into_void_position_type(PositionTerminationCause::Fill)
+                remove_matchee_positions_fill.push(matchee_position.id());
+            }
+            
+            if matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
+            || tokens_transform_cycles(matcher_position.current_position_tokens(matcher_position.current_position_available_cycles_per_token_rate()), matcher_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() { 
+                let matcher_position: MatcherPositionType = match matcher_positions.remove(&matcher_position_id) { Some(p)=>p, None=>break, };
+                matcher_void_positions.insert(
+                    matcher_position.id(),
+                    matcher_position.into_void_position_type(PositionTerminationCause::Fill)
                 );
-            } else {
-                i = i + 1;
-            }
-            
-            if matcher_position_is_void {
                 break;
-            }
-            
-        } else {
-            i = i + 1;
+            }    
         }
     }
+    
+    for remove_matchee_position_id in remove_matchee_positions_fill.into_iter() {
+        let matchee_position: MatcheePositionType = match matchee_positions.remove(&remove_matchee_position_id) {
+            Some(p) => p,
+            None => continue,
+        };
+        matchee_void_positions.insert(
+            matchee_position.id(),
+            matchee_position.into_void_position_type(PositionTerminationCause::Fill)
+        );  
+    }    
 }
 
-fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
-    format!("{:#?}", q)
-}
+
 
 #[query]
 pub fn sns_validate_trade_cycles(q: TradeCyclesQuest) -> Result<String,String> {
@@ -522,32 +515,30 @@ pub fn sns_validate_void_position(q: VoidPositionQuest) -> Result<String,String>
 fn void_position_(caller: Principal, q: VoidPositionQuest) -> VoidPositionResult {
     
     with_mut(&CM_DATA, |cm_data| {
-        if let Ok(cycles_position_i) = cm_data.cycles_positions.binary_search_by_key(&q.position_id, |cycles_position| { cycles_position.id }) {
-            if cm_data.cycles_positions[cycles_position_i].positor != caller {
+        if let Some(cycles_position) = cm_data.cycles_positions.get(&q.position_id) {
+            if cycles_position.positor != caller {
                 return Err(VoidPositionError::WrongCaller);
             }
-            if time_seconds().saturating_sub(cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
-                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.cycles_positions[cycles_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
+            if time_seconds().saturating_sub(cycles_position.timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
+                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cycles_position.timestamp_nanos/NANOS_IN_A_SECOND });
             }  
-            let cycles_position_for_the_void: CyclesPosition = cm_data.cycles_positions.remove(cycles_position_i);
-            let cycles_position_for_the_void_void_cycles_positions_insertion_i: usize = cm_data.void_cycles_positions.binary_search_by_key(&cycles_position_for_the_void.id, |vcp| { vcp.position_id }).unwrap_err();
+            let cycles_position: CyclesPosition = cm_data.cycles_positions.remove(&cycles_position.id()).unwrap();
             cm_data.void_cycles_positions.insert(
-                cycles_position_for_the_void_void_cycles_positions_insertion_i,
-                cycles_position_for_the_void.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
+                cycles_position.id(),
+                cycles_position.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
             );
             Ok(())
-        } else if let Ok(token_position_i) = cm_data.token_positions.binary_search_by_key(&q.position_id, |token_position| { token_position.id }) {
-            if cm_data.token_positions[token_position_i].positor != caller {
+        } else if let Some(token_position) = cm_data.token_positions.get(&q.position_id) {
+            if token_position.positor != caller {
                 return Err(VoidPositionError::WrongCaller);
             }
-            if time_seconds().saturating_sub(cm_data.token_positions[token_position_i].timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
-                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: cm_data.token_positions[token_position_i].timestamp_nanos/NANOS_IN_A_SECOND });
+            if time_seconds().saturating_sub(token_position.timestamp_nanos/NANOS_IN_A_SECOND) < VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS {
+                return Err(VoidPositionError::MinimumWaitTime{ minimum_wait_time_seconds: VOID_POSITION_MINIMUM_WAIT_TIME_SECONDS, position_creation_timestamp_seconds: token_position.timestamp_nanos/NANOS_IN_A_SECOND });
             }
-            let token_position_for_the_void: TokenPosition = cm_data.token_positions.remove(token_position_i);
-            let token_position_for_the_void_void_token_positions_insertion_i: usize = cm_data.void_token_positions.binary_search_by_key(&token_position_for_the_void.id, |vip| { vip.position_id }).unwrap_err();
+            let token_position: TokenPosition = cm_data.token_positions.remove(&token_position.id()).unwrap();
             cm_data.void_token_positions.insert(
-                token_position_for_the_void_void_token_positions_insertion_i,
-                token_position_for_the_void.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
+                token_position.id(),
+                token_position.into_void_position_type(PositionTerminationCause::UserCallVoidPosition)
             );
             Ok(())
         } else {
@@ -647,12 +638,10 @@ pub fn view_tokens_position_book(q: ViewPositionBookQuest) -> ViewPositionBookSp
 }
 
 
-fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, current_positions: &Vec<T>) -> ViewPositionBookSponse {
+fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, current_positions: &BTreeMap<PositionId, T>) -> ViewPositionBookSponse {
     let mut positions_quantities: Vec<(CyclesPerToken, u128)> = vec![]; 
-    let mut is_last_chunk: bool = true;
-    
     let mut cps_as_rate_and_quantity: Vec<(CyclesPerToken, u128)> = current_positions
-        .iter()
+        .values()
         .map(|p| {
             let rate = p.current_position_available_cycles_per_token_rate(); 
             (rate, p.current_position_quantity())
@@ -665,7 +654,7 @@ fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, curren
         cps_as_rate_and_quantity.drain(..partition_point);    
     }
                 
-    for (r,q) in cps_as_rate_and_quantity.into_iter() {
+    for (r,q) in cps_as_rate_and_quantity.iter().copied() {
         if let Some(latest_r_q) = positions_quantities.last_mut() {
             if latest_r_q.0 == r {
                 latest_r_q.1 += q;
@@ -673,16 +662,14 @@ fn view_position_book_<T: CurrentPositionTrait>(q: ViewPositionBookQuest, curren
             } 
         }
         if positions_quantities.len() >= MAX_POSITIONS_QUANTITIES {
-            is_last_chunk = false;
             break;
         }
         positions_quantities.push((r,q));
-            
     }
     
     ViewPositionBookSponse {
+        is_last_chunk: positions_quantities.len() == 0 || positions_quantities.last().unwrap().0 == cps_as_rate_and_quantity.last().unwrap().0,
         positions_quantities, 
-        is_last_chunk,
     }
     
 }
@@ -785,15 +772,14 @@ pub fn view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLog
 }    
 
 fn _view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) -> Vec<PositionLog> {
-    fn d<T: CurrentPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, current_positions: &Vec<T>) -> Box<dyn Iterator<Item=PositionLog> + '_> {
-        let start_before_i = match q.opt_start_before_id {
-            None => current_positions.len(),
-            Some(start_before_id) => current_positions.binary_search_by_key(&start_before_id, |p| p.id()).unwrap_or_else(|i| i)
-        };
+    fn d<T: CurrentPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, current_positions: &BTreeMap<PositionId, T>) -> Box<dyn Iterator<Item=PositionLog> + '_> {
         let mut iter: Box<dyn DoubleEndedIterator<Item=PositionLog>> 
         = Box::new(
-            current_positions[..start_before_i]
-            .iter()
+            current_positions.range((
+                Bound::Unbounded, 
+                q.opt_start_before_id.map(|sbid| Bound::Excluded(sbid)).unwrap_or(Bound::Unbounded)
+            ))
+            .map(|(_k,v)| v)
             .map(|p| p.as_stable_memory_position_log(None))
             .rev());
         if let Some(index_key) = q.index_key {
@@ -822,15 +808,14 @@ fn _view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTra
 pub extern "C" fn view_void_positions_pending() {
     let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
     
-    fn d<VoidPositionType: VoidPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, void_positions: &Vec<VoidPositionType>) -> Box<dyn Iterator<Item=(&PositionLog, bool/*is_payout_complete*/)> + '_> {
-        let start_before_i = match q.opt_start_before_id {
-            None => void_positions.len(),
-            Some(start_before_id) => void_positions.binary_search_by_key(&start_before_id, |p| p.position_id()).unwrap_or_else(|i| i)
-        };
+    fn d<VoidPositionType: VoidPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, void_positions: &BTreeMap<PositionId, VoidPositionType>) -> Box<dyn Iterator<Item=(&PositionLog, bool/*is_payout_complete*/)> + '_> {
         let mut iter: Box<dyn DoubleEndedIterator<Item=(&PositionLog, bool)>> 
         = Box::new(
-            void_positions[..start_before_i]
-            .iter()
+            void_positions.range((
+                Bound::Unbounded, 
+                q.opt_start_before_id.map(|sbid| Bound::Excluded(sbid)).unwrap_or(Bound::Unbounded)
+            ))
+            .map(|(_k,v)| v)
             .map(|vp| (&(vp.update_storage_position_data().update_storage_position_log), vp.payout_data().is_some()))
             .rev());
         if let Some(index_key) = q.index_key {

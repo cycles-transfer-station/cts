@@ -1,4 +1,4 @@
-type Account = record { owner : principal; subaccount : opt vec nat8 };
+type Account = record { owner : principal; subaccount : opt blob };
 type CMIcrc1TokenTradeContractInit = record {
   icrc1_token_ledger_transfer_fee : nat;
   cycles_bank_transfer_fee : nat;
@@ -9,10 +9,10 @@ type CMIcrc1TokenTradeContractInit = record {
   trades_storage_canister_code : CanisterCode;
   cts_id : principal;
 };
-type CanisterCode = record { module_hash : vec nat8; module : vec nat8 };
+type CanisterCode = record { module_hash : blob; module : blob };
 type ControllerUpgradeCSQuest = record {
   new_canister_code : opt CanisterCode;
-  post_upgrade_quest : vec nat8;
+  post_upgrade_quest : blob;
   specific_cs : opt vec principal;
 };
 type CreatePositionQuestLog = record {
@@ -57,9 +57,9 @@ type StorageCanister = record {
   length : nat;
 };
 type TradeCyclesQuest = record {
-  payout_tokens_to_subaccount : opt vec nat8;
+  payout_tokens_to_subaccount : opt blob;
   posit_transfer_ledger_fee : opt nat;
-  return_cycles_to_subaccount : opt vec nat8;
+  return_cycles_to_subaccount : opt blob;
   cycles_per_token_rate : nat;
   cycles : nat;
 };
@@ -75,9 +75,9 @@ type TradeSuccess = record { position_id : nat };
 type TradeTokensQuest = record {
   posit_transfer_ledger_fee : opt nat;
   cycles_per_token_rate : nat;
-  payout_cycles_to_subaccount : opt vec nat8;
+  payout_cycles_to_subaccount : opt blob;
   tokens : nat;
-  return_tokens_to_subaccount : opt vec nat8;
+  return_tokens_to_subaccount : opt blob;
 };
 type TransferBalanceError = variant {
   CyclesMarketIsBusy;

@@ -27,6 +27,7 @@ pub const WASM_PAGE_SIZE_BYTES: usize = 65536; // 2^16 // 64KiB
 
 pub const MANAGEMENT_CANISTER_ID: Principal = Principal::management_canister();
 
+pub const BILLION: u64 = 1_000_000_000;
 pub const TRILLION: u128 = 1_000_000_000_000;
 
 pub const CYCLES_PER_XDR: Cycles = TRILLION; // 1T cycles = 1 XDR

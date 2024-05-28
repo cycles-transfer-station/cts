@@ -272,3 +272,6 @@ pub mod upgrade_canisters {
 
 
 
+pub fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
+    format!("{:#?}", q)
+}

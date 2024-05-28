@@ -1,4 +1,4 @@
-type Account = record { owner : principal; subaccount : opt vec nat8 };
+type Account = record { owner : principal; subaccount : opt blob };
 type CmcNotifyError = variant {
   Refunded : record { block_index : opt nat64; reason : text };
   InvalidTransaction : text;
@@ -13,12 +13,14 @@ type CompleteMintCyclesError = variant {
 type CyclesInError = variant {
   GenericError : record { message : text; error_code : nat };
   BadFee : record { expected_fee : nat };
+  CreatedInFuture : record { ledger_time : nat64 };
+  TooOld;
   MsgCyclesTooLow;
 };
 type CyclesInQuest = record {
   to : Account;
   fee : opt nat;
-  memo : opt vec nat8;
+  memo : opt blob;
   cycles : nat;
   created_at_time : opt nat64;
 };
@@ -26,12 +28,14 @@ type CyclesOutError = variant {
   GenericError : record { message : text; error_code : nat };
   BadFee : record { expected_fee : nat };
   DepositCyclesCallError : record { nat32; text };
+  CreatedInFuture : record { ledger_time : nat64 };
+  TooOld;
   InsufficientFunds : record { balance : nat };
 };
 type CyclesOutQuest = record {
   fee : opt nat;
-  memo : opt vec nat8;
-  from_subaccount : opt vec nat8;
+  memo : opt blob;
+  from_subaccount : opt blob;
   cycles : nat;
   for_canister : principal;
   created_at_time : opt nat64;
@@ -43,8 +47,8 @@ type GetLogsBackwardsSponse = record {
 type Icrc1TransferQuest = record {
   to : Account;
   fee : opt nat;
-  memo : opt vec nat8;
-  from_subaccount : opt vec nat8;
+  memo : opt blob;
+  from_subaccount : opt blob;
   created_at_time : opt nat64;
   amount : nat;
 };
@@ -56,7 +60,7 @@ type LedgerTopupCyclesCmcNotifyError = variant {
   CmcNotifyTopUpQuestCandidEncodeError : text;
   CmcNotifySponseCandidDecodeError : record {
     candid_error : text;
-    candid_bytes : vec nat8;
+    candid_bytes : blob;
   };
   CmcNotifyError : CmcNotifyError;
   CmcNotifyCallError : record { nat32; text };
@@ -67,14 +71,9 @@ type LogTX = record {
   ts : opt nat64;
   amt : nat;
   fee : opt nat;
-  memo : opt vec nat8;
+  memo : opt blob;
 };
-type MetadataValue = variant {
-  Int : int;
-  Nat : nat;
-  Blob : vec nat8;
-  Text : text;
-};
+type MetadataValue = variant { Int : int; Nat : nat; Blob : blob; Text : text };
 type MintCyclesError = variant {
   GenericError : record { message : text; error_code : nat };
   CBIsBusy;
@@ -85,18 +84,21 @@ type MintCyclesError = variant {
     reason : text;
   };
   BadFee : record { expected_fee : nat };
+  CreatedInFuture : record { ledger_time : nat64 };
   LedgerTopupCyclesCmcIcpTransferError : LedgerTopupCyclesCmcIcpTransferError;
   UserIsInTheMiddleOfADifferentCall : UserIsInTheMiddleOfADifferentCall;
+  TooOld;
 };
 type MintCyclesMidCallError = variant {
   LedgerTopupCyclesCmcNotifyError : LedgerTopupCyclesCmcNotifyError;
+  CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles;
 };
 type MintCyclesQuest = record {
   to : Account;
   fee : opt nat;
   burn_icp : nat;
   burn_icp_transfer_fee : nat;
-  memo : opt vec nat8;
+  memo : opt blob;
   created_at_time : opt nat64;
 };
 type MintCyclesSuccess = record {
@@ -140,6 +142,7 @@ type UserIsInTheMiddleOfADifferentCall = variant {
   MintCyclesCall : record { must_call_complete : bool };
 };
 service : () -> {
+  canister_cycles_balance_minus_total_supply : () -> (int) query;
   complete_mint_cycles : (opt principal) -> (Result);
   controller_clear_user_logs_pointers_cache : () -> ();
   cycles_in : (CyclesInQuest) -> (Result_1);
@@ -149,7 +152,7 @@ service : () -> {
   icrc1_decimals : () -> (nat8) query;
   icrc1_fee : () -> (nat) query;
   icrc1_metadata : () -> (vec record { text; MetadataValue }) query;
-  icrc1_minting_account : () -> (Account) query;
+  icrc1_minting_account : () -> (opt Account) query;
   icrc1_name : () -> (text) query;
   icrc1_supported_standards : () -> (vec SupportedStandard) query;
   icrc1_symbol : () -> (text) query;

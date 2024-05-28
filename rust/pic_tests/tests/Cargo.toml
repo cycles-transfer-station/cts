@@ -25,5 +25,8 @@ pocket-ic = { workspace = true }
 icrc-ledger-types = { workspace = true }
 more-asserts = { workspace = true }
 candid = { workspace = true }
-
+icrc1-test-suite = { workspace = true }
+icrc1-test-env = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
 

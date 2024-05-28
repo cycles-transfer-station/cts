@@ -98,7 +98,7 @@ async fn _do_payouts() {
             = void_positions_payouts(&mut cm_data.void_token_positions, do_token_payout, update_storage_positions_yes_or_no);
                         
         if void_cycles_positions_update_storage_positions_chunk.len() > 0 
-        || void_token_positions_update_storage_positions_chunk.len()  > 0 {
+        || void_token_positions_update_storage_positions_chunk.len() > 0 {
             with_mut(&POSITIONS_STORAGE_DATA, |positions_storage_data| { 
                 positions_storage_data.storage_flush_lock = true; 
             });
@@ -202,25 +202,24 @@ async fn _do_payouts() {
         fn _handle_vps<VoidPosition: VoidPositionTrait, DoOutput, F: Fn(&mut VoidPosition, DoOutput)->()>(
             vps_ids: Vec<PositionId>,
             vps_do_rs: Vec<DoOutput>,
-            void_positions: &mut Vec<VoidPosition>, 
+            void_positions: &mut BTreeMap<PositionId, VoidPosition>, 
             handle_output: F
         ) {
             for (vp_id, do_output) in vps_ids.into_iter().zip(vps_do_rs.into_iter()) {      
-                let vp_void_positions_i: usize = match void_positions.binary_search_by_key(&vp_id, |vp| { vp.position_id() }) {
-                    Ok(i) => i,
-                    Err(_) => { continue; }
+                let vp: &mut VoidPosition = match void_positions.get_mut(&vp_id) {
+                    Some(vp) => vp,
+                    None => continue,
                 };
-                let vp: &mut VoidPosition = &mut void_positions[vp_void_positions_i];
                 handle_output(vp, do_output);
                 if vp.can_remove() {
-                    void_positions.remove(vp_void_positions_i);
+                    void_positions.remove(&vp_id);
                 }
             }
         }
         fn handle_vps_payouts<VoidPosition: VoidPositionTrait>(
             vps_ids_payouts: Vec<PositionId>,
             vps_do_payouts_rs: Vec<Option<PayoutData>>,
-            void_positions: &mut Vec<VoidPosition>, 
+            void_positions: &mut BTreeMap<PositionId, VoidPosition>, 
         ) {
             _handle_vps(
                 vps_ids_payouts,
@@ -249,7 +248,7 @@ async fn _do_payouts() {
         fn handle_vps_update_storage_positions<VoidPosition: VoidPositionTrait>(
             vps_ids_update_storage_positions: Vec<PositionId>,
             vps_do_update_storage_positions_rs: Vec<DoUpdateStoragePositionResult>,
-            void_positions: &mut Vec<VoidPosition>, 
+            void_positions: &mut BTreeMap<PositionId, VoidPosition>, 
         ) {
             _handle_vps(
                 vps_ids_update_storage_positions,

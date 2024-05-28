@@ -126,7 +126,7 @@ fn test_100() {
         
         let cm_data: CMData = create_and_download_state_snapshot::<CMData>(&pic, CM_MAIN, tc, 0);
         assert_eq!(
-            cm_data.token_positions[0],
+            *(cm_data.token_positions.first_key_value().unwrap().1),
             TokenPosition{
                 id: i * 2,
                 positor: p1,
@@ -140,7 +140,7 @@ fn test_100() {
                 current_position_tokens: trade_tokens,
                 purchases_rates_times_token_quantities_sum: 0,
                 cycles_payouts_fees_sum: 0,
-                timestamp_nanos: cm_data.token_positions[0].timestamp_nanos,
+                timestamp_nanos: cm_data.token_positions.first_key_value().unwrap().1.timestamp_nanos,
             }
         );
         assert_eq!(cm_data.token_positions.len(), 1);
@@ -268,11 +268,11 @@ fn test_100() {
         assert_eq!(cm_data.void_cycles_positions.len(), 1);
         assert_eq!(cm_data.trade_logs.len(), 1);
         assert_eq!(
-            cm_data.void_token_positions[0],
+            *(cm_data.void_token_positions.first_key_value().unwrap().1),
             void_token_position,
         );
         assert_eq!(
-            cm_data.void_cycles_positions[0],
+            *(cm_data.void_cycles_positions.first_key_value().unwrap().1),
             void_cycles_position
         );
         
@@ -336,11 +336,11 @@ fn test_100() {
         assert_eq!(cm_data.void_cycles_positions.len(), 1);
         assert_eq!(cm_data.trade_logs.len(), 0);
         assert_eq!(
-            cm_data.void_token_positions[0],
+            *(cm_data.void_token_positions.first_key_value().unwrap().1),
             void_token_position,
         );
         assert_eq!(
-            cm_data.void_cycles_positions[0],
+            *(cm_data.void_cycles_positions.first_key_value().unwrap().1),
             void_cycles_position
         );
                 

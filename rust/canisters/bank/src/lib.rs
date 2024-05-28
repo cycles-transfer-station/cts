@@ -38,7 +38,7 @@ use cts_lib::{
         CmcNotifyError
     },
     ic_ledger_types::{IcpBlockHeight, IcpTokens},
-    consts::{MiB, KiB},
+    consts::{MiB, KiB, TRILLION},
 };
 use ic_cdk::{
     init,
@@ -54,6 +54,7 @@ use ic_cdk::{
             call_with_payment128,
         },
         is_controller,
+        canister_balance128,
     },
     trap
 };
@@ -127,6 +128,8 @@ pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
+pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles = 2 * TRILLION;
+pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
 pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
@@ -216,8 +219,8 @@ pub fn icrc1_decimals() -> u8 {
 }
 
 #[query]
-pub fn icrc1_minting_account() -> IcrcId {
-    IcrcId{owner: ic_cdk::api::id(), subaccount: None}
+pub fn icrc1_minting_account() -> Option<IcrcId> {
+    None
 }
 
 #[query]
@@ -271,13 +274,20 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
         
-    if q.to == (IcrcId{owner: ic_cdk::api::id(), subaccount: None})/*minting-account*/ {
-        return Err(Icrc1TransferError::GenericError{ error_code: 0u32.into(), message: "Sending to the minting account is not allowed. Use the cycles_out method to burn cycles.".to_string() });
+    // temporary while waiting to implement transaction-deduplication.
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                Icrc1TransferError::TooOld
+            } else {
+                Icrc1TransferError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
     }
         
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(Icrc1TransferError::GenericError{ error_code: 1u32.into(), message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -388,6 +398,17 @@ fn controller_clear_user_logs_pointers_cache() {
 
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
+    
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                CyclesInError::TooOld
+            } else {
+                CyclesInError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
+    }
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -396,7 +417,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(CyclesInError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -446,6 +467,17 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
+    
+     if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                CyclesOutError::TooOld
+            } else {
+                CyclesOutError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
+    }
+    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -454,7 +486,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(CyclesOutError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -488,7 +520,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                         tx: LogTX{
                             op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
-                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account. // FOR THE DO, fix old logs that don't have this.
+                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
                             memo: q.memo,
                             ts: q.created_at_time,
                         }
@@ -533,6 +565,19 @@ struct MintCyclesMidCallData {
 
 #[update]
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
+    if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL {
+        trap("This canister is low on cycles.");
+    }
+    
+    if let Some(created_at_time) = q.created_at_time {
+        return Err(
+            if created_at_time <= time_nanos_u64() {
+                MintCyclesError::TooOld
+            } else {
+                MintCyclesError::CreatedInFuture{ ledger_time: time_nanos_u64() }
+            }
+        );
+    }
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
     
@@ -549,7 +594,7 @@ pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
-            return Err(MintCyclesError::GenericError{ error_code: 1, message: "Max memo length is 32 bytes.".to_string() });
+            trap("Max memo length is 32 bytes.");
         }
     }
     
@@ -595,6 +640,11 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     }
     
     if mid_call_data.cmc_cycles.is_none() {
+        if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL {
+            mid_call_data.lock = false;
+            with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+            return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles));
+        }
         match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
             Ok(cmc_cycles) => { 
                 mid_call_data.cmc_cycles = Some(cmc_cycles); 
@@ -681,6 +731,14 @@ async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, 
             CompleteMintCyclesError::MintCyclesError(mint_cycles_error) 
         })
 }
+
+
+#[query]
+pub fn canister_cycles_balance_minus_total_supply() -> i128 {
+    (canister_balance128() as i128).saturating_sub(with(&CB_DATA, |cb_data| { cb_data.total_supply }) as i128)
+}
+
+
 
 
 ic_cdk::export_candid!();

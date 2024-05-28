@@ -23,6 +23,8 @@ pub enum CyclesInError {
     MsgCyclesTooLow,
     BadFee{ expected_fee: Cycles },
     GenericError{ error_code: u128, message: String },
+    TooOld,
+    CreatedInFuture{ ledger_time: u64 }, 
 }
 
 #[derive(CandidType, Deserialize)]
@@ -40,6 +42,8 @@ pub enum CyclesOutError {
     InsufficientFunds{ balance: Cycles },
     BadFee{ expected_fee: Cycles },
     DepositCyclesCallError(CallError),
+    TooOld,
+    CreatedInFuture{ ledger_time: u64 }, 
     GenericError{ error_code: u128, message: String },    
 }
 
@@ -58,6 +62,8 @@ pub enum MintCyclesError {
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     MinimumBurnIcp{ minimum_burn_icp: u128 },
     BadFee{ expected_fee: Cycles },
+    TooOld,
+    CreatedInFuture{ ledger_time: u64 },
     GenericError{ error_code: u128, message: String },
     CBIsBusy,
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
@@ -68,6 +74,7 @@ pub enum MintCyclesError {
 #[derive(CandidType, Deserialize, Debug)]
 pub enum MintCyclesMidCallError {
     LedgerTopupCyclesCmcNotifyError(LedgerTopupCyclesCmcNotifyError),
+    CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles,
 }
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]

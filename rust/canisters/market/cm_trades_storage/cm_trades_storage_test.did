@@ -1,5 +1,5 @@
 type FlushError = variant { StorageIsFull };
-type FlushQuest = record { bytes : vec nat8 };
+type FlushQuest = record { bytes : blob };
 type LogStorageInit = record { log_size : nat32 };
 type Result = variant { Ok : record {}; Err : FlushError };
 type ViewLatestTradesQuest = record { opt_start_before_id : opt nat };
