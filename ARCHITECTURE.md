@@ -6,7 +6,7 @@ The CTS is an on-chain order-book market trade platform for ICRC-1 token ledgers
 Each token/ledger listed for trading on the market trades against the CYCLES. CYCLES is the native stablecoin on the internet-computer payed by all canisters to the ICP network for computation and storage costs. The CYCLES are held at a stable value 1-XDR = 1-TRILLION-CYCLES. This makes for a perfect native stablecoin.
 The market tokens trade against the CYCLES, creating a stable trading scenario, helping tokens find their current price based on the merits of that token alone, and not being swayed by the current price of ICP.
 
-For users to hold CYCLES, the CTS-CYCLES-BANK is an ICRC-1 ledger that hold CYCLES for users 1:1 without each user needing a 'cycles-wallet' canister. The DFINITY foundation is currently working on a cycles-ledger to be managed and controlled by the NNS for this purpose that accomplishes the same goal as the CTS-CYCLES-BANK, however there is no telling when it will be released. If the cycles-ledger built by DFINITY does get released, the CTS will switch to using it, as it is better for the ecosystem to be using the same ledger for the cycles.
+For users to hold CYCLES, the CTS-CYCLES-BANK is an ICRC-1 ledger that hold CYCLES for users 1:1 without each user needing a 'cycles-wallet' canister.
 
 For each token/ledger listed for trading on the CTS, the system creates a new trade-contract canister, known as the cm_tc (cycles-market-trade-contract) in this codebase. This canister facilitates the trading of this token by receiving and matching the orders. 
  
