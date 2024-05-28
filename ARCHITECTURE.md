@@ -2,6 +2,8 @@
 
 The CTS is an on-chain order-book market trade platform for ICRC-1 token ledgers on the world-computer blockchain.
 
+The CTS lives 100% on the internet-computer blockchain with zero off-chain dependencies.
+
 ## General architecture overview
 Each token/ledger listed for trading on the market trades against the CYCLES. CYCLES is the native stablecoin on the internet-computer payed by all canisters to the ICP network for computation and storage costs. The CYCLES are held at a stable value 1-XDR = 1-TRILLION-CYCLES. This makes for a perfect native stablecoin.
 The market tokens trade against the CYCLES, creating a stable trading scenario, helping tokens find their current price based on the merits of that token alone, and not being swayed by the current price of ICP.
