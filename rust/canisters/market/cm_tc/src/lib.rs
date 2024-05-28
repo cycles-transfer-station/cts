@@ -214,30 +214,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, Some::<fn(OldCMData) -> CMData>(
-        |o| {
-            CMData{
-                cts_id: o.cts_id,
-                cm_main_id: o.cm_main_id,
-                icrc1_token_ledger: o.icrc1_token_ledger,
-                icrc1_token_ledger_transfer_fee: o.icrc1_token_ledger_transfer_fee,
-                cycles_bank_id: o.cycles_bank_id,
-                cycles_bank_transfer_fee: o.cycles_bank_transfer_fee,
-                positions_id_counter: o.positions_id_counter,
-                trade_logs_id_counter: o.trade_logs_id_counter,
-                mid_call_user_cycles_balance_locks: o.mid_call_user_cycles_balance_locks,
-                mid_call_user_token_balance_locks: o.mid_call_user_token_balance_locks,
-                cycles_positions: o.cycles_positions.into_iter().map(|p| (p.id, p)).collect(),
-                token_positions: o.token_positions.into_iter().map(|p| (p.id, p)).collect(),
-                trade_logs: o.trade_logs,
-                void_cycles_positions: o.void_cycles_positions.into_iter().map(|p| (p.position_id, p)).collect(),
-                void_token_positions: o.void_token_positions.into_iter().map(|p| (p.position_id, p)).collect(),
-                do_payouts_errors: o.do_payouts_errors,
-                candle_counter: o.candle_counter,
-            }
-        }
-        
-    ));
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     

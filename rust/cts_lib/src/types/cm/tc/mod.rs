@@ -195,27 +195,6 @@ pub struct Volume{
 // ---------
 
 #[derive(CandidType, Serialize, Deserialize)]
-pub struct OldCMData {
-    pub cts_id: Principal,
-    pub cm_main_id: Principal,
-    pub icrc1_token_ledger: Principal,
-    pub icrc1_token_ledger_transfer_fee: Tokens,
-    pub cycles_bank_id: Principal,
-    pub cycles_bank_transfer_fee: Cycles,
-    pub positions_id_counter: u128,
-    pub trade_logs_id_counter: u128,
-    pub mid_call_user_cycles_balance_locks: HashSet<Principal>,
-    pub mid_call_user_token_balance_locks: HashSet<Principal>,
-    pub cycles_positions: Vec<CyclesPosition>,
-    pub token_positions: Vec<TokenPosition>,
-    pub trade_logs: VecDeque<TradeLogAndTemporaryData>,
-    pub void_cycles_positions: Vec<VoidCyclesPosition>,
-    pub void_token_positions: Vec<VoidTokenPosition>,
-    pub do_payouts_errors: Vec<CallError>,
-    pub candle_counter: CandleCounter,
-}
-
-#[derive(CandidType, Serialize, Deserialize)]
 pub struct CMData {
     pub cts_id: Principal,
     pub cm_main_id: Principal,
