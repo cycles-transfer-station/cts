@@ -29,6 +29,8 @@ The bank can be used to mint cycles using ICP straight into the user's ledger ac
 ### cm_main - el2py-miaaa-aaaar-qabxq-cai
 The market starts with the canister referred to in this codebase as the 'cm_main' canister located at `rust/canisters/market/cm_main`. This canister creates and manages the trade-contract canisters of each token/ledger listed on the market. This is a top-level canister and will be controlled by the SNS root canister.
 To create a new trade-contract, the cm_main has a method that only the controller can call. The wasm-modules for the trade-contract canister and positions-storage and trades-storage canisters are held on this canister, the cm_main.
+To find the trade-contract canisters, use the method: [`view_icrc1_token_trade_contracts`](https://dashboard.internetcomputer.org/canister/el2py-miaaa-aaaar-qabxq-cai#view_icrc1_token_trade_contracts) on this cm_main canister.
+
 
 ### cm_tc
 Location: `rust/canisters/market/cm_tc`. These canisters are controlled and upgraded by the cm_main canister.
