@@ -10,9 +10,9 @@ logo: cts-logo.png
 url: https://cycles-transfer-station.com
 
 NnsProposal:
-    title: "Create SNS for the CYCLES-TRANSFER-STATION." 
+    title: "Create a SNS for the CYCLES-TRANSFER-STATION." 
 
-    url: "https://cycles-transfer-station.com"
+    url: "forum-post-url"
 
     summary: "Hi summary"
 
@@ -32,7 +32,7 @@ Token:
 Proposals:
     rejection_fee: 500 tokens
 
-    initial_voting_period: 3 days
+    initial_voting_period: 4 days
     
     maximum_wait_for_quiet_deadline_extension: 3 days
 
@@ -44,11 +44,11 @@ Voting:
     MaximumVotingPowerBonuses:
         DissolveDelay:
             duration: 5 years
-            bonus: 100%
+            bonus: 200%
 
         Age:
             duration: 5 years
-            bonus: 100%
+            bonus: 50%
 
     RewardRate:
         initial: 5%
@@ -119,14 +119,14 @@ Swap:
     minimum_direct_participation_icp: 10_000 tokens
     maximum_direct_participation_icp: 50_000 tokens
     minimum_participant_icp: 2 tokens
-    maximum_participant_icp: 2000 tokens
+    maximum_participant_icp: 5000 tokens
 
     # The text that swap participants must confirm before they may participate
     # in the swap.
     #
     # This field is optional. If set, must be a string within 1 to 1,000 characters
     # and at most 8,000 bytes.
-    # confirmation_text: I confirm I want to make money!
+    confirmation_text: The participant confirms that the participant takes full responsibility and accountability for the participant's participation in this SNS swap. The participant knows that there are no guarantees of any kind in this SNS swap. Decentralized blockchain code is handling this SNS swap.
 
     # Configuration of the vesting schedule of the neuron basket, i.e., the SNS
     # neurons that a participants will receive from a successful
