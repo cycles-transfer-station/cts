@@ -22,7 +22,7 @@ Due to this stability mechanism, this makes the CYCLES a great native stablecoin
 
 ### The value of the CYCLES-TRANSFER-STATION
 
-The CTS market lets people trade many ICRC-1 tokens for CYCLES backward and forward without having to go through the ICP token. This creates many benefits for every party. For canister authors and maintainers, it gives them a chance to purchase CYCLES to power their canisters using many different tokens that they may have such as their native token if it is an SNS, or other tokens they may have without dipping into their ICP treasury. So far, the OpenChat SNS and the KINIC SNS have integrated with the CTS and now their autonomous governance canisters have placed orders at the CTS market trading their native tokens CHAT and KINIC for CYCLES to fuel their dapp canisters. For mainstream users, it gives them a chance to purchase and trade many ICRC-1 tokens using the CYCLES stablecoin without having to purchase ICP, creating a stable trading scenario.
+The CTS market lets people trade many ICRC-1 tokens for CYCLES backward and forward without having to go through the ICP token. This creates many benefits for every party. For canister authors and maintainers, it gives them a chance to purchase CYCLES to power their canisters using many different tokens that they may have such as their native token if it is an SNS, or other tokens they may have without dipping into their ICP treasury. So far, the OpenChat SNS and the KINIC SNS have integrated with the CTS and now their autonomous governance canisters have placed orders at the CTS market trading their native tokens CHAT and KINIC for CYCLES to fuel their dapp canisters. For mainstream users, it gives them a chance to purchase and trade many ICRC-1 tokens using the CYCLES stablecoin without having to purchase ICP, therefore growing the usability of the CYCLES.
 
 This CTS functionality is the foundation of the general mainstream usage of the internet-computer's native CYCLES as a stablecoin. 
 
@@ -30,9 +30,11 @@ Users can go into the CTS website, login, and purchase CYCLES at the market usin
 
 The CTS kickstarts the ecosystem of the CYCLES as a stablecoin.
 
-### TOKENOMICS
+### SNS-LAUNCH
 
 The CTS is launching an SNS (Service-Nervous-System) DAO and creating the CTS token which governs the CTS platform.
+
+The SNS launch of the CTS spreads out the surface-area of the controll of the system so that the CTS fullfills it's goal of being a decentralized public-good for the world. The whole system is verifiable with reproducible builds and available source code, so users can verify on the blockchain what the system is doing when they use it. Every update to the platform must pass through a decentralized vote of the global CTS token holders for an update to take place. 
 
 The CTS market charges a fee for trades made on the platform. People who stake their CTS tokens, and participate in the governance voting, share the profits of the platform in proportion to their stake and voting participation.
 
@@ -40,13 +42,14 @@ Holders of the CTS token are therefore shareholders of the CTS platform, and sha
 
 Profits of the platform will be sent to every shareholder on a periodic basis (like once a month).    
 
+### TOKENOMICS
 
 TOTAL-SUPPLY: `20_000_000`  
 TREASURY: `10_000_000`  
 SWAP: `6_000_000`  
 TEAM: `4_000_000`  
 
-1/4 of the team's tokens are locked for 5 years and vested for an additional 5 years. The remaining 3/4 of the team's tokens are locked and vested between 1-month and 4-years. 
+1/4 of the team's tokens are locked for 5 years and vested for an additional 5 years. The remaining 3/4 of the team's tokens are locked and vested between 1-month and 4-years.
 
 MINIMUM-DIRECT-PARTICIPATION-ICP: `10_000-ICP`  
 MAXIMUM-DIRECT-PARTICIPATION-ICP: `50_000-ICP`  
@@ -54,11 +57,15 @@ MAXIMUM-DIRECT-PARTICIPATION-ICP: `50_000-ICP`
 MAX-DISSOLVE-DELAY: `5-YEARS`  
 MAX-DISSOLVE-DELAY-BONUS: `200%`  
 
-VOTING-REWARDS: Starts at 5% goes down to 1% over 10-years.
+VOTING-REWARDS: Starts at 5% and goes down to 1% over 10-years.
 
 ### OUTLOOK-GOING-FORWARD
 
+The CTS team plans on continuing on our journey of building the ecosystem of the CYCLES as a stablecoin.
+
 The general plan going forward is to calibrate the platform for the needs of the ecosystem and it's users as we grow. 
+
+The team's vision for the CTS is that the CTS is the home for the internet-computer's native CYCLES. A station where people go to do everything they need with the CYCLES. As the ecosystem grows, more needs will become clear. For this now, the CYCLES market is the focus.
 
 A couple of things we have planned are: 
  - The implementation of the sharing of the profits of the platform with the CTS token shareholders, 
@@ -68,8 +75,13 @@ A couple of things we have planned are:
  - General website UI touchups,
  - More robust and automatic backup and rollback feature.
 
-The CTS team plans on continuing on our journey of building the ecosystem of the CYCLES as a stablecoin. 
-
 Some of the long-term features we are thinking about are borrowing and lending many tokens using the CYCLES stablecoin as the collateral, and complex escrow services.
+
+### CONCLUSION
+
+Thanks for reading, we value your consideration.
+
+The CTS team takes this pledge to continue on our journey, and manifest the vision of the CYCLES-TRANSFER-STATION. 
+
 
 
