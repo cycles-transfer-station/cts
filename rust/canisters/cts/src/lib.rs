@@ -257,6 +257,28 @@ pub fn controller_commit_batch(q: ControllerCommitBatchQuest) {
 }
 
 #[query]
+pub fn view_current_batch_hash() -> Option<[u8; 32]> {
+    with(&CTS_DATA, |d| {
+        if d.current_batch.len() == 0 {
+            return None;
+        } else {
+            return Some(hash_of_files(&d.current_batch));
+        }
+    })
+}
+
+#[query]
+pub fn view_live_files_hash() -> Option<[u8; 32]> {
+    with(&CTS_DATA, |d| {
+        if d.frontcode_files.len() == 0 {
+            return None;
+        } else {
+            return Some(hash_of_files(&d.frontcode_files));
+        }
+    })
+}
+
+#[query]
 pub fn view_file_hashes() -> Vec<(String, [u8; 32])> {
     with(&CTS_DATA, |cts_data| { 
         let mut vec = Vec::<(String, [u8; 32])>::new();

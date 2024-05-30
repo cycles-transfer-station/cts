@@ -23,5 +23,7 @@ service : (CTSInit) -> {
   upload_file_chunks : (text, nat32, blob) -> ();
   view_batch_creators : () -> (vec principal) query;
   view_current_batch_file_hashes : () -> (vec record { text; blob }) query;
+  view_current_batch_hash : () -> (opt blob) query;
   view_file_hashes : () -> (vec record { text; blob }) query;
+  view_live_files_hash : () -> (opt blob) query;
 }
