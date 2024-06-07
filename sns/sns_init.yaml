@@ -16,7 +16,7 @@ NnsProposal:
 
     summary: "Hi summary"
 
-fallback_controller_principals: [2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe, 35bfm-o3l6o-2stfb-kr2p3-qvvw5-dtdjq-q5nly-rqv4r-p7vtd-fs2mg-6qe]
+fallback_controller_principals: [2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe, 35bfm-o3l6o-2stfb-kr2p3-qvvw5-dtdjq-q5nly-rqv4r-p7vtd-fs2mg-6qe, 6mmfo-3g7mh-pjrig-sgliy-zkemc-gxr4w-lvppb-4gi5x-sictd-c6ip7-bae]
 
 dapp_canisters: [em3jm-bqaaa-aaaar-qabxa-cai, wwikr-gqaaa-aaaar-qacva-cai, el2py-miaaa-aaaar-qabxq-cai]
 
@@ -34,7 +34,7 @@ Proposals:
 
     initial_voting_period: 4 days
     
-    maximum_wait_for_quiet_deadline_extension: 3 days
+    maximum_wait_for_quiet_deadline_extension: 2 days
 
 Neurons:
     minimum_creation_stake: 100 tokens
@@ -87,7 +87,7 @@ Distribution:
         memo: 5
         dissolve_delay: 3 months
         vesting_period: 3 months
-      - principal: 2syno-7lhkz-hiuhu-k4tf5-x4mvg-jptdr-pmomn-6d4ok-zq7bh-btlsu-bqe
+      - principal: 6mmfo-3g7mh-pjrig-sgliy-zkemc-gxr4w-lvppb-4gi5x-sictd-c6ip7-bae
         stake: 416_000 tokens
         memo: 6
         dissolve_delay: 1 months
@@ -115,18 +115,11 @@ Distribution:
     total: 20_000_000 tokens
 
 Swap:
-    minimum_participants: 50
+    minimum_participants: 10
     minimum_direct_participation_icp: 10_000 tokens
     maximum_direct_participation_icp: 50_000 tokens
-    minimum_participant_icp: 2 tokens
+    minimum_participant_icp: 4 tokens
     maximum_participant_icp: 5000 tokens
-
-    # The text that swap participants must confirm before they may participate
-    # in the swap.
-    #
-    # This field is optional. If set, must be a string within 1 to 1,000 characters
-    # and at most 8,000 bytes.
-    confirmation_text: The participant confirms that the participant takes full responsibility and accountability for the participant's participation in this SNS swap. The participant knows that there are no guarantees of any kind in this SNS swap. Decentralized blockchain code is handling this SNS swap.
 
     # Configuration of the vesting schedule of the neuron basket, i.e., the SNS
     # neurons that a participants will receive from a successful
