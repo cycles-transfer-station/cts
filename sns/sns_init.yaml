@@ -1,9 +1,6 @@
 name: CYCLES-TRANSFER-STATION
 
-description: Mint, transfer, and trade the native stablecoin on the world-computer.
-
-# This is currently a placeholder field and must be left empty for now.
-Principals: []
+description: "The CYCLES-TRANSFER-STATION is a 100% on-chain order-book market trade platform for ICRC-1 tokens on the world-computer. The key is that the market tokens trade against the native CYCLES, creating a stable trading scenario, and facilitating the general trade of the CYCLES."
 
 logo: cts-logo.png
 
@@ -12,7 +9,7 @@ url: https://cycles-transfer-station.com
 NnsProposal:
     title: "Create a SNS for the CYCLES-TRANSFER-STATION." 
 
-    url: "forum-post-url"
+    url: "https://forum.dfinity.org/t/proposal-for-the-creation-of-a-new-sns-for-the-cycles-transfer-station/31502"
 
     summary: "Hi summary"
 
