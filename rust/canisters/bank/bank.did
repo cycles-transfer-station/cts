@@ -119,6 +119,7 @@ type Result_1 = variant { Ok : nat; Err : CyclesInError };
 type Result_2 = variant { Ok : nat; Err : CyclesOutError };
 type Result_3 = variant { Ok : nat; Err : TransferError_1 };
 type Result_4 = variant { Ok : MintCyclesSuccess; Err : MintCyclesError };
+type Result_5 = variant { Ok : text; Err : text };
 type SupportedStandard = record { url : text; name : text };
 type Tokens = record { e8s : nat64 };
 type TransferError = variant {
@@ -159,4 +160,5 @@ service : () -> {
   icrc1_total_supply : () -> (nat) query;
   icrc1_transfer : (Icrc1TransferQuest) -> (Result_3);
   mint_cycles : (MintCyclesQuest) -> (Result_4);
+  sns_validate_cycles_out : (CyclesOutQuest) -> (Result_5) query;
 }

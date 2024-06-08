@@ -25,6 +25,7 @@ use cts_lib::{
         principal_as_thirty_bytes,
         thirty_bytes_as_principal,
         call_error_as_u32_and_string,
+        sns_validation_string,
     },
     management_canister::CanisterIdRecord,
     types::{
@@ -463,7 +464,10 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
 
 // cycles-out
 
-
+#[query]
+pub fn sns_validate_cycles_out(q: CyclesOutQuest) -> Result<String, String> {
+    Ok(sns_validation_string(q))    
+}
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {

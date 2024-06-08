@@ -27,7 +27,7 @@ pub enum CyclesInError {
     CreatedInFuture{ ledger_time: u64 }, 
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub struct CyclesOutQuest {
     pub cycles: Cycles,
     pub fee: Option<Cycles>,
