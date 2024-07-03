@@ -1,0 +1,22 @@
+sns governance store rolling 5 reward events on each neuron, the fraction of the neuron_reward_e8s out of the total distributed_e8s for that reward-event. 
+
+shareholder_payouts canister calls sns governance canister every day and mirrors this data for each principal by taking the sum of the neuron_reward_e8s for each neuron of that principal. 
+
+on each CTS-shareholder-payout-event, sum the distributed_e8s of each reward-event within this CTS-shareholder-payout-event, and sum the neuron_reward_e8s of each principal within this CTS-shareholder-payout reward-event. 
+then payout out the trading fees collected during this CTS-shareholder-payout-event with the fractions of each principal.
+
+count total-trade-fees-collected currently in the POSITIONS_SUBACCOUNT of each cm_tc. when payout happens, subtract the payouts from this count.   
+
+tell CTS users to put their CTS principal as a hot-key on one of their neurons, and register their CTS principal with their neuron principal in the shareholder-payouts canister through the CTS website frontend. only one CTS-principal per neuron-principal allowed at the same time in the shareholder-payouts canister. shareholder-payouts canister will check that the neuron has this hotkey, and register the user's CTS principal to receive the shareholder-payouts for that neuron-principal's voting participation.
+
+send CTS shareholder-payouts to the users' CTS website principal so that every token in the CTS market will be available to the user in the user's CTS website account.
+
+on the shareholder-payouts canister, store a "cts-maturity" of each token for each principal which is the payout-amount that the principal is owed. This is calculated from the SNS-governance reward events data. 
+
+on each CTS-shareholder-payout event, transfer the fees-collected from the cm_tcs into the shareholder-payouts canister, and calculate the payouts (cts-maturity) of each token for each principal. division-remainders roll over to the next cts-shareholder-payout-event. make sure to not use floats because here we are not minting rewards, we are paying out of the collected-market-fees.
+  
+either CTS users can view their cts-maturity and choose to get paid whenever they choose (disburse cts-maturity) possibly with a (maturity-modulation that can only go down because we aren't minting here), or automatically payout CTS users whenever the cts-maturity >= 10_000 * transfer-fee-of-the-token-being-payed-out, but that might cause problems for people's tax calculations and also might become a waste of all those transfer-fees. maybe we can make a easy downloadable tax sheet for download?.
+  
+make a page on the CTS website called shareholder-payouts or shareholder-dashboard. where shareholders can manage their cts-maturity and where everyone, even not-logged-in users, can view stats of the total market fees collected for each token, this month, this week, this year, all time, how much paid out etc.  
+
+
