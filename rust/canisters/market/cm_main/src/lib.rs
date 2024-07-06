@@ -63,6 +63,7 @@ pub struct TradeContractData {
 #[derive(CandidType, Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
+    // portant that the sequence of these stay the same and only get added on. the shareholder_payouts canister needs it. 
     trade_contracts: Vec<(TradeContractIdAndLedgerId, TradeContractData)>,
     tc_canister_code: CanisterCode,
     trades_storage_canister_code: CanisterCode,

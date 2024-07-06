@@ -12,6 +12,8 @@ members = [
     "canisters/market/cm_positions_storage",
     "cts_lib",
     "pic_tests/canister_caller",
+    "canisters/shareholder_payouts",
+    "outsiders",
 ]
 
 exclude = [

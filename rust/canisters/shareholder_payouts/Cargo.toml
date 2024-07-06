@@ -1,0 +1,19 @@
+[package]
+name = "shareholder_payouts"
+version = "0.1.0"
+authors = ["levi <levifeldman37@gmail.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cts_lib = { path = "../../cts_lib" }
+candid = { workspace = true }
+#futures = { workspace = true }
+#serde = { workspace = true }
+#serde_bytes = { workspace = true }
+canister-tools = { workspace = true }
+ic-stable-structures = { workspace = true }
+ic-cdk = { workspace = true }
+
