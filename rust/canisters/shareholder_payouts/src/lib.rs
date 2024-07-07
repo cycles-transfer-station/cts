@@ -128,7 +128,7 @@ enum RegisterNeuronOwnerError {
     
     MaxNumberOfOngoingCalls, // canister is busy, locks are full
 	
-	ListNeuronsCallError(CallError),
+    ListNeuronsCallError(CallError),
 	
 }
 
@@ -198,62 +198,62 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
                 let mut found_permission_for_the_cts_user = false;
                 let mut found_permission_for_the_neuron_owner_id = false;
                 for neuron_permission in neuron.permissions.iter() {
-	                if let Some(neuron_permission_principal) = neuron_permission.principal {
-	                    
-	                    if neuron_permission_principal == cts_user 
-	                    && check_neuron_permissions(&neuron_permission.permission_type, &CTS_USER_NEURON_PERMISSIONS[..]) { 
-		 					found_permission_for_the_cts_user = true;
-	                   	} 
-	                   	else if neuron_permission_principal == q.neuron_owner_id 
-		 				&& check_neuron_permissions(&neuron_permission.permission_type, &NEURON_OWNER_NEURON_PERMISSIONS[..]) { 
-		 				 	found_permission_for_the_neuron_owner_id = true;
-	                   	}
-	                   	if found_permission_for_the_cts_user == true 
-	                   	&& found_permission_for_the_neuron_owner_id == true {
-	                   		good = true;
-	                   		break 'outer;
-	                   	}
-	                }
-	           	}
-	        }
+                    if let Some(neuron_permission_principal) = neuron_permission.principal {
+                        
+                        if neuron_permission_principal == cts_user 
+                        && check_neuron_permissions(&neuron_permission.permission_type, &CTS_USER_NEURON_PERMISSIONS[..]) { 
+                            found_permission_for_the_cts_user = true;
+                        } 
+                        else if neuron_permission_principal == q.neuron_owner_id 
+                        && check_neuron_permissions(&neuron_permission.permission_type, &NEURON_OWNER_NEURON_PERMISSIONS[..]) { 
+                            found_permission_for_the_neuron_owner_id = true;
+                        }
+                        if found_permission_for_the_cts_user == true 
+                        && found_permission_for_the_neuron_owner_id == true {
+                            good = true;
+                            break 'outer;
+                        }
+                    }
+                }
+            }
 	        
-	        if good == true {
+            if good == true {
 	                        	
-            	with_mut(&NEURON_OWNERS_AS_CTS_USERS, |d| {
-	           		d.insert(q.neuron_owner_id, cts_user);
+                with_mut(&NEURON_OWNERS_AS_CTS_USERS, |d| {
+                    d.insert(q.neuron_owner_id, cts_user);
                 });
 
                 with_mut(&SHAREHOLDERS, |shareholders| {
-	           		match shareholders.get(&cts_user) {
-	                   	None => {
-	                       	shareholders.insert(
-	                           	cts_user,
-	                           	Shareholder{
-                                	neuron_owner_ids: vec![q.neuron_owner_id],
-                                	balances: Vec::new(), 
-                                	built_up_neuron_reward_e8s: Vec::new();
-	                       		}
-	                       );
-	                   }
-	                   Some(shareholder) => {
-	                       shareholder.neuron_owner_ids.push(q.neuron_owner_id);
-	                   }
-	               }
+                    match shareholders.get(&cts_user) {
+                        None => {
+                            shareholders.insert(
+                                cts_user,
+                                Shareholder{
+                                    neuron_owner_ids: vec![q.neuron_owner_id],
+                                    balances: Vec::new(), 
+                                    built_up_neuron_reward_e8s: Vec::new();
+                                }   
+                            );
+                        }
+                        Some(shareholder) => {
+                            shareholder.neuron_owner_ids.push(q.neuron_owner_id);
+                        }
+                    }
                 });
 
-				return Ok(());
+                return Ok(());
 	        
-	        } else {
-	        	// if no neuron is found with a hotkey as the cts_user, return err
+            } else {
+                // if no neuron is found with a hotkey as the cts_user, return err
                 with_mut(&SP_DATA, unlock);
-				return Err(RegisterNeuronOwnerError::NeuronsNotFound);
-	    	}
-	    }
-	    Err(call_error) => {
-	        with_mut(&SP_DATA, unlock);
-	        return Err(RegisterNeuronOwnerError::ListNeuronsCallError(call_error_as_u32_and_string(call_error)));
-	    }
-	}
+                return Err(RegisterNeuronOwnerError::NeuronsNotFound);
+            }
+        }
+        Err(call_error) => {
+            with_mut(&SP_DATA, unlock);
+            return Err(RegisterNeuronOwnerError::ListNeuronsCallError(call_error_as_u32_and_string(call_error)));
+        }
+    }
 }
 
 
@@ -272,9 +272,9 @@ async fn timer() {
     // check if lock is on
     let turn_lock_on_result: Result<(), ()> = with_mut(&SP_DATA, |sp_data| {
         if sp_data.lock == true {
-        	return Err(()); 
+            return Err(()); 
         }
-	    // lock on
+        // lock on
         sp_data.lock = true;
         Ok(())
     });
@@ -284,8 +284,8 @@ async fn timer() {
         
     timer_with_lock_on().await;
         
-	// lock off
-	with_mut(&SP_DATA, |sp_data| {
+    // lock off
+    with_mut(&SP_DATA, |sp_data| {
         sp_data.lock = false;
     });
 }
@@ -313,11 +313,11 @@ async fn timer_with_lock_on() {
     let mut count_sns_reward_events_timestamps: Vec<u64> = Vec::new();
     loop {
         match sns_governance_service.list_neurons(
-    		ListNeurons{
-    		    of_principal: None,
-    		    limit: MAX_LIMIT_LIST_NEURONS,
-    		    start_page_at,
-    		} 
+            ListNeurons{
+                of_principal: None,
+                limit: MAX_LIMIT_LIST_NEURONS,
+                start_page_at,
+            } 
         ).await {
             Ok(sponse) => {
                 
@@ -327,19 +327,19 @@ async fn timer_with_lock_on() {
                 
                 // must be Some now.
                 start_page_at = Some(match sponse.neurons.last().unwrap().id { // unwrap because we made sure len != 0
-                	Some(neuron_id) => neuron_id,
-                	None => {
-                	    ic_cdk::print("strange, a neuron is without an id.");
-                	    return;
-                	}  
+                    Some(neuron_id) => neuron_id,
+                    None => {
+                        ic_cdk::print("strange, a neuron is without an id.");
+                        return;
+                    }  
                 });
                 
                 if count_sns_reward_events_timestamps.len() == 0 {
-                	// choose sns-reward-events to count
-                	// return if there are no new reward-events
-                	if let Some(first_neuron) = sponse.neurons.first() {
-                		let latest_sns_reward_event_done_parsing: u64 = with(&SP_DATA, |sp_data| {
-                        	sp_data.latest_sns_reward_event_done_parsing
+                    // choose sns-reward-events to count
+                    // return if there are no new reward-events
+                    if let Some(first_neuron) = sponse.neurons.first() {
+                        let latest_sns_reward_event_done_parsing: u64 = with(&SP_DATA, |sp_data| {
+                            sp_data.latest_sns_reward_event_done_parsing
                         });
                         // remove earliest one so that the reward-events that we are counting don't slip away in between the list_neurons calls.
                         let mut first_neuron_reward_events_to_neuron_reward_e8s_clone = first_neuron.reward_events_to_neuron_reward_e8s.clone(); 
@@ -357,17 +357,17 @@ async fn timer_with_lock_on() {
                         );
                         // add not-yet-parsed sns-reward-events to the count_sns_reward_events_timestamps list.
                         for (reward_event_end_timestamp_seconds, neuron_reward_e8s) in first_neuron_reward_events_to_neuron_reward_e8s_clone.iter() {
-                			if reward_event_end_timestamp_seconds <= latest_sns_reward_event_done_parsing {
-                			    continue;
-                			} else {
-                			    count_sns_reward_events_timestamps.push(reward_event_end_timestamp_seconds);
-                			}
-                		}
-                	}	 
-                	if count_sns_reward_events_timestamps.len() == 0 {
-                		ic_cdk::print("No sns-reward-events to parse");
-                		return;
-                	}   
+                            if reward_event_end_timestamp_seconds <= latest_sns_reward_event_done_parsing {
+                                continue;
+                            } else {
+                                count_sns_reward_events_timestamps.push(reward_event_end_timestamp_seconds);
+                            }
+                        }
+                    }	 
+                    if count_sns_reward_events_timestamps.len() == 0 {
+                        ic_cdk::print("No sns-reward-events to parse");
+                        return;
+                    }   
                 }
                 
                 for neuron in sponse.neurons.iter() {
@@ -386,10 +386,10 @@ async fn timer_with_lock_on() {
                                 }
                             }
                         }
-                    	None => {
-                    	    ic_cdk::print("Neuron found with zero owners. Owner means a principal has every neuron-permission.");
-                    		continue;
-                    	}
+                        None => {
+                            ic_cdk::print("Neuron found with zero owners. Owner means a principal has every neuron-permission.");
+                            continue;
+                        }
                     };
                     
                     for count_sns_reward_event in count_sns_reward_events_timestamps.iter() {
@@ -406,26 +406,26 @@ async fn timer_with_lock_on() {
                     }
                 }                
             }
-    		Err(call_error) => {
-    			ic_cdk::print("list_neurons call error: {:?}", call_error);
-    			return;
-    		}        
-	    }
- 	}
+            Err(call_error) => {
+                ic_cdk::print("list_neurons call error: {:?}", call_error);
+                return;
+            }        
+        }
+    }
     
     for (neuron_owner, neuron_rewards_e8s) in neuron_owners_neuron_rewards.into_iter() {
         if let Some(cts_user) = with(&NEURON_OWNERS_AS_CTS_USERS, |d| { d.get(&neuron_owner) }) {
             with_mut(&SHAREHOLDERS, |shareholders| {
                 if let Some(mut shareholder) = shareholders.get(&cts_user) { // there should always be Some here 
-            		shareholder.built_up_neuron_reward_e8s += neuron_rewards_e8s;
-            		shareholders.insert(cts_user, shareholder);
-            	}
+                    shareholder.built_up_neuron_reward_e8s += neuron_rewards_e8s;
+                    shareholders.insert(cts_user, shareholder);
+                }
             });
         }
     }
     
     with_mut(&SP_DATA, |sp_data| {
-    	sp_data.latest_sns_reward_event_done_parsing = count_sns_reward_events_timestamps.iter().max().unwrap(); // unwrap bc we made sure before that len() != 0 
+        sp_data.latest_sns_reward_event_done_parsing = count_sns_reward_events_timestamps.iter().max().unwrap(); // unwrap bc we made sure before that len() != 0 
     });
     
     // done parsing sns-reward-events.
@@ -435,11 +435,11 @@ async fn timer_with_lock_on() {
     
     
     // call cm_main to get list of tcs and their ledgers.
-    
+
     // loop through tcs, call each one to fill up with the trading-fees-collected if there is enough that it's worth it to send.
     // add these trading-fees-collected to the sp_data.current_built_up_cts_rewards
     // if there are new tcs, push new values onto the current_built_up_cts_rewards.
-    
+
     // loop through the current_built_up_cts_rewards, if there is enough of a tcs-built-up-rewards, do a payout-event for that tc.
         
 }
