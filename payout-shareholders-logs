@@ -1,4 +1,7 @@
 sns governance store rolling 5 reward events on each neuron, the fraction of the neuron_reward_e8s out of the total distributed_e8s for that reward-event. 
+store a map key: reward-event-timestamp, value: neuron_reward_e8s. 
+must be a map because since it is 5 rolling latest reward-events, the reward-events can change in between chunks of list_neurons. 
+
 
 shareholder_payouts canister calls sns governance canister every day and mirrors this data for each principal by taking the sum of the neuron_reward_e8s for each neuron of that principal. 
 
