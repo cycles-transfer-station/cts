@@ -399,8 +399,8 @@ async fn timer_with_lock_on() {
                             }
                             None => {
                                 ic_cdk::print("Could not find reward-event on the neuron.");
-                                // return since we need to get the neuron_rewards for all neurons of a sns-reward-event
-                                return;
+                                // might be a new neuron or something.
+                                continue;
                             } 
                         }
                     }
