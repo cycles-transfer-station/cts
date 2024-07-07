@@ -78,26 +78,26 @@ pub struct ShareholderPayoutsCanisterInit {
 
 #[init]
 fn init(q: ShareholderPayoutsCanisterInit) {
-	canister_tools::init(&SP_DATA, SP_DATA_MEMORY_ID);   
+    canister_tools::init(&SP_DATA, SP_DATA_MEMORY_ID);   
 	
-	with_mut(&SP_DATA, |sp_data| {
-	    sp_data.sns_governance_canister_id = q.sns_governance_canister_id;
-	    sp_data.cm_main = q.cm_main;
-	}); 
+    with_mut(&SP_DATA, |sp_data| {
+        sp_data.sns_governance_canister_id = q.sns_governance_canister_id;
+        sp_data.cm_main = q.cm_main;
+    }); 
 	
-	set_timer();
+    set_timer();
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
-	canister_tools::pre_upgrade();    
+    canister_tools::pre_upgrade();    
 }
 
 #[post_upgrade]
 fn post_upgrade() {
-	canister_tools::post_upgrade(&SP_DATA, SP_DATA_MEMORY_ID, None::<fn(SPData) -> SPData>);    
+    canister_tools::post_upgrade(&SP_DATA, SP_DATA_MEMORY_ID, None::<fn(SPData) -> SPData>);    
 
-	set_timer();
+    set_timer();
 }
 
 
@@ -105,12 +105,12 @@ fn post_upgrade() {
 fn check_neuron_permissions(neuron_permission_types: &Vec<i32>, check_permissions: &[i32]) -> bool {
     let mut good = true;
     for check_permission in check_permissions.iter() {
-		if neuron_permission_types.contains(check_permission) == false {
-			good = false;
-			break;
-		}
+        if neuron_permission_types.contains(check_permission) == false {
+            good = false;
+            break;
+        }
     }
-	good
+    good
 };
 
 pub struct RegisterNeuronOwnerQuest {
@@ -141,59 +141,59 @@ type RegisterNeuronOwnerResult = Result<(), RegisterNeuronOwnerError>;
 #[update]
 pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuronOwnerResult {
  	
- 	let cts_user: Principal = ic_cdk::api::caller();
+    let cts_user: Principal = ic_cdk::api::caller();
  	
- 	with(&NEUORN_OWNERS_AS_CTS_USERS, |d| {
-	    // check if neuron-owner is already registered. 
- 	    // must only be able to register a neuron-owner-id with a cts-user once.  
-	    if let Some(_) = d.get(&q.neuron_owner_id) {
-	        return Err(RegisterNeuronOwnerError::NeuronOwnerAlreadyRegistered);
-	    }
-	    Ok(())
-	})?;
+    with(&NEUORN_OWNERS_AS_CTS_USERS, |d| {
+        // check if neuron-owner is already registered. 
+        // must only be able to register a neuron-owner-id with a cts-user once.  
+        if let Some(_) = d.get(&q.neuron_owner_id) {
+            return Err(RegisterNeuronOwnerError::NeuronOwnerAlreadyRegistered);
+        }
+        Ok(())
+    })?;
  	
- 	with(&SHAREHOLDERS, |shareholders| {
- 	    if let Some(shareholder) = shareholders.get(&cts_user) {
- 	        if shareholder.neuron_owner_ids.len() >= MAX_NEURON_OWNER_IDS_PER_SHAREHOLDER {
- 	            return Err(RegisterNeuronOwnerError::MaxNeuronOwnerIdsPerShareholder);
- 	        }
- 	    }
- 	    Ok(())
- 	})?;
+    with(&SHAREHOLDERS, |shareholders| {
+        if let Some(shareholder) = shareholders.get(&cts_user) {
+            if shareholder.neuron_owner_ids.len() >= MAX_NEURON_OWNER_IDS_PER_SHAREHOLDER {
+                return Err(RegisterNeuronOwnerError::MaxNeuronOwnerIdsPerShareholder);
+            }
+        }
+        Ok(())
+    })?;
  	
-	with(&SP_DATA, |d| {
-	    // check lock
-	    if d.register_neuron_owner_locks.contains(&cts_user) {
-	        return Err(RegisterNeuronOwnerError::CallerIsInADifferentCall);
-	    }
-		if d.register_neuron_owner_locks.contains(&q.neuron_owner_id) {
-	        return Err(RegisterNeuronOwnerError::NeuronOwnerIdIsInADifferentCall);
-	    }
-	    if d.register_neuron_owner_locks.len() >= MAX_REGISTER_NEURON_OWNER_LOCKS {
-	        return Err(RegisterNeuronOwnerError::MaxNumberOfOngoingCalls),
-	    }	
-		// lock	    
-	    d.register_neuron_owner_locks.insert(cts_user);
-	    d.register_neuron_owner_locks.insert(q.neuron_owner_id);
-	    Ok(())
-	})?;
+    with(&SP_DATA, |d| {
+        // check lock
+        if d.register_neuron_owner_locks.contains(&cts_user) {
+            return Err(RegisterNeuronOwnerError::CallerIsInADifferentCall);
+        }
+        if d.register_neuron_owner_locks.contains(&q.neuron_owner_id) {
+            return Err(RegisterNeuronOwnerError::NeuronOwnerIdIsInADifferentCall);
+        }
+        if d.register_neuron_owner_locks.len() >= MAX_REGISTER_NEURON_OWNER_LOCKS {
+            return Err(RegisterNeuronOwnerError::MaxNumberOfOngoingCalls),
+        }	
+        // lock	    
+        d.register_neuron_owner_locks.insert(cts_user);
+        d.register_neuron_owner_locks.insert(q.neuron_owner_id);
+        Ok(())
+    })?;
 	
-	// make sure to unlock cts_user and q.neuron_owner_id on errors after here
-	let unlock = |sp_data: &mut SPData| {
-	    sp_data.register_neuron_owner_locks.remove(cts_user);
-	    sp_data.register_neuron_owner_locks.remove(q.neuron_owner_id);
-	};
+    // make sure to unlock cts_user and q.neuron_owner_id on errors after here
+    let unlock = |sp_data: &mut SPData| {
+        sp_data.register_neuron_owner_locks.remove(cts_user);
+        sp_data.register_neuron_owner_locks.remove(q.neuron_owner_id);
+    };
 	
-	match with(&SP_DATA, |d| d.sns_governance_service()).list_neurons(
-	    ListNeurons{
-	        of_principal: Some(q.neuron_owner_id),
-	        limit: MAX_LIMIT_LIST_NEURONS,
-	    	start_page_at: None,
-	    }
-	).await {
-	    Ok(list_neurons_response) => {
-	        let mut good: bool = false;
-	        'outer: for neuron in list_neurons_response.neurons.iter() {
+    match with(&SP_DATA, |d| d.sns_governance_service()).list_neurons(
+        ListNeurons{
+            of_principal: Some(q.neuron_owner_id),
+            limit: MAX_LIMIT_LIST_NEURONS,
+            start_page_at: None,
+        }
+    ).await {
+        Ok(list_neurons_response) => {
+            let mut good: bool = false;
+            'outer: for neuron in list_neurons_response.neurons.iter() {
                 // must be both true for the same neuron.
                 let mut found_permission_for_the_cts_user = false;
                 let mut found_permission_for_the_neuron_owner_id = false;
