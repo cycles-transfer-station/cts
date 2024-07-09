@@ -399,7 +399,7 @@ async fn timer_with_lock_on() {
                             }
                             None => {
                                 ic_cdk::print("Could not find reward-event on the neuron.");
-                                // might be a new neuron or something.
+                                // might be a new neuron or a neuron that didn't vote.
                                 continue;
                             } 
                         }
