@@ -104,6 +104,9 @@ pub const NEURON_OWNER_NEURON_PERMISSIONS: [i32; 11] = [0,1,2,3,4,5,6,7,8,9,10];
 
 pub const MAX_LIMIT_LIST_NEURONS: u32 = 500;
 
+// THIS CONSTANT IS NOT A DIAL, IT IS A MARKER FOR THE CURRENT AMOUNT OF TCS THAT THIS CANISTER CAN HANDLE WITH IT'S CURRENT IMPLEMENTATION OF THE STABLE-STRUCTURES-BOUNDS.
+// EACH SHAREHOLDER HOLDS A Vec<u64> THE LENGTH OF THE NUMBER OF THIS CONSTANT. 
+// CHANGING THIS CONSTANT WILL BREAK THE CURRENT SHAREHOLDERS STORABLE IMPLEMENTATION.
 pub const MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED: usize = 500; // check in the heartebeat timer cts-reward-event that the number of tcs in the cm-main has not exceeded this constant. if it has, then stop and wait for manual upgrade, don't do any reward events.  
 
 

@@ -384,13 +384,13 @@ pub struct CandleCounter {
     pub volume_tokens: Tokens,            // all-time
 }
 
-
+// private fields on purpose
 #[derive(Default, CandidType, Serialize, Deserialize)]
 pub struct TradeFeesCollectionCounter {
-    pub new_token_trade_fees_collection: Tokens, // the token fees collected that have not been transferred to the shareholder-payouts canister yet. 
-    pub new_cycles_trade_fees_collection: Cycles, // the cycles fees collected that have not been transferred to the shareholder-payouts canister yet.
-    pub total_token_trade_fees_collection: Tokens, // the total amount of token fees collected of all time including those transferred to the shareholder-payouts canister.
-    pub total_cycles_trade_fees_collection: Cycles, // the total amount of cycles fees collected of all time including those transferred to the shareholder-payouts canister.
+    new_token_trade_fees_collection: Tokens, // the token fees collected that have not been transferred to the shareholder-payouts canister yet. 
+    new_cycles_trade_fees_collection: Cycles, // the cycles fees collected that have not been transferred to the shareholder-payouts canister yet.
+    total_token_trade_fees_collection: Tokens, // the total amount of token fees collected of all time including those transferred to the shareholder-payouts canister.
+    total_cycles_trade_fees_collection: Cycles, // the total amount of cycles fees collected of all time including those transferred to the shareholder-payouts canister.
 }
 impl TradeFeesCollectionCounter {
     pub fn count_trade(&mut self, tl: &TradeLog) {
@@ -399,6 +399,27 @@ impl TradeFeesCollectionCounter {
         self.total_token_trade_fees_collection = self.total_token_trade_fees_collection.saturating_add(tl.tokens_payout_fee);
         self.total_cycles_trade_fees_collection = self.total_cycles_trade_fees_collection.saturating_add(tl.cycles_payout_fee);
     }
+    
+    pub fn new_token_trade_fees_collection(&self) -> Tokens {
+        self.new_token_trade_fees_collection
+    }
+    pub fn new_cycles_trade_fees_collection(&self) -> Cycles {
+        self.new_cycles_trade_fees_collection
+    }
+    pub fn take_new_token_trade_fees_collection(&mut self) { // i don't want to return the amount here because it would increase the chances that someone would use this function to look at the value but without intending to take the value. use the new_token_trade_fees_collection() method to look at the value.
+        self.new_token_trade_fees_collection = 0;
+    }
+    pub fn take_new_cycles_trade_fees_collection(&mut self) {
+        self.new_cycles_trade_fees_collection = 0;
+    }
+    pub fn give_back_new_token_trade_fees_collection_after_failed_ledger_transfer_call(&mut self, tokens: Tokens) {
+        self.new_token_trade_fees_collection = self.new_token_trade_fees_collection.saturating_add(tokens);
+    }
+    pub fn give_back_new_cycles_trade_fees_collection_after_failed_ledger_transfer_call(&mut self, cycles: Cycles) {
+        self.new_cycles_trade_fees_collection = self.new_cycles_trade_fees_collection.saturating_add(cycles);
+    }
+    
+    
 }
 
 

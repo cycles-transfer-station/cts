@@ -154,6 +154,7 @@ const POSITIONS_SUBACCOUNT: &[u8; 32] = &[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 
 const MAX_INSTRUCTIONS_IN_THE_MATCH_TRADES_FN: u64 = 30 * BILLION;
 
+const SHAREHOLDER_PAYOUT_LEDGER_TRANSFER_MEMO: &'static [u8; 8] = b"CTS-SHPY";
 
 thread_local! {
     
@@ -622,22 +623,115 @@ async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: Tra
 #[update]
 pub async fn shareholder_payouts_collect_trade_fees() -> ShareholderPayoutsCollectTradeFeesSponse {
     // caller check
-    with(&CM_DATA, |d| {
-        if caller() != d.shareholder_payouts_canister_id {
-            trap("Caller for this method must be the CTS shareholder-payouts canister.");
-        }
-    });
+    let shareholder_payouts_canister_id: Principal = with(&CM_DATA, |d| d.shareholder_payouts_canister_id);
+    if caller() != shareholder_payouts_canister_id {
+        trap("Caller for this method must be the CTS shareholder-payouts canister.");
+    }
+    
+    let mut do_shareholder_payout_token_amount_plus_fee: Option<Tokens> = None;
+    let mut do_shareholder_payout_cycles_amount_plus_fee: Option<Cycles> = None;
     
     with_mut(&CM_DATA, |cm_data| {
-        if cm_data.trade_fees_collection_counter.
+        
+        const MULTIPLY_TRANSFER_FEE_FOR_THE_MINIMUM_FEES_COLLECTION_FOR_A_PAYOUT: u128 = 1000;
+    
+        let minimum_new_token_trade_fees_collection_for_a_payout: Tokens = cm_data.icrc1_token_ledger_transfer_fee * MULTIPLY_TRANSFER_FEE_FOR_THE_MINIMUM_FEES_COLLECTION_FOR_A_PAYOUT;
+        let minimum_new_cycles_trade_fees_collection_for_a_payout: Cycles = cm_data.cycles_bank_transfer_fee * MULTIPLY_TRANSFER_FEE_FOR_THE_MINIMUM_FEES_COLLECTION_FOR_A_PAYOUT;
+        
+        if cm_data.trade_fees_collection_counter
+        .new_token_trade_fees_collection()
+        >= minimum_new_token_trade_fees_collection_for_a_payout {
+            do_shareholder_payout_token_amount_plus_fee = Some(cm_data.trade_fees_collection_counter.new_token_trade_fees_collection());
+            // subtract from the counter before we make the ledger transfer call, then add it back if the call fails.
+            cm_data.trade_fees_collection_counter.take_new_token_trade_fees_collection();
+        }
+        
+        if cm_data.trade_fees_collection_counter
+        .new_cycles_trade_fees_collection()
+        >= minimum_new_cycles_trade_fees_collection_for_a_payout {
+            do_shareholder_payout_cycles_amount_plus_fee = Some(cm_data.trade_fees_collection_counter.new_cycles_trade_fees_collection());
+            // subtract from the counter before we make the ledger transfer call, then add it back if the call fails.
+            cm_data.trade_fees_collection_counter.take_new_cycles_trade_fees_collection();
+        }
                 
     });
     
-        
-        
-        
-        
-        
+    ShareholderPayoutsCollectTradeFeesSponse {
+        tokens_sent: {
+            match do_shareholder_payout_token_amount_plus_fee {
+                None => 0,
+                Some(amount_plus_fee) => {
+                    let transfer_fee = localkey::cell::get(&TOKEN_LEDGER_TRANSFER_FEE);
+                    let amount = amount_plus_fee.saturating_sub(transfer_fee);
+                    match token_transfer(
+                        Icrc1TransferQuest{
+                            amount,
+                            fee: Some(transfer_fee),
+                            to: IcrcId{owner: shareholder_payouts_canister_id, subaccount: None},
+                            memo: Some(ByteBuf::from(SHAREHOLDER_PAYOUT_LEDGER_TRANSFER_MEMO.clone())),
+                            from_subaccount: Some(*POSITIONS_SUBACCOUNT),
+                            created_at_time: None,
+                        }
+                    ).await {
+                        Ok(icrc1_transfer_result) => match icrc1_transfer_result{
+                            Ok(block_id) => {
+                                amount
+                            }
+                            Err(icrc1_transfer_error) => {
+                                with_mut(&CM_DATA, |cm_data| {
+                                    cm_data.trade_fees_collection_counter.give_back_new_token_trade_fees_collection_after_failed_ledger_transfer_call(amount_plus_fee);
+                                });
+                                0
+                            }
+                        } 
+                        Err(call_error) => {
+                            with_mut(&CM_DATA, |cm_data| {
+                                cm_data.trade_fees_collection_counter.give_back_new_token_trade_fees_collection_after_failed_ledger_transfer_call(amount_plus_fee);
+                            });
+                            0
+                        }
+                    }
+                }
+            }
+        },
+        cb_cycles_sent: {
+            match do_shareholder_payout_cycles_amount_plus_fee {
+                None => 0,
+                Some(amount_plus_fee) => {
+                    let transfer_fee = localkey::cell::get(&CYCLES_BANK_TRANSFER_FEE);
+                    let amount = amount_plus_fee.saturating_sub(transfer_fee);
+                    match cycles_transfer(
+                        Icrc1TransferQuest{
+                            amount,
+                            fee: Some(transfer_fee),
+                            to: IcrcId{owner: shareholder_payouts_canister_id, subaccount: None},
+                            memo: Some(ByteBuf::from(SHAREHOLDER_PAYOUT_LEDGER_TRANSFER_MEMO.clone())),
+                            from_subaccount: Some(*POSITIONS_SUBACCOUNT),
+                            created_at_time: None,
+                        }
+                    ).await {
+                        Ok(icrc1_transfer_result) => match icrc1_transfer_result{
+                            Ok(block_id) => {
+                                amount
+                            }
+                            Err(icrc1_transfer_error) => {
+                                with_mut(&CM_DATA, |cm_data| {
+                                    cm_data.trade_fees_collection_counter.give_back_new_cycles_trade_fees_collection_after_failed_ledger_transfer_call(amount_plus_fee);
+                                });
+                                0
+                            }
+                        } 
+                        Err(call_error) => {
+                            with_mut(&CM_DATA, |cm_data| {
+                                cm_data.trade_fees_collection_counter.give_back_new_cycles_trade_fees_collection_after_failed_ledger_transfer_call(amount_plus_fee);
+                            });
+                            0
+                        }
+                    }
+                }
+            } 
+        }
+    }
 }
 
 
