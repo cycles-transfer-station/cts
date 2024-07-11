@@ -37,7 +37,7 @@ pub struct Icrc1TransferQuest {
 pub use u128 as BlockId;
 pub use u128 as Tokens;
 
-
+// return a error variant of a deserialization-error
 pub async fn icrc1_transfer(icrc1_ledger_id: Principal, q: Icrc1TransferQuest) -> Result<Result<BlockId, Icrc1TransferError>, CallError> {
     call(
         icrc1_ledger_id,

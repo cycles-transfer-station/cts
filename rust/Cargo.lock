@@ -620,6 +620,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
+name = "outsiders"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -775,6 +785,20 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "shareholder_payouts"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "canister-tools",
+ "cts_lib",
+ "ic-cdk",
+ "ic-cdk-timers",
+ "ic-stable-structures",
+ "outsiders",
+ "serde",
 ]
 
 [[package]]

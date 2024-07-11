@@ -4,18 +4,31 @@ use ic_cdk::{
     post_upgrade,
 	update, 
     query,
+    call,
 };
-use ic_stable_structures::StableBTreeMap;
-
+use cts_lib::{
+    types::{
+        Cycles,
+        CallError,
+        cm::tc::ShareholderPayoutsCollectTradeFeesSponse,
+    },
+    tools::{
+        localkey::refcell::{with, with_mut},
+        call_error_as_u32_and_string,
+    }
+};
+use ic_stable_structures::{StableBTreeMap, memory_manager::{MemoryId, VirtualMemory}, DefaultMemoryImpl};
 use std::time::Duration;
-use outsiders::sns_governance::{Service as SNSGovernanceService, ListNeurons, ListNeuronsResponse};	
-
-
+use std::collections::{HashSet, HashMap, BTreeSet, BTreeMap};
+use std::cell::RefCell;
+use cts_lib::types::cm::cm_main::{TradeContractIdAndLedgerId, TradeContractData};
+use outsiders::sns_governance::{Service as SNSGovernanceService, ListNeurons, /*ListNeuronsResponse*/, NeuronId};	
+use candid::{Principal, CandidType, Deserialize};
 
 #[cfg(test)]
 mod tests;
 
-
+#[derive(CandidType, Deserialize)]
 pub struct SPData {
     sns_governance_canister_id: Principal,
     cm_main: Principal,
@@ -26,11 +39,26 @@ pub struct SPData {
     latest_sns_reward_event_done_parsing: u64,
     // locks when parsing sns_reward_events and when doing cts-payout-event and when filling up the current_built_up_cts_rewards.
     lock: bool,
-    current_built_up_cts_rewards: Vec<u64>, // in the same sequence as the cm_main. each value will be reset after a payout-event of that cm_tc.
+    current_built_up_cts_rewards_cycles: Cycles, // the built-up rewards of the cycles currency in all the tcs combined. value will be reset after a payout-event of the cycles-rewards.
+    current_built_up_cts_rewards_tokens: Vec<u64>, // in the same sequence as the cm_main. each value will be reset after a payout-event of that cm_tc.
+    sum_built_up_neuron_rewards: u64, // the sum of the built_up_neuron_reward_e8s of every neuron. useful for performance. this is reset after a cts-payout-event.  
 }
 impl SPData {
     fn sns_governance_service(&self) -> SNSGovernanceService {
         SNSGovernanceService(self.sns_governance_canister_id)
+    }
+    fn new() -> Self {
+        Self {
+            sns_governance_canister_id: Principal::from_slice(&[]),
+            cm_main: Principal::from_slice(&[]),
+            register_neuron_owner_locks: HashSet::new(),
+            last_sns_reward_event_of_the_previous_cts_reward_event: 0,
+            latest_sns_reward_event_done_parsing: 0,
+            lock: false,
+            current_built_up_cts_rewards_cycles: 0,
+            current_built_up_cts_rewards_tokens: Vec::new(),
+            sum_built_up_neuron_rewards: 0,         
+        }
     }
 }
 
@@ -39,8 +67,25 @@ pub struct Shareholder {
     // can only be registered by the neuron owner putting this principal as a hotkey on one of his/her neurons, 
     // so then this canister will check and register this field for the neuron-owner. The payouts go to the cts-website-ii-principal  
     neuron_owner_ids: Vec<Principal>, // max MAX_NEURON_OWNER_IDS_PER_SHAREHOLDER
-    balances: Vec<u64>, // a list of the cts-maturity currently held by this neuron for each cm_tc in the same sequence as the cm_tcs are held in the cm_main.trade_contracts. 
-    built_up_neuron_reward_e8s: u64 = // built-up neuron_reward_e8s sum of each neuron_reward_e8s for every sns-governance-reward-event within this cts-payout-event.
+    cycles_maturity: Cycles, // the cts-maturity currently held by this neuron for the cycles currency.
+    token_maturities: Vec<u64>, // a list of the cts-maturity currently held by this neuron for each cm_tc in the same sequence as the cm_tcs are held in the cm_main.trade_contracts. 
+    built_up_neuron_rewards: u64, // built-up neuron_reward_e8s sum of each neuron_reward_e8s for every sns-governance-reward-event within this cts-payout-event.
+} 
+// make sure to keep in the mind MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED.
+use ic_stable_structures::storable::{Storable, Bound};
+use std::borrow::Cow;
+impl Storable for Shareholder {
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 1024,
+        is_fixed_size: false
+    };
+
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        unimplemented!()
+    }
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        unimplemented!()
+    }
 }
 
 
@@ -59,6 +104,9 @@ pub const NEURON_OWNER_NEURON_PERMISSIONS: [i32; 11] = [0,1,2,3,4,5,6,7,8,9,10];
 
 pub const MAX_LIMIT_LIST_NEURONS: u32 = 500;
 
+pub const MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED: usize = 500; // check in the heartebeat timer cts-reward-event that the number of tcs in the cm-main has not exceeded this constant. if it has, then stop and wait for manual upgrade, don't do any reward events.  
+
+
 
 thread_local! {
     static SP_DATA: RefCell<SPData> = RefCell::new(SPData::new());
@@ -70,7 +118,7 @@ thread_local! {
     static NEURON_OWNERS_AS_CTS_USERS: RefCell<StableBTreeMap<Principal, Principal, VirtualMemory<DefaultMemoryImpl>>> = RefCell::new(StableBTreeMap::init(canister_tools::get_virtual_memory(NEURON_OWNERS_AS_CTS_USERS_MEMORY_ID)));
 }
 
-
+#[derive(CandidType, Deserialize)]
 pub struct ShareholderPayoutsCanisterInit {
     sns_governance_canister_id: Principal,
     cm_main: Principal,
@@ -111,17 +159,22 @@ fn check_neuron_permissions(neuron_permission_types: &Vec<i32>, check_permission
         }
     }
     good
-};
+}
 
+#[derive(CandidType, Deserialize)]
 pub struct RegisterNeuronOwnerQuest {
     neuron_owner_id: Principal,
 }
 
-enum RegisterNeuronOwnerError {
+#[derive(CandidType, Deserialize)]
+pub enum RegisterNeuronOwnerError {
     // neurons are not found with a hotkey set as this cts-user
     NeuronsNotFound,
 	// a neuron-owner must only be registered to one cts user.
     NeuronOwnerAlreadyRegistered,
+    
+    // only a certain amount of neuron-owner-ids can be registered per shareholder.
+    MaxNeuronOwnerIdsPerShareholder,
     
     CallerIsInADifferentCall,
     NeuronOwnerIdIsInADifferentCall,
@@ -143,7 +196,7 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
  	
     let cts_user: Principal = ic_cdk::api::caller();
  	
-    with(&NEUORN_OWNERS_AS_CTS_USERS, |d| {
+    with(&NEURON_OWNERS_AS_CTS_USERS, |d| {
         // check if neuron-owner is already registered. 
         // must only be able to register a neuron-owner-id with a cts-user once.  
         if let Some(_) = d.get(&q.neuron_owner_id) {
@@ -161,7 +214,7 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
         Ok(())
     })?;
  	
-    with(&SP_DATA, |d| {
+    with_mut(&SP_DATA, |d| {
         // check lock
         if d.register_neuron_owner_locks.contains(&cts_user) {
             return Err(RegisterNeuronOwnerError::CallerIsInADifferentCall);
@@ -170,7 +223,7 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
             return Err(RegisterNeuronOwnerError::NeuronOwnerIdIsInADifferentCall);
         }
         if d.register_neuron_owner_locks.len() >= MAX_REGISTER_NEURON_OWNER_LOCKS {
-            return Err(RegisterNeuronOwnerError::MaxNumberOfOngoingCalls),
+            return Err(RegisterNeuronOwnerError::MaxNumberOfOngoingCalls);
         }	
         // lock	    
         d.register_neuron_owner_locks.insert(cts_user);
@@ -180,8 +233,8 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
 	
     // make sure to unlock cts_user and q.neuron_owner_id on errors after here
     let unlock = |sp_data: &mut SPData| {
-        sp_data.register_neuron_owner_locks.remove(cts_user);
-        sp_data.register_neuron_owner_locks.remove(q.neuron_owner_id);
+        sp_data.register_neuron_owner_locks.remove(&cts_user);
+        sp_data.register_neuron_owner_locks.remove(&q.neuron_owner_id);
     };
 	
     match with(&SP_DATA, |d| d.sns_governance_service()).list_neurons(
@@ -191,7 +244,7 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
             start_page_at: None,
         }
     ).await {
-        Ok(list_neurons_response) => {
+        Ok((list_neurons_response,)) => {
             let mut good: bool = false;
             'outer: for neuron in list_neurons_response.neurons.iter() {
                 // must be both true for the same neuron.
@@ -230,13 +283,15 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
                                 cts_user,
                                 Shareholder{
                                     neuron_owner_ids: vec![q.neuron_owner_id],
-                                    balances: Vec::new(), 
-                                    built_up_neuron_reward_e8s: Vec::new();
+                                    cycles_maturity: 0,
+                                    token_maturities: Vec::new(), 
+                                    built_up_neuron_rewards: 0,
                                 }   
                             );
                         }
-                        Some(shareholder) => {
+                        Some(mut shareholder) => {
                             shareholder.neuron_owner_ids.push(q.neuron_owner_id);
+                            shareholders.insert(cts_user, shareholder);
                         }
                     }
                 });
@@ -261,8 +316,8 @@ pub async fn register_neuron_owner(q: RegisterNeuronOwnerQuest) -> RegisterNeuro
 
 fn set_timer() {
     ic_cdk_timers::set_timer_interval(
-        Duration::from_days(1),
-        ic_cdk::spawn(timer());
+        Duration::from_secs(60 * 60 * 24),
+        || ic_cdk::spawn(timer()),
     );
 }
 
@@ -319,14 +374,14 @@ async fn timer_with_lock_on() {
                 start_page_at,
             } 
         ).await {
-            Ok(sponse) => {
+            Ok((sponse,)) => {
                 
                 if sponse.neurons.len() == 0 {
                     break;
                 }
                 
                 // must be Some now.
-                start_page_at = Some(match sponse.neurons.last().unwrap().id { // unwrap because we made sure len != 0
+                start_page_at = Some(match sponse.neurons.last().unwrap().id.clone() { // unwrap because we made sure len != 0
                     Some(neuron_id) => neuron_id,
                     None => {
                         ic_cdk::print("strange, a neuron is without an id.");
@@ -342,21 +397,15 @@ async fn timer_with_lock_on() {
                             sp_data.latest_sns_reward_event_done_parsing
                         });
                         // remove earliest one so that the reward-events that we are counting don't slip away in between the list_neurons calls.
-                        let mut first_neuron_reward_events_to_neuron_reward_e8s_clone = first_neuron.reward_events_to_neuron_reward_e8s.clone(); 
-                        let earliest_reward_event_for_skip: u64 = match first_neuron_reward_events_to_neuron_reward_e8s_clone
-                            .min_by_key(|t| { t.0 })
-                            .map(|t| { t.0 }) {
-                                Some(k) = k,
-                                None => {
-                                    ic_cdk::print("zero reward-events on the neuron");
-                                    return;
-                                }
-                            }; 
-                        first_neuron_reward_events_to_neuron_reward_e8s_clone.remove(
-                            &earliest_reward_event_for_skip
-                        );
+                        let mut first_neuron_reward_map: BTreeMap<u64, u64> = first_neuron.reward_event_end_timestamp_seconds_to_neuron_reward_e8s.clone(); 
+                        if first_neuron_reward_map.len() == 0 {                                     
+                            ic_cdk::print("zero reward-events on the neuron");
+                            return;
+                        }
+                        first_neuron_reward_map.pop_first();
+                        
                         // add not-yet-parsed sns-reward-events to the count_sns_reward_events_timestamps list.
-                        for (reward_event_end_timestamp_seconds, neuron_reward_e8s) in first_neuron_reward_events_to_neuron_reward_e8s_clone.iter() {
+                        for (reward_event_end_timestamp_seconds, _) in first_neuron_reward_map.into_iter() {
                             if reward_event_end_timestamp_seconds <= latest_sns_reward_event_done_parsing {
                                 continue;
                             } else {
@@ -371,7 +420,7 @@ async fn timer_with_lock_on() {
                 }
                 
                 for neuron in sponse.neurons.iter() {
-                    let neuron_owner: Principal = match neuron.permissions.iter().any(
+                    let neuron_owner: Principal = match neuron.permissions.iter().find(
                         |neuron_permission| { 
                             check_neuron_permissions(&neuron_permission.permission_type, &NEURON_OWNER_NEURON_PERMISSIONS[..])
                         }
@@ -393,7 +442,7 @@ async fn timer_with_lock_on() {
                     };
                     
                     for count_sns_reward_event in count_sns_reward_events_timestamps.iter() {
-                        match neuron.reward_events_to_neuron_reward_e8s.get(&count_sns_reward_event) {
+                        match neuron.reward_event_end_timestamp_seconds_to_neuron_reward_e8s.get(&count_sns_reward_event) {
                             Some(neuron_reward_e8s) => {
                                 *(neuron_owners_neuron_rewards.entry(neuron_owner).or_default()) += neuron_reward_e8s;
                             }
@@ -407,39 +456,173 @@ async fn timer_with_lock_on() {
                 }                
             }
             Err(call_error) => {
-                ic_cdk::print("list_neurons call error: {:?}", call_error);
+                ic_cdk::print(&format!("list_neurons call error: {:?}", call_error));
                 return;
             }        
         }
     }
     
-    for (neuron_owner, neuron_rewards_e8s) in neuron_owners_neuron_rewards.into_iter() {
-        if let Some(cts_user) = with(&NEURON_OWNERS_AS_CTS_USERS, |d| { d.get(&neuron_owner) }) {
-            with_mut(&SHAREHOLDERS, |shareholders| {
-                if let Some(mut shareholder) = shareholders.get(&cts_user) { // there should always be Some here 
-                    shareholder.built_up_neuron_reward_e8s += neuron_rewards_e8s;
-                    shareholders.insert(cts_user, shareholder);
+    with(&NEURON_OWNERS_AS_CTS_USERS, |neuron_owners_as_cts_users| { 
+        with_mut(&SHAREHOLDERS, |shareholders| {
+            with_mut(&SP_DATA, |sp_data| {    
+                for (neuron_owner, neuron_rewards) in neuron_owners_neuron_rewards.into_iter() {
+                    if let Some(cts_user) = neuron_owners_as_cts_users.get(&neuron_owner) {
+                        if let Some(mut shareholder) = shareholders.get(&cts_user) { // there should always be Some here 
+                            shareholder.built_up_neuron_rewards += neuron_rewards;
+                            shareholders.insert(cts_user, shareholder);
+                            sp_data.sum_built_up_neuron_rewards += neuron_rewards;
+                        }
+                    }
                 }
             });
-        }
-    }
+        });
+    });
+
     
     with_mut(&SP_DATA, |sp_data| {
-        sp_data.latest_sns_reward_event_done_parsing = count_sns_reward_events_timestamps.iter().max().unwrap(); // unwrap bc we made sure before that len() != 0 
+        sp_data.latest_sns_reward_event_done_parsing = count_sns_reward_events_timestamps.iter().max().unwrap().clone(); // unwrap bc we made sure before that len() != 0 
     });
     
     // done parsing sns-reward-events.
     // ------- done -------
-	    
-	        
-    
-    
-    // call cm_main to get list of tcs and their ledgers.
 
-    // loop through tcs, call each one to fill up with the trading-fees-collected if there is enough that it's worth it to send.
-    // add these trading-fees-collected to the sp_data.current_built_up_cts_rewards
-    // if there are new tcs, push new values onto the current_built_up_cts_rewards.
-
-    // loop through the current_built_up_cts_rewards, if there is enough of a tcs-built-up-rewards, do a payout-event for that tc.
+    
+    // ------- start do cts-reward-event -------
         
+    // call cm_main to get list of tcs and their ledgers.
+    
+    let tcs_and_ledgers: Vec<TradeContractIdAndLedgerId> = match call::<(), (Vec<(TradeContractIdAndLedgerId, TradeContractData)>,)>(
+        with_mut(&SP_DATA, |sp_data| { sp_data.cm_main }),
+        "view_icrc1_token_trade_contracts",
+        ()
+    ).await {
+        Ok((v,)) => {
+            v.into_iter().map(|t| t.0).collect()
+        }
+        Err(call_error) => {
+            ic_cdk::print(&format!("view_icrc1_token_trade_contracts call error: {:?}", call_error));
+            return;
+        }
+    };
+    
+    if tcs_and_ledgers.len() >= MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED {
+        ic_cdk::print("cannot do cts-reward-event, cannot start collecting trade fees from tcs, because tcs_and_ledgers.len() >= MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED");
+        return;
+    }
+    
+    
+    // loop through tcs, call each one to fill up with the trading-fees-collected if there is enough that it's worth it for the tc to send.
+    
+    for (i, tc) in tcs_and_ledgers.iter().map(|tc_and_ledger| tc_and_ledger.trade_contract_canister_id).enumerate() {
+        match call::<(), (ShareholderPayoutsCollectTradeFeesSponse,)>(
+            tc,
+            "shareholder_payouts_collect_trade_fees",
+            ()
+        ).await {
+            Ok((s,)) => {
+                // add these trading-fees-collected to the sp_data.current_built_up_cts_rewards
+                with_mut(&SP_DATA, |sp_data| {
+                    sp_data.current_built_up_cts_rewards_cycles = sp_data.current_built_up_cts_rewards_cycles.saturating_add(s.cb_cycles_sent);
+                    // if there are new tcs, push new values onto the current_built_up_cts_rewards.
+                    if sp_data.current_built_up_cts_rewards_tokens.len() < i + 1 {
+                        sp_data.current_built_up_cts_rewards_tokens.push(s.tokens_sent as u64); // in the sequence of the cm_main's list.
+                    } else {
+                        sp_data.current_built_up_cts_rewards_tokens[i] = sp_data.current_built_up_cts_rewards_tokens[i].saturating_add(s.tokens_sent as u64);
+                    }
+                });            
+            }
+            Err(call_error) => {
+                ic_cdk::print(&format!("shareholder_payouts_collect_trade_fees call error on tc: {}: {:?}", tc, call_error));
+                continue;
+            }
+        }
+    }
+    
+    // loop through the current_built_up_cts_rewards, if there is enough of a tcs-built-up-rewards, do a payout-event for that tc.
+    
+    // check if there is at least one tc that we can do a cts-reward-event for. 
+    // if there is at least one tc that we can do a cts-reward-event for, then we'll do a cts-reward-event and payout shareholders and re-set the shareholders' built_up_neuron_reward_e8s to 0.
+    // if there is zero tcs that we can do a cts-reward-event for, then we won't do a cts-reward-event.
+    
+    with_mut(&SP_DATA, |sp_data| {
+        with_mut(&SHAREHOLDERS, |shareholders| {
+            
+            let mut at_least_one_tc_payout: bool = false;
+            
+            let minimum_built_up_tokens_or_cycles_for_a_payout: u64 = (shareholders.len() * 100) as u64; 
+            
+            if sp_data.current_built_up_cts_rewards_cycles >= minimum_built_up_tokens_or_cycles_for_a_payout as u128 {
+                at_least_one_tc_payout = true;
+            } else {
+                for built_up_tokens in sp_data.current_built_up_cts_rewards_tokens.iter() {
+                    if *built_up_tokens >= minimum_built_up_tokens_or_cycles_for_a_payout {
+                        at_least_one_tc_payout = true;
+                    }
+                } 
+            }
+            if at_least_one_tc_payout == true 
+            && sp_data.sum_built_up_neuron_rewards > 0 { // portant
+                // do cts-reward-event
+                
+                // since the sum of the payouts for all neurons for a specific token can be less than the amount available due to division and stuff.
+                // so we count here the quantity of the payouts.
+                let mut cycles_payouts_sum: Cycles = 0;
+                let mut tokens_payouts_sums: Vec<u64> = vec![];
+                
+                // read the shareholders once, and set the shareholders once
+                // shareholders.iter holds an immutable reference so we won't be able to insert back into the map if we user iter. 
+                // so what we do is we collect the keys for the map first, then loop through the keys where we can get and set.                
+                
+                let shareholders_set: BTreeSet<Principal> = with(&NEURON_OWNERS_AS_CTS_USERS, |d| { d.iter().map(|(_k,v)| v).collect::<BTreeSet<Principal>>() }); // there is no .keys() method on the stablebtree-map. easiest way to get list of the keys of the SHAREHOLDERS map. 
+                
+                for shareholder in shareholders_set {  
+                    let mut shareholder_data: Shareholder = match shareholders.get(&shareholder) { Some(d) => d, None => continue, }; // there should always be some since the cts-user is on the neuron_owners_as_cts_users-map.
+                    
+                    if shareholder_data.built_up_neuron_rewards == 0 {
+                        continue;
+                    }
+                    
+                    let shareholder_reward_portion_one_out_of: u64 = sp_data.sum_built_up_neuron_rewards / shareholder_data.built_up_neuron_rewards;
+                    
+                    // only if we are doing a payout for the cycles
+                    if sp_data.current_built_up_cts_rewards_cycles >= minimum_built_up_tokens_or_cycles_for_a_payout as Cycles {
+                        let shareholder_payout = sp_data.current_built_up_cts_rewards_cycles / (shareholder_reward_portion_one_out_of as u128);
+                        shareholder_data.cycles_maturity = shareholder_data.cycles_maturity.saturating_add(shareholder_payout);
+                        cycles_payouts_sum = cycles_payouts_sum.saturating_add(shareholder_payout);
+                    }
+                    
+                    for (i, built_up_tokens) in sp_data.current_built_up_cts_rewards_tokens.iter().enumerate() {
+                        // only if we are doing a payout for this token
+                        if *built_up_tokens >= minimum_built_up_tokens_or_cycles_for_a_payout {
+                            let shareholder_payout = built_up_tokens / shareholder_reward_portion_one_out_of;
+                            for list in [&mut shareholder_data.token_maturities, &mut tokens_payouts_sums] {
+                                if list.len() < i + 1 {
+                                    list.push(shareholder_payout);
+                                } else {
+                                    list[i] = list[i].saturating_add(shareholder_payout);
+                                }
+                            }
+                        }
+                    }
+                    
+                    shareholder_data.built_up_neuron_rewards = 0; // reset shareholder built-up-neuron-rewards
+                    shareholders.insert(shareholder, shareholder_data);        
+                }
+                
+                // reset global sum_built_up_neuron_rewards
+                sp_data.sum_built_up_neuron_rewards = 0;
+                // reset the sp_data.current_built_up_cts_rewards_ to sp_data.current_built_up_cts_rewards_ - _payouts_sum
+                sp_data.current_built_up_cts_rewards_cycles = sp_data.current_built_up_cts_rewards_cycles.saturating_sub(cycles_payouts_sum); 
+                for (built_up_tokens, token_payout) in sp_data.current_built_up_cts_rewards_tokens.iter_mut().zip(tokens_payouts_sums.into_iter()) {
+                    *built_up_tokens = built_up_tokens.saturating_sub(token_payout); 
+                }
+                
+                ic_cdk::print("CTS-SHAREHOLDER-PAYOUT!");
+                return; // will return anyway since this is the end of the function but whatever.                
+            } else {
+                ic_cdk::print("Not doing a cts-reward-event, sum_built_up_neuron_rewards == 0.");
+                return; // will return anyway since this is the end of the function but whatever.
+            }
+        });
+    });    
 }

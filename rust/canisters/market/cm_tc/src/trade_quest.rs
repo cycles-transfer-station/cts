@@ -61,7 +61,8 @@ impl TradeQuest for TradeCyclesQuest {
             &mut cm_data.void_token_positions,
             &mut cm_data.trade_logs,
             &mut cm_data.trade_logs_id_counter,
-            &mut cm_data.candle_counter,  
+            &mut cm_data.candle_counter,
+            &mut cm_data.trade_fees_collection_counter,
         );
     }
 }
@@ -103,7 +104,8 @@ impl TradeQuest for TradeTokensQuest {
             &mut cm_data.void_cycles_positions,
             &mut cm_data.trade_logs,
             &mut cm_data.trade_logs_id_counter,
-            &mut cm_data.candle_counter,  
+            &mut cm_data.candle_counter,
+            &mut cm_data.trade_fees_collection_counter,
         );
     }
 

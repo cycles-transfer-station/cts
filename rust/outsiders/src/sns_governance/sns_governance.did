@@ -1,5 +1,3 @@
-// taken from commit a9a67996f7a5f0c4e95a697fafcad6b15a5aae62
-
 type Account = record { owner : opt principal; subaccount : opt Subaccount };
 type Action = variant {
   ManageNervousSystemParameters : NervousSystemParameters;
@@ -317,6 +315,10 @@ type Neuron = record {
   source_nns_neuron_id : opt nat64;
   auto_stake_maturity : opt bool;
   aging_since_timestamp_seconds : nat64;
+  reward_event_end_timestamp_seconds_to_neuron_reward_e8s : vec record {
+    nat64;
+    nat64;
+  };
   dissolve_state : opt DissolveState;
   voting_power_percentage_multiplier : nat64;
   vesting_period_seconds : opt nat64;

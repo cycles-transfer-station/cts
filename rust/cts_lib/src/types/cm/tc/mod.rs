@@ -36,6 +36,7 @@ pub struct CMIcrc1TokenTradeContractInit {
     pub cycles_bank_transfer_fee: Cycles,
     pub trades_storage_canister_code: CanisterCode,
     pub positions_storage_canister_code: CanisterCode,
+    pub shareholder_payouts_canister_id: Principal,
 }
 
 // ----
@@ -192,6 +193,12 @@ pub struct Volume{
     pub volume_sum: u128,
 }
 
+#[derive(CandidType, Deserialize)]
+pub struct ShareholderPayoutsCollectTradeFeesSponse {
+    pub cb_cycles_sent: Cycles, // transferred at the cts-cycles-bank.
+    pub tokens_sent: Tokens,
+}
+
 // ---------
 
 #[derive(CandidType, Serialize, Deserialize)]
@@ -213,6 +220,8 @@ pub struct CMData {
     pub void_token_positions: BTreeMap<PositionId, VoidTokenPosition>,
     pub do_payouts_errors: Vec<CallError>,
     pub candle_counter: CandleCounter,
+    pub shareholder_payouts_canister_id: Principal,
+    pub trade_fees_collection_counter: TradeFeesCollectionCounter, 
 }
 
 impl CMData {
@@ -235,6 +244,8 @@ impl CMData {
             void_token_positions: BTreeMap::new(),
             do_payouts_errors: Vec::new(),
             candle_counter: CandleCounter::default(),
+            shareholder_payouts_canister_id: Principal::from_slice(&[]),
+            trade_fees_collection_counter: TradeFeesCollectionCounter::default(),
         }
     }
 }
@@ -372,3 +383,23 @@ pub struct CandleCounter {
     pub volume_cycles: Cycles,            // all-time
     pub volume_tokens: Tokens,            // all-time
 }
+
+
+#[derive(Default, CandidType, Serialize, Deserialize)]
+pub struct TradeFeesCollectionCounter {
+    pub new_token_trade_fees_collection: Tokens, // the token fees collected that have not been transferred to the shareholder-payouts canister yet. 
+    pub new_cycles_trade_fees_collection: Cycles, // the cycles fees collected that have not been transferred to the shareholder-payouts canister yet.
+    pub total_token_trade_fees_collection: Tokens, // the total amount of token fees collected of all time including those transferred to the shareholder-payouts canister.
+    pub total_cycles_trade_fees_collection: Cycles, // the total amount of cycles fees collected of all time including those transferred to the shareholder-payouts canister.
+}
+impl TradeFeesCollectionCounter {
+    pub fn count_trade(&mut self, tl: &TradeLog) {
+        self.new_token_trade_fees_collection = self.new_token_trade_fees_collection.saturating_add(tl.tokens_payout_fee);
+        self.new_cycles_trade_fees_collection = self.new_cycles_trade_fees_collection.saturating_add(tl.cycles_payout_fee);
+        self.total_token_trade_fees_collection = self.total_token_trade_fees_collection.saturating_add(tl.tokens_payout_fee);
+        self.total_cycles_trade_fees_collection = self.total_cycles_trade_fees_collection.saturating_add(tl.cycles_payout_fee);
+    }
+}
+
+
+

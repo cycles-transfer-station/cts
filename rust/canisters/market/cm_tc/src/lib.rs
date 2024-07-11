@@ -189,6 +189,7 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
         cm_data.cycles_bank_id = cm_init.cycles_bank_id;
         cm_data.cycles_bank_transfer_fee = cm_init.cycles_bank_transfer_fee;
+        cm_data.shareholder_payouts_canister_id = cm_init.shareholder_payouts_canister_id;
     });
     
     with_mut(&TRADES_STORAGE_DATA, |trades_storage_data| {
@@ -367,6 +368,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     trade_logs: &mut VecDeque<TradeLogAndTemporaryData>, 
     trade_logs_id_counter: &mut PurchaseId,
     candle_counter: &mut CandleCounter,
+    trade_fees_collection_counter: &mut TradeFeesCollectionCounter,
 ) {       
     
     if MatcherPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
@@ -450,6 +452,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
             );
             
             candle_counter.count_trade(&trade_logs.back().unwrap().log);
+            trade_fees_collection_counter.count_trade(&trade_logs.back().unwrap().log);            
             
             if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
             || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
@@ -612,6 +615,42 @@ async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: Tra
         }
     }
 }
+
+
+// --------- SHAREHOLDER-PAYOUTS ---------------
+
+#[update]
+pub async fn shareholder_payouts_collect_trade_fees() -> ShareholderPayoutsCollectTradeFeesSponse {
+    // caller check
+    with(&CM_DATA, |d| {
+        if caller() != d.shareholder_payouts_canister_id {
+            trap("Caller for this method must be the CTS shareholder-payouts canister.");
+        }
+    });
+    
+    with_mut(&CM_DATA, |cm_data| {
+        if cm_data.trade_fees_collection_counter.
+                
+    });
+    
+        
+        
+        
+        
+        
+}
+
+
+
+
+    // --- ledger-logs ---
+    // use call raw for the transfer, if sponse-deserialization-error log and stop further of this method's calls till manual intervention. deserialization error on a ledger transfer call should not happen and cannot be programatically handled.
+    // do the same for all ledger transfer calls for position-posits and for trade-payouts.
+    // if non-sns icrc-1 ledgers trade at the cts, make sure that ledger passes the icrc-1-test-suite. and reproducible builds.
+
+
+
+
 
 
 

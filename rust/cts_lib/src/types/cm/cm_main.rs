@@ -13,6 +13,12 @@ pub struct TradeContractIdAndLedgerId {
     pub trade_contract_canister_id: Principal,
 }
 
+#[derive(CandidType, Serialize, Deserialize, Clone)]        
+pub struct TradeContractData {
+    pub tc_module_hash: [u8; 32],
+    pub latest_upgrade_timestamp_nanos: u64,
+}
+
 #[derive(CandidType, Deserialize)]
 pub struct CMMainInit {
     pub cts_id: Principal,

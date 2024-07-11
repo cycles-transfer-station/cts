@@ -9,11 +9,13 @@ crate-type = ["cdylib"]
 
 [dependencies]
 cts_lib = { path = "../../cts_lib" }
+outsiders = { path = "../../outsiders" }
 candid = { workspace = true }
 #futures = { workspace = true }
-#serde = { workspace = true }
+serde = { workspace = true }
 #serde_bytes = { workspace = true }
 canister-tools = { workspace = true }
 ic-stable-structures = { workspace = true }
 ic-cdk = { workspace = true }
+ic-cdk-timers = { workspace = true }
 

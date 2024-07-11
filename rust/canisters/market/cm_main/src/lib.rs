@@ -53,17 +53,10 @@ use candid::{
 
 
 
-#[derive(CandidType, Serialize, Deserialize, Clone)]        
-pub struct TradeContractData {
-    tc_module_hash: [u8; 32],
-    latest_upgrade_timestamp_nanos: u64,
-}
-
-
 #[derive(CandidType, Serialize, Deserialize)]
 struct CMMainData {
     cts_id: Principal,
-    // portant that the sequence of these stay the same and only get added on. the shareholder_payouts canister needs it. 
+    // portant that the sequence of these stay the same and only get added on. the shareholder_payouts canister needs it. keep this as a vector.
     trade_contracts: Vec<(TradeContractIdAndLedgerId, TradeContractData)>,
     tc_canister_code: CanisterCode,
     trades_storage_canister_code: CanisterCode,

@@ -1,8 +1,12 @@
+//taken from the levifeldman-show-neuron-reward-portion branch of the levifeldman/ic repo. commit: f5ead899ab705957c68ece0c51d62ae6bcabd3a1
+
 // This is an experimental feature to generate Rust binding from Candid.
 // You may want to manually adjust some of the types.
 #![allow(dead_code, unused_imports)]
 use candid::{self, CandidType, Deserialize, Principal};
 use ic_cdk::api::call::CallResult as Result;
+use std::collections::BTreeMap;
+
 
 #[derive(CandidType, Deserialize)]
 pub struct GenericNervousSystemFunction {
@@ -46,7 +50,7 @@ pub struct MaturityModulation {
   pub current_basis_points: Option<i32>,
   pub updated_at_timestamp_seconds: Option<u64>,
 }
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Clone)]
 pub struct NeuronId { pub id: serde_bytes::ByteBuf }
 #[derive(CandidType, Deserialize)]
 pub struct Followees { pub followees: Vec<NeuronId> }
@@ -383,6 +387,7 @@ pub struct Neuron {
   pub source_nns_neuron_id: Option<u64>,
   pub auto_stake_maturity: Option<bool>,
   pub aging_since_timestamp_seconds: u64,
+  pub reward_event_end_timestamp_seconds_to_neuron_reward_e8s: BTreeMap<u64, u64>, // changed from a Vec<(u64, u64)>
   pub dissolve_state: Option<DissolveState>,
   pub voting_power_percentage_multiplier: u64,
   pub vesting_period_seconds: Option<u64>,
