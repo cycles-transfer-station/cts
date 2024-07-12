@@ -15,6 +15,10 @@ use cts_lib::{
     tools::{
         localkey::refcell::{with, with_mut},
         call_error_as_u32_and_string,
+        time_seconds,
+    },
+    consts::{
+        SECONDS_IN_A_MINUTE
     }
 };
 use ic_stable_structures::{StableBTreeMap, memory_manager::{MemoryId, VirtualMemory}, DefaultMemoryImpl};
@@ -22,7 +26,7 @@ use std::time::Duration;
 use std::collections::{HashSet, HashMap, BTreeSet, BTreeMap};
 use std::cell::RefCell;
 use cts_lib::types::cm::cm_main::{TradeContractIdAndLedgerId, TradeContractData};
-use outsiders::sns_governance::{Service as SNSGovernanceService, ListNeurons, /*ListNeuronsResponse*/, NeuronId};	
+use outsiders::sns_governance::{Service as SNSGovernanceService, ListNeurons, /*ListNeuronsResponse,*/ NeuronId};	
 use candid::{Principal, CandidType, Deserialize};
 
 #[cfg(test)]
@@ -57,7 +61,7 @@ impl SPData {
             lock: false,
             current_built_up_cts_rewards_cycles: 0,
             current_built_up_cts_rewards_tokens: Vec::new(),
-            sum_built_up_neuron_rewards: 0,         
+            sum_built_up_neuron_rewards: 0,
         }
     }
 }
@@ -363,12 +367,22 @@ async fn timer_with_lock_on() {
     // start from the second-to-earliest reward-event available, do not use the earliest reward-event because it can be gone in between the chunks-calls.
     // if for some reason it misses a few reward events, just skip them and start from the second-to-earliest-reward-event-available.
     
-    /*Principal = neuron-owner-id*/
-    /*u64 = sum of the neuron_reward_e8s for all neurons and for all sns-reward-events within this cts-payout-event*/
+    /*key: Principal = neuron-owner-id*/
+    /*value: u64 = sum of the neuron_reward_e8s for all neurons and for all sns-reward-events within this cts-payout-event*/
     let mut neuron_owners_neuron_rewards: HashMap<Principal, u64> = HashMap::new(); 
     let mut start_page_at: Option<NeuronId> = None; // the last neuron-id gotten so far.
-    // on the first chunk, choose these reward events to count for every other chunk.
-    let mut count_sns_reward_events_timestamps: Vec<u64> = Vec::new();
+    
+    let latest_sns_reward_event_done_parsing: u64 = with(&SP_DATA, |sp_data| {
+        sp_data.latest_sns_reward_event_done_parsing
+    });
+    
+    // this is so we make sure that we don't count a new sns-reward-event that happens in between the differnt list_neurons chunk-calls. we'll get that one on the following-day.
+    let start_before_timestamp_seconds: u64 = (time_seconds() - (SECONDS_IN_A_MINUTE * 5)) as u64; // different subnet might be a little behind in their clock
+    
+    // set this to the latest one we are parsing now. if no new reward events, this will be none.
+    // after we are done looping through all neurons, then if this is Some, set the sp_data.latest_sns_reward_event_done_parsing = now_parsing_latest_sns_reward_event.
+    let mut now_parsing_latest_sns_reward_event: Option<u64> = None;
+    
     loop {
         match sns_governance_service.list_neurons(
             ListNeurons{
@@ -391,37 +405,7 @@ async fn timer_with_lock_on() {
                         return;
                     }  
                 });
-                
-                if count_sns_reward_events_timestamps.len() == 0 {
-                    // choose sns-reward-events to count
-                    // return if there are no new reward-events
-                    if let Some(first_neuron) = sponse.neurons.first() {
-                        let latest_sns_reward_event_done_parsing: u64 = with(&SP_DATA, |sp_data| {
-                            sp_data.latest_sns_reward_event_done_parsing
-                        });
-                        // remove earliest one so that the reward-events that we are counting don't slip away in between the list_neurons calls.
-                        let mut first_neuron_reward_map: BTreeMap<u64, u64> = first_neuron.reward_event_end_timestamp_seconds_to_neuron_reward_e8s.clone(); 
-                        if first_neuron_reward_map.len() == 0 {                                     
-                            ic_cdk::print("zero reward-events on the neuron");
-                            return;
-                        }
-                        first_neuron_reward_map.pop_first();
-                        
-                        // add not-yet-parsed sns-reward-events to the count_sns_reward_events_timestamps list.
-                        for (reward_event_end_timestamp_seconds, _) in first_neuron_reward_map.into_iter() {
-                            if reward_event_end_timestamp_seconds <= latest_sns_reward_event_done_parsing {
-                                continue;
-                            } else {
-                                count_sns_reward_events_timestamps.push(reward_event_end_timestamp_seconds);
-                            }
-                        }
-                    }	 
-                    if count_sns_reward_events_timestamps.len() == 0 {
-                        ic_cdk::print("No sns-reward-events to parse");
-                        return;
-                    }   
-                }
-                
+                                
                 for neuron in sponse.neurons.iter() {
                     let neuron_owner: Principal = match neuron.permissions.iter().find(
                         |neuron_permission| { 
@@ -444,16 +428,18 @@ async fn timer_with_lock_on() {
                         }
                     };
                     
-                    for count_sns_reward_event in count_sns_reward_events_timestamps.iter() {
-                        match neuron.reward_event_end_timestamp_seconds_to_neuron_reward_e8s.get(&count_sns_reward_event) {
-                            Some(neuron_reward_e8s) => {
-                                *(neuron_owners_neuron_rewards.entry(neuron_owner).or_default()) += neuron_reward_e8s;
+                    for (reward_event_end_timestamp_seconds, neuron_reward_e8s) in neuron.reward_event_end_timestamp_seconds_to_neuron_reward_e8s.iter() {
+                        if *reward_event_end_timestamp_seconds > latest_sns_reward_event_done_parsing
+                        && *reward_event_end_timestamp_seconds < start_before_timestamp_seconds {
+                            *(neuron_owners_neuron_rewards.entry(neuron_owner).or_default()) += neuron_reward_e8s;
+                            match now_parsing_latest_sns_reward_event.as_mut() { 
+                                Some(now_parsing_latest_sns_reward_event) => {
+                                    *now_parsing_latest_sns_reward_event = std::cmp::max(*now_parsing_latest_sns_reward_event, *reward_event_end_timestamp_seconds);
+                                }
+                                None => {
+                                    now_parsing_latest_sns_reward_event = Some(*reward_event_end_timestamp_seconds);
+                                }
                             }
-                            None => {
-                                ic_cdk::print("Could not find reward-event on the neuron.");
-                                // might be a new neuron or a neuron that didn't vote.
-                                continue;
-                            } 
                         }
                     }
                 }                
@@ -481,11 +467,11 @@ async fn timer_with_lock_on() {
         });
     });
 
-    
-    with_mut(&SP_DATA, |sp_data| {
-        sp_data.latest_sns_reward_event_done_parsing = count_sns_reward_events_timestamps.iter().max().unwrap().clone(); // unwrap bc we made sure before that len() != 0 
-    });
-    
+    if let Some(now_parsing_latest_sns_reward_event) = now_parsing_latest_sns_reward_event {
+        with_mut(&SP_DATA, |sp_data| {
+            sp_data.latest_sns_reward_event_done_parsing = now_parsing_latest_sns_reward_event; 
+        });
+    }
     // done parsing sns-reward-events.
     // ------- done -------
 
@@ -508,8 +494,8 @@ async fn timer_with_lock_on() {
         }
     };
     
-    if tcs_and_ledgers.len() >= MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED {
-        ic_cdk::print("cannot do cts-reward-event, cannot start collecting trade fees from tcs, because tcs_and_ledgers.len() >= MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED");
+    if tcs_and_ledgers.len() > MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED {
+        ic_cdk::print("cannot do cts-reward-event, cannot start collecting trade fees from tcs, because cm_main tcs_and_ledgers.len() > MAX_NUMBER_OF_TCS_ABLE_TO_BE_HANDLED");
         return;
     }
     
@@ -525,6 +511,9 @@ async fn timer_with_lock_on() {
             Ok((s,)) => {
                 // add these trading-fees-collected to the sp_data.current_built_up_cts_rewards
                 with_mut(&SP_DATA, |sp_data| {
+                    
+                    // put 10% into the treasury, then take from there max 5& for the maturity-modulation if needed.
+                
                     sp_data.current_built_up_cts_rewards_cycles = sp_data.current_built_up_cts_rewards_cycles.saturating_add(s.cb_cycles_sent);
                     // if there are new tcs, push new values onto the current_built_up_cts_rewards.
                     if sp_data.current_built_up_cts_rewards_tokens.len() < i + 1 {
