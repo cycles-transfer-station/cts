@@ -74,7 +74,7 @@ test-unit:
     cd {{justfile_directory()}}/rust && cargo test
     
 test-pic *cargo_test_params: (build "dev")
-    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}} | grep -v "Non-increasing batch time at height"
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}}
     
 test: && test-unit test-pic
     @echo "test"

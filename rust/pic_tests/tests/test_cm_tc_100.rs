@@ -23,6 +23,10 @@ fn test_100() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
     
+    // add cycles onto the tc so that it can spawn storage canisters.
+    // currently need 20T for a storage-canister and at least 20T on the tc.
+    pic.add_cycles(tc, 20*2 + 25 - pic.cycle_balance(tc); 
+    
     let (p1,p2): (Principal,Principal) = (
         Principal::from_slice(&[1,1,1,1,1]),
         Principal::from_slice(&[2,2,2,2,2]),

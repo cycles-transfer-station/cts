@@ -2,12 +2,14 @@ use pocket_ic::{*, common::rest::RawEffectivePrincipal};
 use candid::{Nat, Principal, CandidType, Deserialize};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
-    consts::{TRILLION, KiB},
+    consts::{TRILLION, KiB, NANOS_IN_A_SECOND, SECONDS_IN_A_DAY, SECONDS_IN_A_HOUR},
     tools::principal_token_subaccount,
     types::{
         cm::cm_main::*,
         Cycles,
         CanisterCode,
+        fueler::{FuelerData, FUEL_TOPUP_TRIGGER_THRESHOLD},
+        
     },
 };
 use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError, BlockIndex}};
@@ -22,10 +24,18 @@ pub const ICP_MINTER: Principal = Principal::from_slice(b"icp-minter");
 pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
-pub const CTS_CONTROLLER: Principal = Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
+pub const CTS_CONTROLLER: Principal = SNS_ROOT; // Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
 pub const CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 110, 1, 1]);
 pub const CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 111, 1, 1]);
 pub const BANK: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 170, 1, 1]);
+pub const FUELER: Principal = Principal::from_slice(&[0,0,0,0,2,48,0,191,1,1]); // update this when mainnet canister live.
+pub const SNS_ROOT: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 218, 1, 1]) ; // ibahq-taaaa-aaaaq-aadna-cai
+pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
+pub const SNS_LEDGER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 220, 1, 1]);
+pub const SNS_LEDGER_INDEX: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 222, 1, 1]);
+pub const SNS_SWAP: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 221, 1, 1]);
+
+pub const START_WITH_FUEL: u128 = FUEL_TOPUP_TRIGGER_THRESHOLD - 5*TRILLION;
 
 use std::path::PathBuf;
 
@@ -151,6 +161,7 @@ pub fn set_up() -> PocketIc {
     let pic = PocketIcBuilder::new()
         .with_nns_subnet()
         .with_fiduciary_subnet()
+        .with_sns_subnet()
         .build();
     //let _nns_subnet = pic.topology().get_nns().unwrap();
     //let _fid_subnet = pic.topology().get_fiduciary().unwrap();
@@ -252,19 +263,103 @@ pub fn set_up() -> PocketIc {
     ).unwrap();
     r.unwrap();
     
+    // SNS-ROOT
+    pic.create_canister_with_id(Some(SNS_GOVERNANCE), None, SNS_ROOT).unwrap();
+    pic.add_cycles(SNS_ROOT, START_WITH_FUEL);
+    let sns_root_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/sns-root-canister-e790c6636115482db53ca3daa2f1900202ab04cf.wasm.gz")).unwrap();
+    pic.install_canister(
+        SNS_ROOT,
+        sns_root_wasm, 
+        candid::encode_one(
+            outsiders::sns_root::SnsRootCanister {
+                dapp_canister_ids: vec![CTS, BANK, CM_MAIN, FUELER],
+                testflight: false,
+                latest_ledger_archive_poll_timestamp_seconds: None,
+                archive_canister_ids: vec![],
+                governance_canister_id: Some(SNS_GOVERNANCE),
+                index_canister_id: Some(SNS_LEDGER_INDEX),
+                swap_canister_id: Some(SNS_SWAP),
+                ledger_canister_id: Some(SNS_LEDGER),
+            }
+        ).unwrap(), 
+        Some(SNS_GOVERNANCE), 
+    );
+    
+    // SNS_GOVERANANCE
+    pic.create_canister_with_id(Some(SNS_ROOT), None, SNS_GOVERNANCE).unwrap();
+    pic.add_cycles(SNS_GOVERNANCE, START_WITH_FUEL);
+    
+    // SNS_SWAP
+    pic.create_canister_with_id(Some(SNS_ROOT), None, SNS_SWAP).unwrap();
+    pic.add_cycles(SNS_SWAP, START_WITH_FUEL);
+    let sns_swap_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/sns-swap-canister-b39f782ae9e976f6f25c8f1d75b977bd22c81507.wasm.gz")).unwrap();
+    pic.install_canister(
+        SNS_SWAP,
+        sns_swap_wasm, 
+        candid::encode_one(
+            outsiders::sns_swap::Init {
+                nns_proposal_id: Some(1234),
+                sns_root_canister_id: SNS_ROOT.to_text(),
+                neurons_fund_participation: None,
+                min_participant_icp_e8s: Some(5_00000000),
+                neuron_basket_construction_parameters: Some(
+                    outsiders::sns_swap::NeuronBasketConstructionParameters {
+                        dissolve_delay_interval_seconds: (SECONDS_IN_A_DAY * 365 + SECONDS_IN_A_HOUR * 6) as u64,
+                        count: 4,
+                    }
+                ),
+                fallback_controller_principal_ids: vec![SNS_ROOT.to_text()], // one is required
+                max_icp_e8s: None,
+                neuron_minimum_stake_e8s: Some(100_00000000),
+                confirmation_text: None,
+                swap_start_timestamp_seconds: None,
+                swap_due_timestamp_seconds: Some((pic_get_time_nanos(&pic) / NANOS_IN_A_SECOND + SECONDS_IN_A_DAY * 14) as u64),
+                min_participants: Some(5),
+                sns_token_e8s: Some(10_000_000_00000000),
+                nns_governance_canister_id: NNS_GOVERNANCE.to_text(),
+                transaction_fee_e8s: Some(100000),
+                icp_ledger_canister_id: ICP_LEDGER.to_text(),
+                sns_ledger_canister_id: SNS_LEDGER.to_text(),
+                neurons_fund_participation_constraints: None,
+                neurons_fund_participants: None,
+                should_auto_finalize: Some(false),
+                max_participant_icp_e8s: Some(10_00000000),
+                sns_governance_canister_id: SNS_GOVERNANCE.to_text(),
+                min_direct_participation_icp_e8s: Some(10_000_00000000),
+                restricted_countries: None,
+                min_icp_e8s: None,
+                max_direct_participation_icp_e8s: Some(50_000_00000000),
+            }
+        ).unwrap(), 
+        Some(SNS_ROOT), 
+    );
+    
+    
+    // SNS_LEDGER
+    pic.create_canister_with_id(Some(SNS_ROOT), None, SNS_LEDGER).unwrap();
+    pic.add_cycles(SNS_LEDGER, START_WITH_FUEL);
+    
+    //  SNS_LEDGER_INDEX
+    pic.create_canister_with_id(Some(SNS_ROOT), None, SNS_LEDGER_INDEX).unwrap();
+    pic.add_cycles(SNS_LEDGER_INDEX, START_WITH_FUEL);
+    
+    // CTS
+    pic.create_canister_with_id(Some(SNS_ROOT), None, CTS).unwrap();
+    pic.add_cycles(CTS, START_WITH_FUEL);
+    
     // BANK
-    pic.create_canister_with_id(Some(CTS_CONTROLLER), None, BANK).unwrap();
-    pic.add_cycles(BANK, 1_000 * TRILLION);
+    pic.create_canister_with_id(Some(SNS_ROOT), None, BANK).unwrap();
+    pic.add_cycles(BANK, START_WITH_FUEL);
     pic.install_canister(
         BANK, 
         std::fs::read(wasms_dir().join("bank.wasm")).unwrap(), 
         candid::encode_args(()).unwrap(), 
-        Some(CTS_CONTROLLER), 
+        Some(SNS_ROOT), 
     );
 
     // CM_MAIN
-    pic.create_canister_with_id(Some(CTS_CONTROLLER), None, CM_MAIN).unwrap();
-    pic.add_cycles(CM_MAIN, 1_000 * TRILLION);
+    pic.create_canister_with_id(Some(SNS_ROOT), None, CM_MAIN).unwrap();
+    pic.add_cycles(CM_MAIN, START_WITH_FUEL);
     pic.install_canister(
         CM_MAIN, 
         std::fs::read(wasms_dir().join("cm_main.wasm")).unwrap(), 
@@ -272,7 +367,7 @@ pub fn set_up() -> PocketIc {
             cts_id: CTS,
             cycles_bank_id: BANK,
         }).unwrap(), 
-        Some(CTS_CONTROLLER), 
+        Some(SNS_ROOT), 
     );
     
     for (wasm_path, market_canister_type) in [
@@ -281,15 +376,32 @@ pub fn set_up() -> PocketIc {
         ("cm_trades_storage.wasm", MarketCanisterType::TradesStorage),
     ] {
         let cc = CanisterCode::new(std::fs::read(wasms_dir().join(wasm_path)).unwrap());
-        call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
+        call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, SNS_ROOT, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
     }
+    
+    // FUELER
+    pic.create_canister_with_id(Some(SNS_ROOT), None, FUELER).unwrap();
+    pic.add_cycles(FUELER, START_WITH_FUEL);
+    pic.install_canister(
+        FUELER, 
+        std::fs::read(wasms_dir().join("fueler.wasm")).unwrap(), 
+        candid::encode_one(
+            FuelerData{
+                sns_root: SNS_ROOT,
+                cm_main: CM_MAIN,
+                cts_cycles_bank: BANK,
+            }
+        ).unwrap(), 
+        Some(SNS_ROOT)
+    );
+    
     
     pic
 }
 
 pub fn set_up_tc(pic: &PocketIc) -> Principal {
     call_candid_as::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
-        &pic, CM_MAIN, RawEffectivePrincipal::None, CTS_CONTROLLER, "controller_create_trade_contract", (
+        &pic, CM_MAIN, RawEffectivePrincipal::None, SNS_ROOT, "controller_create_trade_contract", (
             ControllerCreateIcrc1TokenTradeContractQuest {
                 icrc1_ledger_id: ICP_LEDGER,
                 icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,

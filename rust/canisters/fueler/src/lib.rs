@@ -7,14 +7,11 @@ use cts_lib::{
     tools::{
         localkey::refcell::{with, with_mut}
     },
-    consts::{
-        TRILLION,
-        SECONDS_IN_A_DAY,
-    },
     ic_ledger_types::{MAINNET_CYCLES_MINTING_CANISTER_ID, ICP_LEDGER_TRANSFER_DEFAULT_FEE},
     types::{
+        fueler::*,
         cm::cm_main::ViewTCsStatusSponse,
-        bank::{MintCyclesQuest, MintCyclesResult, MintCyclesSuccess, MintCyclesError, CompleteMintCyclesResult, CompleteMintCyclesError, CyclesOutQuest, CyclesOutError},
+        bank::{BANK_TRANSFER_FEE, MintCyclesQuest, MintCyclesResult, MintCyclesSuccess, MintCyclesError, CompleteMintCyclesResult, CompleteMintCyclesError, CyclesOutQuest, CyclesOutError},
     },
     icrc::{BlockId, IcrcId},
 };
@@ -22,33 +19,12 @@ use outsiders::{
     sns_root::{Service as SNSRootService, GetSnsCanistersSummaryRequest},
     cmc::{Service as CMCService},
 };
-use candid::{Principal, CandidType, Deserialize};
+use candid::{Principal};
 use canister_tools::MemoryId;
-use std::time::Duration;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-#[derive(CandidType, Deserialize)]
-struct FuelerData {
-    sns_root: Principal, // use the sns_root to find the canisters that the sns-root controlls.
-    cm_main: Principal, // use the cm_main to get the cycles-balances of the cm_tcs
-    cts_cycles_bank: Principal, // use to call the special method canister_cycles_balance_minus_total_supply to know when to topup this canister.
-}
-impl FuelerData {
-    fn new() -> Self {
-        Self {
-            sns_root: Principal::from_slice(&[]),
-            cm_main: Principal::from_slice(&[]),
-            cts_cycles_bank: Principal::from_slice(&[]),
-        }
-    }
-}
 const FUELER_DATA_MEMORY_ID: MemoryId = MemoryId::new(0);
-
-const RHYTHM: Duration = Duration::from_secs(SECONDS_IN_A_DAY as u64 * 1);
-
-const FUEL_TOPUP_TRIGGER_THRESHOLD: u128 = 50 * TRILLION; // canisters that go below this threshold will be topped up.
-const FUEL_TOPUP_TO_MINIMUM_BALANCE: u128 = 100 * TRILLION; // how much to top up canisters that went below the threshold.
 
 thread_local! {
     static FUELER_DATA: RefCell<FuelerData> = RefCell::new(FuelerData::new()); 
@@ -143,7 +119,7 @@ async fn fuel() {
                 let canister_id: Principal = match canister_summary.canister_id { 
                     Some(c) => c, 
                     None => {
-                        ic_cdk::print("Strange, canister_summary.canister_id field is None.");
+                        ic_cdk::print(&format!("Strange, canister_summary.canister_id field is None.\n{:?}", s_clone));
                         continue;
                     }
                 };
@@ -155,7 +131,7 @@ async fn fuel() {
                         }
                     }
                     None => {
-                        ic_cdk::print("Strange, canister_summary.status field is None.");
+                        ic_cdk::print(&format!("Strange, canister_summary.status field is None.\n{:?}", s_clone));
                         continue;
                     }
                 }   
@@ -198,6 +174,9 @@ async fn fuel() {
                 if status.cycles < FUEL_TOPUP_TRIGGER_THRESHOLD {
                     topup_canisters.insert(tc, FUEL_TOPUP_TO_MINIMUM_BALANCE - status.cycles);
                 }
+            }
+            for (tc, call_error) in s.1.into_iter() {
+                ic_cdk::print(&format!("Error received when cm_main tried getting canister_status of a tc: {},\nError: {:?}", tc, call_error));
             }
         }
         Err(call_error) => {
@@ -279,13 +258,13 @@ async fn fuel() {
     
     for (for_canister, need_cycles) in topup_canisters.into_iter() {
         // call cycles_out on the cts-cycles-bank
-        let quest_cycles = std::cmp::min(need_cycles, cycles_left);
+        let quest_cycles = std::cmp::min(need_cycles, cycles_left).saturating_sub(BANK_TRANSFER_FEE);
         match ic_cdk::call::<(CyclesOutQuest,), (Result<BlockId, CyclesOutError>,)>(
             cts_cycles_bank,
             "cycles_out",
             (CyclesOutQuest{
                 cycles: quest_cycles,
-                fee: None,
+                fee: Some(BANK_TRANSFER_FEE),                   // set the fee here because we need to count for the cycles_left
                 from_subaccount: None,
                 memo: None,
                 for_canister: for_canister,
@@ -295,7 +274,7 @@ async fn fuel() {
             Ok((r,)) => match r {
                 Ok(block_id) => {
                     ic_cdk::print(&format!("Topped up canister {} with {} cycles at block-height {}", for_canister, quest_cycles, block_id));
-                    cycles_left -= quest_cycles;
+                    cycles_left -= quest_cycles + BANK_TRANSFER_FEE;
                 }
                 Err(cycles_out_error) => {
                     ic_cdk::print(&format!("Error returned when calling cycles_out on the CTS-CYCLES-BANK to top-up canister {} with {} cycles. \n{:?}", for_canister, quest_cycles, cycles_out_error));       
@@ -306,4 +285,6 @@ async fn fuel() {
             }
         }
     }
+    
+    ic_cdk::print("fuel done");
 }

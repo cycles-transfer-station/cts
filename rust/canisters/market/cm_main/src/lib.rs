@@ -85,15 +85,6 @@ impl CMMainData {
     }
 }
 
-
-
-
-const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = {
-    #[cfg(not(debug_assertions))]
-    { 7 * TRILLION }
-    #[cfg(debug_assertions)]
-    { 100 * TRILLION }
-};
     
 
 const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
