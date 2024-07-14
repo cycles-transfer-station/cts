@@ -16,4 +16,5 @@ ic-cdk = { workspace = true }
 ic-stable-structures = { workspace = true }
 serde_bytes = { workspace = true }
 ic-cdk-timers = { workspace = true }
+outsiders = { path = "../../outsiders" }
 

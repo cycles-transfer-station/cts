@@ -17,4 +17,4 @@ icrc-ledger-types = { workspace = true }
 ic-stable-structures = { workspace = true }
 futures = { workspace = true }
 rmp-serde = { workspace = true }
-
+outsiders = { path = "../outsiders" }
