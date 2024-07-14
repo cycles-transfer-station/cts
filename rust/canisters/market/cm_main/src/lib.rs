@@ -85,10 +85,9 @@ impl CMMainData {
     }
 }
 
-    
-
 const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
+const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 7 * TRILLION;
 
 thread_local! {
     static CM_MAIN_DATA: RefCell<CMMainData> = RefCell::new(CMMainData::new());

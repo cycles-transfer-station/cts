@@ -4,12 +4,7 @@ use serde::Serialize;
 use crate::{
     types::{CallError, Cycles}, 
     icrc::Tokens,
-    consts::TRILLION,
 };
-
-
-pub const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 7 * TRILLION;
-
 
 #[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TradeContractIdAndLedgerId {
