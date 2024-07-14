@@ -288,3 +288,10 @@ async fn fuel() {
     
     ic_cdk::print("fuel done");
 }
+
+
+
+
+
+
+ic_cdk::export_candid!();
