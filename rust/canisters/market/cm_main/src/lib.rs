@@ -165,8 +165,10 @@ fn unlock_and_write_controller_create_icrc1token_trade_contract_mid_call_data(mu
     cm_main_data.controller_create_icrc1token_trade_contract_mid_call_data = Some(mid_call_data);
 }
 
-
-
+#[query]
+pub fn sns_validate_controller_create_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) -> Result<String,String> {
+    Ok(format!("ControllerCreateIcrc1TokenTradeContractQuest {{\n    icrc1_ledger_id: {},\n    icrc1_ledger_transfer_fee: {}\n}}", q.icrc1_ledger_id, q.icrc1_ledger_transfer_fee))
+}
 
 #[update]
 pub async fn controller_create_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) 
