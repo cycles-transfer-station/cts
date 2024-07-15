@@ -85,6 +85,15 @@ pub struct MintCyclesSuccess {
 
 pub type MintCyclesResult = Result<MintCyclesSuccess, MintCyclesError>;
 
+
+#[derive(CandidType, Deserialize, Debug)]
+pub enum CompleteMintCyclesError{
+    UserIsNotInTheMiddleOfAMintCyclesCall,
+    MintCyclesError(MintCyclesError)
+}
+
+pub type CompleteMintCyclesResult = Result<MintCyclesSuccess, CompleteMintCyclesError>;
+
 #[derive(CandidType, Deserialize, Debug)]
 pub enum UserIsInTheMiddleOfADifferentCall {
     MintCyclesCall{ must_call_complete: bool },

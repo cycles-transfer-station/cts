@@ -172,6 +172,7 @@ dependencies = [
  "futures",
  "ic-cdk",
  "ic-stable-structures",
+ "outsiders",
  "serde",
  "serde_bytes",
 ]
@@ -294,6 +295,7 @@ dependencies = [
  "ic-ledger-types",
  "ic-stable-structures",
  "icrc-ledger-types",
+ "outsiders",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -330,6 +332,21 @@ name = "either"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
+
+[[package]]
+name = "fueler"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "canister-tools",
+ "cts_lib",
+ "ic-cdk",
+ "ic-cdk-timers",
+ "ic-stable-structures",
+ "outsiders",
+ "serde",
+ "serde_bytes",
+]
 
 [[package]]
 name = "futures"
@@ -618,6 +635,16 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+
+[[package]]
+name = "outsiders"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "serde",
+ "serde_bytes",
+]
 
 [[package]]
 name = "paste"

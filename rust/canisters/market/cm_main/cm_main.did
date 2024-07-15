@@ -1,5 +1,22 @@
 type CMMainInit = record { cycles_bank_id : principal; cts_id : principal };
 type CanisterCode = record { module_hash : blob; module : blob };
+type CanisterStatusResult = record {
+  status : CanisterStatusResultStatus;
+  memory_size : nat;
+  cycles : nat;
+  settings : DefiniteCanisterSettings;
+  query_stats : CanisterStatusResultQueryStats;
+  idle_cycles_burned_per_day : nat;
+  module_hash : opt blob;
+  reserved_cycles : nat;
+};
+type CanisterStatusResultQueryStats = record {
+  response_payload_bytes_total : nat;
+  num_instructions_total : nat;
+  num_calls_total : nat;
+  request_payload_bytes_total : nat;
+};
+type CanisterStatusResultStatus = variant { stopped; stopping; running };
 type ContinueControllerCreateIcrc1TokenTradeContractError = variant {
   ControllerCreateIcrc1TokenTradeContractError : ControllerCreateIcrc1TokenTradeContractError;
   ControllerIsNotInTheMiddleOfAControllerCreateIcrc1TokenTradeContractCall;
@@ -40,7 +57,17 @@ type ControllerUpgradeCSQuest = record {
   post_upgrade_quest : blob;
   specific_cs : opt vec principal;
 };
+type DefiniteCanisterSettings = record {
+  freezing_threshold : nat;
+  controllers : vec principal;
+  reserved_cycles_limit : nat;
+  log_visibility : LogVisibility;
+  wasm_memory_limit : nat;
+  memory_allocation : nat;
+  compute_allocation : nat;
+};
 type LogStorageType = variant { Positions; Trades };
+type LogVisibility = variant { controllers; public };
 type MarketCanisterType = variant {
   TradesStorage;
   PositionsStorage;
@@ -92,4 +119,10 @@ service : (CMMainInit) -> {
   view_icrc1_token_trade_contracts : () -> (
       vec record { TradeContractIdAndLedgerId; TradeContractData },
     ) query;
+  view_tcs_status : () -> (
+      record {
+        vec record { principal; CanisterStatusResult };
+        vec record { principal; record { nat32; text } };
+      },
+    );
 }

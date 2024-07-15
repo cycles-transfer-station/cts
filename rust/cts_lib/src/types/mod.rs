@@ -6,6 +6,8 @@ use candid::{
 
 pub mod bank;
 pub mod cm;
+pub mod fueler;
+
 
 pub type Cycles = u128;
 pub type CallError = (u32, String);

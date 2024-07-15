@@ -3,9 +3,8 @@ use candid::{Principal, CandidType, Deserialize};
 use serde::Serialize;
 use crate::{
     types::{CallError, Cycles}, 
-    icrc::Tokens
+    icrc::Tokens,
 };
-
 
 #[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TradeContractIdAndLedgerId {
@@ -61,3 +60,6 @@ pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
     TCInitCandidEncodeError(String),
     InstallCodeIcrc1TokenTradeContractCallError(CallError),
 }
+
+pub type ViewTCsStatusSponse = (Vec<(Principal/*tc*/, outsiders::management_canister::CanisterStatusResult)>, Vec<(Principal, CallError)>);
+

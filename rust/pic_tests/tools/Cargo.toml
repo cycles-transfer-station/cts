@@ -8,6 +8,7 @@ edition = "2021"
 candid = { workspace = true }
 pocket-ic = { workspace = true }
 cts_lib = { workspace = true }
+outsiders = { workspace = true }
 serde = { workspace = true }
 icrc-ledger-types = { workspace = true }
 more-asserts = { workspace = true }

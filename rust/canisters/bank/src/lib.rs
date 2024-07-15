@@ -702,14 +702,8 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     })
 }
 
-#[derive(CandidType, Deserialize)]
-pub enum CompleteMintCyclesError{
-    UserIsNotInTheMiddleOfAMintCyclesCall,
-    MintCyclesError(MintCyclesError)
-}
-
 #[update]
-pub async fn complete_mint_cycles(for_user: Option<Principal>) -> Result<MintCyclesSuccess, CompleteMintCyclesError> {
+pub async fn complete_mint_cycles(for_user: Option<Principal>) -> CompleteMintCyclesResult {
     complete_mint_cycles_(for_user.unwrap_or(caller())).await
 }
 

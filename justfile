@@ -23,6 +23,9 @@ cm_positions_storage_did_path := rust_canisters_path / "market/cm_positions_stor
 cm_trades_storage_filename := "cm_trades_storage.wasm"
 cm_trades_storage_did_path := rust_canisters_path / "market/cm_trades_storage/cm_trades_storage.did"
 
+fueler_filename := "fueler.wasm"
+fueler_did_path := rust_canisters_path / "fueler/fueler.did"
+
 
 cargo-build-wasms profile:
     rm -rf build && mkdir build
@@ -56,7 +59,8 @@ build profile *git_commit_id: (cargo-build-wasms profile)
         "{{cm_main_filename}}","{{cm_main_did_path}}" \
         "{{cm_tc_filename}}","{{cm_tc_did_path}}" \
         "{{cm_positions_storage_filename}}","{{cm_positions_storage_did_path}}" \
-        "{{cm_trades_storage_filename}}","{{cm_trades_storage_did_path}}"; \
+        "{{cm_trades_storage_filename}}","{{cm_trades_storage_did_path}}" \
+        "{{fueler_filename}}","{{fueler_did_path}}"; \
     do
         IFS=","
         set -- $i
@@ -74,7 +78,7 @@ test-unit:
     cd {{justfile_directory()}}/rust && cargo test
     
 test-pic *cargo_test_params: (build "dev")
-    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}} | grep -v "Non-increasing batch time at height"
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}}
     
 test: && test-unit test-pic
     @echo "test"

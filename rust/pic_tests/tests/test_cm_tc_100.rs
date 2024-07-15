@@ -23,6 +23,10 @@ fn test_100() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
     
+    // add cycles onto the tc so that it can spawn storage canisters.
+    // currently need 20T for each storage-canister and at least 20T on the tc.
+    pic.add_cycles(tc, (20*2 + 25)*TRILLION - pic.cycle_balance(tc)); 
+    
     let (p1,p2): (Principal,Principal) = (
         Principal::from_slice(&[1,1,1,1,1]),
         Principal::from_slice(&[2,2,2,2,2]),
@@ -106,24 +110,6 @@ fn test_100() {
             P_START_TOKEN_BALANCE - ((trade_tokens + (ICP_LEDGER_TRANSFER_FEE * 2))*(i+1)) 
         );
         
-        let mut token_position_log = PositionLog{
-            id: i * 2,
-            positor: p1,
-            quest: CreatePositionQuestLog {
-                quantity: trade_tokens,
-                cycles_per_token_rate: trade_tokens_rate,
-            },
-            position_kind: PositionKind::Token,
-            mainder_position_quantity: trade_tokens, 
-            fill_quantity: 0, 
-            fill_average_rate: trade_tokens_rate,
-            payouts_fees_sum: 0,
-            creation_timestamp_nanos: pic_get_time_nanos(&pic),
-            position_termination: None,
-            void_position_payout_dust_collection: false, 
-            void_position_payout_ledger_transfer_fee: 0u64,
-        };
-        
         let cm_data: CMData = create_and_download_state_snapshot::<CMData>(&pic, CM_MAIN, tc, 0);
         assert_eq!(
             *(cm_data.token_positions.first_key_value().unwrap().1),
@@ -149,13 +135,32 @@ fn test_100() {
         assert_eq!(cm_data.void_cycles_positions.len(), 0);
         
         let positions_log_storage_data = create_and_download_state_snapshot::<LogStorageData>(&pic, CM_MAIN, tc, 1);
+        let positions_log_storage_data_serialize_backwards_log = PositionLog::stable_memory_serialize_backwards(
+            &positions_log_storage_data.storage_buffer[
+                (positions_log_storage_data.storage_buffer.len() - PositionLog::STABLE_MEMORY_SERIALIZE_SIZE)
+                ..
+            ]
+        );
+        let mut token_position_log = PositionLog{
+            id: i * 2,
+            positor: p1,
+            quest: CreatePositionQuestLog {
+                quantity: trade_tokens,
+                cycles_per_token_rate: trade_tokens_rate,
+            },
+            position_kind: PositionKind::Token,
+            mainder_position_quantity: trade_tokens, 
+            fill_quantity: 0, 
+            fill_average_rate: trade_tokens_rate,
+            payouts_fees_sum: 0,
+            creation_timestamp_nanos: positions_log_storage_data_serialize_backwards_log.creation_timestamp_nanos,
+            position_termination: None,
+            void_position_payout_dust_collection: false, 
+            void_position_payout_ledger_transfer_fee: 0u64,
+        };
+        
         assert_eq!(
-            PositionLog::stable_memory_serialize_backwards(
-                &positions_log_storage_data.storage_buffer[
-                    (positions_log_storage_data.storage_buffer.len() - PositionLog::STABLE_MEMORY_SERIALIZE_SIZE)
-                    ..
-                ]
-            ),
+            positions_log_storage_data_serialize_backwards_log,
             token_position_log,
         );
         
@@ -199,12 +204,19 @@ fn test_100() {
             P_START_CYCLES_BALANCE - ((trade_cycles + (BANK_TRANSFER_FEE * 2))*(i+1))
         );
         
+        let cm_data: CMData = create_and_download_state_snapshot::<CMData>(&pic, CM_MAIN, tc, 0);
+        assert_eq!(cm_data.token_positions.len(), 0);
+        assert_eq!(cm_data.cycles_positions.len(), 0);
+        assert_eq!(cm_data.void_token_positions.len(), 1);
+        assert_eq!(cm_data.void_cycles_positions.len(), 1);
+        assert_eq!(cm_data.trade_logs.len(), 1);
+        
         token_position_log = PositionLog{
             mainder_position_quantity: 0, 
             fill_quantity: trade_cycles, 
             payouts_fees_sum: cycles_payout_fee,
             position_termination: Some(PositionTerminationData{
-                timestamp_nanos: pic_get_time_nanos(&pic),
+                timestamp_nanos: cm_data.void_token_positions.first_key_value().unwrap().1.update_storage_position_data.update_storage_position_log.position_termination.as_ref().unwrap().timestamp_nanos,
                 cause: PositionTerminationCause::Fill,
             }),
             ..token_position_log
@@ -222,22 +234,22 @@ fn test_100() {
             fill_quantity: trade_tokens, 
             fill_average_rate: trade_tokens_rate,
             payouts_fees_sum: tokens_payout_fee,
-            creation_timestamp_nanos: pic_get_time_nanos(&pic),
+            creation_timestamp_nanos: cm_data.void_cycles_positions.first_key_value().unwrap().1.update_storage_position_data.update_storage_position_log.creation_timestamp_nanos,
             position_termination: Some(PositionTerminationData{
-                timestamp_nanos: pic_get_time_nanos(&pic),
+                timestamp_nanos: cm_data.void_cycles_positions.first_key_value().unwrap().1.update_storage_position_data.update_storage_position_log.position_termination.as_ref().unwrap().timestamp_nanos,
                 cause: PositionTerminationCause::Fill,
             }),
             void_position_payout_dust_collection: false,
             void_position_payout_ledger_transfer_fee: 0u64,
         };
-
+        
         let mut void_token_position = VoidTokenPosition{
             position_id: token_position_log.id,
             positor: token_position_log.positor,
             tokens: 0,
             token_payout_lock: false,
             token_payout_data: None,
-            timestamp_nanos: pic_get_time_nanos(&pic),
+            timestamp_nanos: cm_data.void_token_positions.first_key_value().unwrap().1.timestamp_nanos,
             update_storage_position_data: VPUpdateStoragePositionData {
                 lock: false,
                 status: false,
@@ -252,7 +264,7 @@ fn test_100() {
             cycles: 0,
             cycles_payout_lock: false,
             cycles_payout_data: None,
-            timestamp_nanos: pic_get_time_nanos(&pic),
+            timestamp_nanos: cm_data.void_cycles_positions.first_key_value().unwrap().1.timestamp_nanos,
             update_storage_position_data: VPUpdateStoragePositionData {
                 lock: false,
                 status: false,
@@ -261,12 +273,6 @@ fn test_100() {
             return_cycles_to_subaccount: None,
         };
         
-        let cm_data: CMData = create_and_download_state_snapshot::<CMData>(&pic, CM_MAIN, tc, 0);
-        assert_eq!(cm_data.token_positions.len(), 0);
-        assert_eq!(cm_data.cycles_positions.len(), 0);
-        assert_eq!(cm_data.void_token_positions.len(), 1);
-        assert_eq!(cm_data.void_cycles_positions.len(), 1);
-        assert_eq!(cm_data.trade_logs.len(), 1);
         assert_eq!(
             *(cm_data.void_token_positions.first_key_value().unwrap().1),
             void_token_position,

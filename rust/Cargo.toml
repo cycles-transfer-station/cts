@@ -3,6 +3,7 @@
 resolver = "2"
 
 members = [
+    "cts_lib",
     "canisters/cts",
     "canisters/bank",    
     "canisters/market/cm_main",
@@ -10,8 +11,9 @@ members = [
     "canisters/market/cm_storage_lib",
     "canisters/market/cm_trades_storage",
     "canisters/market/cm_positions_storage",
-    "cts_lib",
+    "canisters/fueler",
     "pic_tests/canister_caller",
+    "outsiders",
 ]
 
 exclude = [

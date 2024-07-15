@@ -1,0 +1,6 @@
+type FuelerData = record {
+  cts_cycles_bank : principal;
+  sns_root : principal;
+  cm_main : principal;
+};
+service : (FuelerData) -> {}

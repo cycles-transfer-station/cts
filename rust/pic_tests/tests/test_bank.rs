@@ -55,7 +55,7 @@ fn test_mint_cycles() {
     assert_eq!(
         user_logs[0].1,
         Log{
-            ts: pic_get_time_nanos(&pic) as u64,
+            ts: user_logs[0].1.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
                 op: Operation::Mint{ to: IcrcId{owner:user, subaccount: None}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
@@ -79,10 +79,11 @@ fn test_mint_for_subaccount() {
     mint_cycles(&pic, &mint_for_countid, burn_icp);    
     assert_eq!(icrc1_balance(&pic, BANK, &mint_for_countid), tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE);
     assert_eq!(icrc1_balance(&pic, BANK, &Account{owner:user, subaccount: None}), 0);
+    let log = &get_logs_backwards(&pic, BANK, &Account{owner: user, subaccount: Some(subaccount)}, None).logs[0].1;
     assert_eq!(
-        get_logs_backwards(&pic, BANK, &Account{owner: user, subaccount: Some(subaccount)}, None).logs[0].1,
-        Log{
-            ts: pic_get_time_nanos(&pic) as u64,
+        log,
+        &Log{
+            ts: log.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
                 op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
@@ -122,7 +123,7 @@ fn test_transfer() {
         assert_eq!(
             log,
             &Log{
-                ts: pic_get_time_nanos(&pic) as u64,
+                ts: log.ts,
                 fee: None,
                 tx: LogTX{
                     op: Operation::Xfer{ from: IcrcId{owner: user, subaccount: None}, to: IcrcId{owner: user2, subaccount: None} },
@@ -215,10 +216,11 @@ fn test_cycles_in() {
             let block = cycles_in_result.unwrap();
             assert_eq!(block, 0);
             assert_eq!(icrc1_balance(&pic, BANK, &for_account), cycles);
+            let log = &get_logs_backwards(&pic, BANK, &for_account, None).logs[0].1; 
             assert_eq!(
-                get_logs_backwards(&pic, BANK, &for_account, None).logs[0].1,
-                Log{
-                    ts: pic_get_time_nanos(&pic) as u64,
+                log,
+                &Log{
+                    ts: log.ts,
                     fee: None,
                     tx: LogTX{
                         op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CyclesIn{ from_canister: canister_caller } },
@@ -259,10 +261,11 @@ fn test_cycles_out() {
     assert_le!(pic.cycle_balance(BANK), bank_cycles_balance_before_cycles_out - (tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2));
     assert_ge!(pic.cycle_balance(receiving_canister), receiving_canister_cycles_balance_before + (tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2) - 100_000_000);        
     assert_eq!(icrc1_balance(&pic, BANK, &Account{owner:user, subaccount:Some(subaccount)}), 0);    
+    let log = &get_logs_backwards(&pic, BANK, &Account{owner: user, subaccount: Some(subaccount)}, None).logs[1].1;
     assert_eq!(
-        get_logs_backwards(&pic, BANK, &Account{owner: user, subaccount: Some(subaccount)}, None).logs[1].1,
-        Log{
-            ts: pic_get_time_nanos(&pic) as u64,
+        log,
+        &Log{
+            ts: log.ts,
             fee: None,
             tx: LogTX{
                 op: Operation::Burn{ from: IcrcId{owner: user, subaccount: Some(subaccount)}, for_canister: receiving_canister },

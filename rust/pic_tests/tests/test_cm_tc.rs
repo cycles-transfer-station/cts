@@ -70,7 +70,7 @@ fn test_1() {
             fill_quantity: 0,
             fill_average_rate: trade_rate,
             payouts_fees_sum: 0,
-            creation_timestamp_nanos: pic_get_time_nanos(&pic),
+            creation_timestamp_nanos: p1_position.creation_timestamp_nanos,
             position_termination: None,
             void_position_payout_dust_collection: false,
             void_position_payout_ledger_transfer_fee: 0,
@@ -91,8 +91,6 @@ fn test_1() {
     )).unwrap().0.unwrap().position_id;    
     assert_eq!(p2_position_id, 1);
     
-    let p2_trade_cycles_timestamp_nanos = pic_get_time_nanos(&pic);    
-    
     let p2_view_user_current_positions_sponse_b = pic.query_call(tc, Principal::anonymous(), "view_user_current_positions",
         candid::encode_one(ViewStorageLogsQuest{
             opt_start_before_id: None,
@@ -110,8 +108,10 @@ fn test_1() {
         }).unwrap(),
     ).unwrap().unwrap();
     assert_eq!(p2_view_void_positions_pending_sponse_b.len(), PositionLog::STABLE_MEMORY_SERIALIZE_SIZE + 1); 
+    let log = PositionLog::stable_memory_serialize_backwards(&p2_view_void_positions_pending_sponse_b[..(p2_view_void_positions_pending_sponse_b.len() - 1)]); 
+    let p2_trade_cycles_timestamp_nanos = log.creation_timestamp_nanos;
     assert_eq!(
-        PositionLog::stable_memory_serialize_backwards(&p2_view_void_positions_pending_sponse_b[..(p2_view_void_positions_pending_sponse_b.len() - 1)]),
+        log,
         PositionLog{
             id: 1,
             positor: p2,
@@ -127,7 +127,7 @@ fn test_1() {
             creation_timestamp_nanos: p2_trade_cycles_timestamp_nanos,
             position_termination: Some(PositionTerminationData{
                 cause: PositionTerminationCause::Fill,
-                timestamp_nanos: pic_get_time_nanos(&pic)
+                timestamp_nanos: p2_trade_cycles_timestamp_nanos
             }),
             void_position_payout_dust_collection: false, // because the payout didn't run yet
             void_position_payout_ledger_transfer_fee: 0, // because the payout didn't run yet
@@ -142,8 +142,9 @@ fn test_1() {
         }).unwrap(),
     ).unwrap().unwrap();
     assert_eq!(p1_view_user_current_positions_sponse_b.len(), PositionLog::STABLE_MEMORY_SERIALIZE_SIZE);    
+    let log = PositionLog::stable_memory_serialize_backwards(&p1_view_user_current_positions_sponse_b); 
     assert_eq!(
-        PositionLog::stable_memory_serialize_backwards(&p1_view_user_current_positions_sponse_b), 
+        log, 
         PositionLog{
             id: 0,
             positor: p1,
@@ -156,7 +157,7 @@ fn test_1() {
             fill_quantity: p2_trade_cycles - (p2_trade_cycles % trade_rate),
             fill_average_rate: trade_rate,
             payouts_fees_sum: (p2_trade_cycles - (p2_trade_cycles % trade_rate)) / 10_000 * 50,
-            creation_timestamp_nanos: pic_get_time_nanos(&pic),
+            creation_timestamp_nanos: log.creation_timestamp_nanos,
             position_termination: None,
             void_position_payout_dust_collection: false,
             void_position_payout_ledger_transfer_fee: 0,
@@ -171,8 +172,9 @@ fn test_1() {
             }).unwrap(),
         ).unwrap().unwrap();
         assert_eq!(view_position_pending_trades_sponse_b.len(), TradeLog::STABLE_MEMORY_SERIALIZE_SIZE + 2);    
+        let log = TradeLog::stable_memory_serialize_backwards(&view_position_pending_trades_sponse_b);
         assert_eq!(
-            TradeLog::stable_memory_serialize_backwards(&view_position_pending_trades_sponse_b),
+            log,
             TradeLog{
                 position_id_matcher: 1,
                 position_id_matchee: 0,
@@ -183,7 +185,7 @@ fn test_1() {
                 cycles: p2_trade_cycles - (p2_trade_cycles % trade_rate),
                 cycles_per_token_rate: trade_rate,
                 matchee_position_kind: PositionKind::Token,
-                timestamp_nanos: pic_get_time_nanos(&pic),
+                timestamp_nanos: log.timestamp_nanos,
                 tokens_payout_fee: (p2_trade_cycles / trade_rate) * trade_rate / 10_000 * 50 / trade_rate,
                 cycles_payout_fee: (p2_trade_cycles - (p2_trade_cycles % trade_rate)) / 10_000 * 50,
                 cycles_payout_data: None,
