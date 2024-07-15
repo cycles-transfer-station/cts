@@ -154,7 +154,7 @@ async fn fuel() {
     ).await { 
         Ok((b,)) => {
             if b < FUEL_TOPUP_TRIGGER_THRESHOLD as i128 {
-                *(topup_canisters.entry(cts_cycles_bank).or_default()) = ((FUEL_TOPUP_TO_MINIMUM_BALANCE as i128) - b) as u128;
+                topup_canisters.insert(cts_cycles_bank, ((FUEL_TOPUP_TO_MINIMUM_BALANCE as i128) - b) as u128);
             }        
         }
         Err(call_error) => {
@@ -217,7 +217,7 @@ async fn fuel() {
                             "complete_mint_cycles",
                             (None,)
                         ).await {
-                            Ok((mint_cycles_result,)) => match mint_cycles_result {
+                            Ok((complete_mint_cycles_result,)) => match complete_mint_cycles_result {
                                 Ok(mint_cycles_success) => {
                                     break mint_cycles_success;
                                 }    
