@@ -376,7 +376,7 @@ pub fn set_up() -> PocketIc {
         ("cm_trades_storage.wasm", MarketCanisterType::TradesStorage),
     ] {
         let cc = CanisterCode::new(std::fs::read(wasms_dir().join(wasm_path)).unwrap());
-        call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, SNS_ROOT, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
+        call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, SNS_GOVERNANCE, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
     }
     
     // FUELER
@@ -401,7 +401,7 @@ pub fn set_up() -> PocketIc {
 
 pub fn set_up_tc(pic: &PocketIc) -> Principal {
     call_candid_as::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
-        &pic, CM_MAIN, RawEffectivePrincipal::None, SNS_ROOT, "controller_create_trade_contract", (
+        &pic, CM_MAIN, RawEffectivePrincipal::None, SNS_GOVERNANCE, "controller_create_trade_contract", (
             ControllerCreateIcrc1TokenTradeContractQuest {
                 icrc1_ledger_id: ICP_LEDGER,
                 icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,

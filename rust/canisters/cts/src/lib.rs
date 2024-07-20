@@ -11,8 +11,7 @@ use cts_lib::{
                 with_mut,
             }
         },
-        caller_is_controller_gaurd,
-        sns_validation_string,
+        caller_is_sns_governance_gaurd,
     },
 };
 use ic_cdk::{
@@ -98,11 +97,7 @@ fn init(cts_init: CTSInit) {
             d.batch_creators = batch_creators;
         }
     });
-} 
-
-
-// -------------------------------------------------------------
-
+}
 
 #[pre_upgrade]
 fn pre_upgrade() {
@@ -116,8 +111,7 @@ fn post_upgrade() {
     with(&CTS_DATA, |cts_data| {
         set_root_hash(&cts_data);
     });
-} 
-
+}
 
 
 // ----- METRICS -----
@@ -129,8 +123,7 @@ pub struct CTSMetrics {
 }
 
 #[query]
-pub fn controller_view_metrics() -> CTSMetrics {
-    caller_is_controller_gaurd(&caller());
+pub fn view_metrics() -> CTSMetrics {
     with(&CTS_DATA, |_cts_data| {
         CTSMetrics {
             stable_size: ic_cdk::api::stable::stable64_size(),
@@ -229,12 +222,12 @@ pub struct ControllerCommitBatchQuest{
 
 #[query]
 pub fn sns_validate_controller_commit_batch(q: ControllerCommitBatchQuest) -> Result<String,String> {
-    Ok(sns_validation_string(q))
+    Ok(format!("batch_hash: {}", hex::encode(q.batch_hash)))
 }
 
 #[update]
 pub fn controller_commit_batch(q: ControllerCommitBatchQuest) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
 
     with_mut(&CTS_DATA, |d| {
         let batch_hash = hash_of_files(&d.current_batch);
@@ -298,7 +291,7 @@ pub fn view_batch_creators() -> HashSet<Principal> {
 
 #[update]
 pub fn controller_add_batch_creators(batch_creators: HashSet<Principal>) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
 
     with_mut(&CTS_DATA, |d| {
         for p in batch_creators.into_iter() {
@@ -309,7 +302,7 @@ pub fn controller_add_batch_creators(batch_creators: HashSet<Principal>) {
 
 #[update]
 pub fn controller_remove_batch_creators(batch_creators: HashSet<Principal>) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
 
     with_mut(&CTS_DATA, |d| {
         for p in batch_creators.into_iter() {
@@ -323,7 +316,7 @@ pub fn controller_remove_batch_creators(batch_creators: HashSet<Principal>) {
 
 #[update]
 pub fn controller_clear_files() {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files = Files::new();
@@ -334,7 +327,7 @@ pub fn controller_clear_files() {
 
 #[update]
 pub fn controller_clear_file(filename: String) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
     
     with_mut(&CTS_DATA, |cts_data| {
         cts_data.frontcode_files.remove(&filename);

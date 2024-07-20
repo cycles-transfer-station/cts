@@ -1,7 +1,6 @@
 use ic_cdk::{
     api::{
         trap,
-        caller,
         call::{
             call,
             call_raw128,
@@ -30,10 +29,10 @@ use cts_lib::{
             }
         },
         upgrade_canisters::*,
-        caller_is_controller_gaurd,
         sha256,
         time_nanos_u64,
         call_error_as_u32_and_string,
+        caller_is_sns_governance_gaurd,
     },
     consts::{MiB, TRILLION, MANAGEMENT_CANISTER_ID},
 };
@@ -105,7 +104,6 @@ fn init(cm_main_init: CMMainInit) {
     });
 }
 
-
 #[pre_upgrade]
 fn pre_upgrade() {
     canister_tools::pre_upgrade();
@@ -117,13 +115,13 @@ fn post_upgrade() {
 }
 
 
-
 // ----------------- UPLOAD-CANISTER-CODE --------------------
 
 
 #[update]
 pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canister_type: MarketCanisterType) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
+    
     if *(canister_code.module_hash()) != sha256(canister_code.module()) {
         trap("module hash is not as given");
     } 
@@ -174,7 +172,7 @@ pub fn sns_validate_controller_create_trade_contract(q: ControllerCreateIcrc1Tok
 pub async fn controller_create_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError> {
 
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
     
     let mid_call_data: ControllerCreateIcrc1TokenTradeContractMidCallData = with_mut(&CM_MAIN_DATA, |data| {
         match data.controller_create_icrc1token_trade_contract_mid_call_data {
@@ -329,8 +327,6 @@ pub enum ContinueControllerCreateIcrc1TokenTradeContractError {
 pub async fn continue_controller_create_trade_contract() 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ContinueControllerCreateIcrc1TokenTradeContractError> {
     
-    caller_is_controller_gaurd(&caller());
-    
     continue_controller_create_icrc1token_trade_contract_().await
 
 }
@@ -384,7 +380,7 @@ pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, Tr
 
 #[update]
 pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
     
     let tc_cc: CanisterCode = with_mut(&CM_MAIN_DATA, |cm_main_data| {
         if let Some(new_canister_code) = q.new_canister_code {
@@ -439,7 +435,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
 
 #[update]
 pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
-    caller_is_controller_gaurd(&caller());
+    caller_is_sns_governance_gaurd();
     
     if let Some(ref new_cc) = q.new_canister_code {
         new_cc.verify_module_hash().unwrap();
@@ -464,8 +460,7 @@ pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: Contr
 
 
 #[update]
-pub async fn controller_view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> Result<Vec<u8>, CallError> { 
-    caller_is_controller_gaurd(&caller());
+pub async fn view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> Result<Vec<u8>, CallError> { 
     
     call_raw128(
         tc,
@@ -483,7 +478,6 @@ pub async fn controller_view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> R
 pub async fn view_tcs_status() -> ViewTCsStatusSponse { 
     
     let management_canister_service = ManagementCanisterService(MANAGEMENT_CANISTER_ID);
-    
     
     let mut futures: Vec<_/*future*/> = Vec::new();
     
@@ -513,42 +507,8 @@ pub async fn view_tcs_status() -> ViewTCsStatusSponse {
         }
     });
     
-    
     (successes, errors)
 }    
-
-
-
-
-
-// ----- CONTROLLER_CALL_CANISTER-METHOD --------------------------
-
-#[derive(CandidType, Deserialize)]
-pub struct ControllerCallCanisterQuest {
-    pub callee: Principal,
-    pub method_name: String,
-    pub arg_raw: Vec<u8>,
-    pub cycles: Cycles
-}
-
-#[update]
-pub async fn controller_call_canister(q: ControllerCallCanisterQuest) -> Result<Vec<u8>, CallError> {
-    caller_is_controller_gaurd(&caller());
-        
-    call_raw128(
-        q.callee,
-        &q.method_name,
-        &q.arg_raw,
-        q.cycles
-    )
-    .await
-    .map_err(call_error_as_u32_and_string)
-}
-
-
-
-
-
 
 
 

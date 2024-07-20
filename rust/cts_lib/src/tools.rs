@@ -5,7 +5,7 @@ use crate::{
         IcpId,
     },
     consts::{
-        NANOS_IN_A_SECOND,
+        NANOS_IN_A_SECOND, SNS_GOVERNANCE,
     },
     types::{
         Cycles,
@@ -274,4 +274,12 @@ pub mod upgrade_canisters {
 
 pub fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
     format!("{:#?}", q)
+}
+
+
+
+pub fn caller_is_sns_governance_gaurd() {
+    if ic_cdk::caller() != SNS_GOVERNANCE {
+        trap("Caller must be the CTS SNS governance canister.");
+    }
 }

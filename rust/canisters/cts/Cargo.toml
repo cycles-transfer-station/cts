@@ -22,4 +22,4 @@ canister-tools = { workspace = true }
 ic-stable-structures = { workspace = true }
 ic-cdk = { workspace = true }
 ic-certified-map = { workspace = true }
-
+hex = { workspace = true }

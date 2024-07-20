@@ -274,6 +274,7 @@ dependencies = [
  "canister-tools",
  "cts_lib",
  "futures",
+ "hex",
  "ic-cdk",
  "ic-certified-map",
  "ic-stable-structures",

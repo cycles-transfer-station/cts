@@ -14,7 +14,6 @@ service : (CTSInit) -> {
   controller_clear_files : () -> ();
   controller_commit_batch : (ControllerCommitBatchQuest) -> ();
   controller_remove_batch_creators : (vec principal) -> ();
-  controller_view_metrics : () -> (CTSMetrics) query;
   create_batch : (record {}) -> ();
   sns_validate_controller_commit_batch : (ControllerCommitBatchQuest) -> (
       Result,
@@ -26,4 +25,5 @@ service : (CTSInit) -> {
   view_current_batch_hash : () -> (opt blob) query;
   view_file_hashes : () -> (vec record { text; blob }) query;
   view_live_files_hash : () -> (opt blob) query;
+  view_metrics : () -> (CTSMetrics) query;
 }

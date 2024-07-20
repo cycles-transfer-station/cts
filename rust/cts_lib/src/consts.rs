@@ -68,14 +68,4 @@ pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 
 // -----------------------------------------------------------------
 
 
-
-
-
-pub const CTS_PURCHASE_CYCLES_BANK_COLLECT_PAYMENT_ICP_MEMO: IcpMemo = IcpMemo(u64::from_be_bytes(*b"CTS-PCBC"));
-
-
-
-//pub const CTS_LOCAL_ID: &'static [u8; 10] = b"cts_local_";
-pub const CTS_ID: Principal = Principal::from_slice(&[0,0,0,0,2,48,0,110,1,1]); // em3jm-bqaaa-aaaar-qabxa-cai
-
-
+pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
