@@ -1,6 +1,7 @@
 /rust/target
 
 /rust/pic_tests/target
+/rust/pic_tests/pocket-ic
 
 /build
 

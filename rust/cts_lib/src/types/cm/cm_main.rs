@@ -4,12 +4,24 @@ use serde::Serialize;
 use crate::{
     types::{CallError, Cycles}, 
     icrc::Tokens,
+    consts::TRILLION,
 };
+
+
+pub const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 7 * TRILLION;
+pub const MINIMUM_LEFTOVER_CYCLES_ON_THIS_CM_MAIN_CANISTER_AFTER_A_CREATION_OF_A_NEW_ICRC1TOKEN_TRADE_CONTRACT: Cycles = 20 * TRILLION;
+
 
 #[derive(CandidType, Serialize, Deserialize, Hash, PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TradeContractIdAndLedgerId {
     pub icrc1_ledger_canister_id: Principal,
     pub trade_contract_canister_id: Principal,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone)]
+pub struct TradeContractData {
+    pub tc_module_hash: [u8; 32],
+    pub latest_upgrade_timestamp_nanos: u64,
 }
 
 #[derive(CandidType, Deserialize)]

@@ -16,7 +16,6 @@ use ic_cdk::{
 use cts_lib::{
     management_canister::*,
     types::{
-        Cycles,
         CallError,
         canister_code::CanisterCode,
         cm::{*, cm_main::*, tc::CMIcrc1TokenTradeContractInit}
@@ -34,7 +33,7 @@ use cts_lib::{
         call_error_as_u32_and_string,
         caller_is_sns_governance_gaurd,
     },
-    consts::{MiB, TRILLION, MANAGEMENT_CANISTER_ID},
+    consts::{MiB, MANAGEMENT_CANISTER_ID},
 };
 use outsiders::management_canister::{Service as ManagementCanisterService, CanisterStatusArgs};
 use canister_tools::{self, MemoryId};
@@ -51,12 +50,6 @@ use candid::{
 // ----------------------
 
 
-
-#[derive(CandidType, Serialize, Deserialize, Clone)]        
-pub struct TradeContractData {
-    tc_module_hash: [u8; 32],
-    latest_upgrade_timestamp_nanos: u64,
-}
 
 
 #[derive(CandidType, Serialize, Deserialize)]
@@ -86,7 +79,6 @@ impl CMMainData {
 
 const HEAP_DATA_SERIALIZATION_STABLE_MEMORY_ID: MemoryId = MemoryId::new(0);
 
-const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 7 * TRILLION;
 
 thread_local! {
     static CM_MAIN_DATA: RefCell<CMMainData> = RefCell::new(CMMainData::new());
@@ -217,7 +209,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
     }
     
     if mid_call_data.icrc1token_trade_contract_canister_id.is_none() {
-        if canister_balance128() < NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES + 20*TRILLION {
+        if canister_balance128() < NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES + MINIMUM_LEFTOVER_CYCLES_ON_THIS_CM_MAIN_CANISTER_AFTER_A_CREATION_OF_A_NEW_ICRC1TOKEN_TRADE_CONTRACT {
             with_mut(&CM_MAIN_DATA, |data| {
                 data.controller_create_icrc1token_trade_contract_mid_call_data = None;
             });

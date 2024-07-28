@@ -58,7 +58,7 @@ fn test_mint_cycles() {
             ts: user_logs[0].1.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: IcrcId{owner:user, subaccount: None}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
+                op: Operation::Mint{ to: IcrcId{owner:user, subaccount: None}, kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
                 fee: None,
                 amt: mint_cycles_mount,
                 memo: None,
@@ -86,7 +86,7 @@ fn test_mint_for_subaccount() {
             ts: log.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CMC{ caller: user, icp_block_height: 1 } },
+                op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
                 fee: None,
                 amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
                 memo: None,
@@ -450,6 +450,5 @@ fn icrc1_test_suite_crate() {
     });
     
 }
-
 
 

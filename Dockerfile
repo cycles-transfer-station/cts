@@ -9,14 +9,14 @@ RUN apt -yq update && \
 
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
-ENV RUST_VERSION=1.75.0
+ENV RUST_VERSION=1.80.0
 ENV PATH=${CARGO_HOME}/bin:${PATH}
 RUN curl --fail https://sh.rustup.rs -sSf \
         | sh -s -- -y --default-toolchain ${RUST_VERSION}-x86_64-unknown-linux-gnu --no-modify-path && \
     rustup default ${RUST_VERSION}-x86_64-unknown-linux-gnu && \
     rustup target add wasm32-unknown-unknown && \
-    cargo install ic-wasm --version 0.7.0 --force --locked && \
-    cargo install candid-extractor --version 0.1.2 --force --locked
+    cargo install ic-wasm --version 0.8.0 --force --locked && \
+    cargo install candid-extractor --version 0.1.4 --force --locked
     
 ENV JUST_DIR=/opt/just_dir
 RUN mkdir -p $JUST_DIR && curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to $JUST_DIR

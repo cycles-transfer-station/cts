@@ -184,87 +184,101 @@ async fn fuel() {
         }
     }
     
-    // now calculate icp needed to mint sum of the cycles needed for each canister using the cmc rate.
-    let sum_fuel: u128 = topup_canisters.values().sum();
+    let sum_fuel: u128 = topup_canisters.values().sum::<u128>().saturating_add(BANK_TRANSFER_FEE * topup_canisters.len() as u128);
     
-    let icp_need: u128 = sum_fuel / (xdr_permyriad_per_icp as u128) + 1; // +1 for a possible division remainder
-    
-    // call mint_cycles on the cts-cycles-bank. ICP should be in the subaccount from sns-transfer-treasury-funds proposals.
-    let mint_cycles_success: MintCyclesSuccess = match ic_cdk::call::<(MintCyclesQuest,), (MintCyclesResult,)>(
-        cts_cycles_bank,
-        "mint_cycles",
-        (MintCyclesQuest{
-            burn_icp: icp_need,
-            burn_icp_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() as u128,
-            to: IcrcId{owner: ic_cdk::api::id(), subaccount: None},   
-            fee: None,
-            memo: None,    
-            created_at_time: None    
-        },)
-    ).await {
-        Ok((mint_cycles_result,)) => match mint_cycles_result {
-            Ok(mint_cycles_success) => {
-                mint_cycles_success
-            }
-            Err(mint_cycles_error) => {
-                if let MintCyclesError::MidCallError(mid_call_error) = mint_cycles_error {
-                    ic_cdk::print(&format!("MidCallError returned when calling mint_cycles on the CTS-CYCLES-BANK: {:?}.", mid_call_error));
-                    let mut i: usize = 0;
-                    loop {
-                        ic_cdk::print(&format!("Performing complete_mint_cycles call number {}", i));
-                        match ic_cdk::call::<(Option<Principal>,), (CompleteMintCyclesResult,)>(
-                            cts_cycles_bank,
-                            "complete_mint_cycles",
-                            (None,)
-                        ).await {
-                            Ok((complete_mint_cycles_result,)) => match complete_mint_cycles_result {
-                                Ok(mint_cycles_success) => {
-                                    break mint_cycles_success;
-                                }    
-                                Err(complete_mint_cycles_error) => {
-                                    if let CompleteMintCyclesError::MintCyclesError(MintCyclesError::MidCallError(mid_call_error)) = complete_mint_cycles_error {
-                                        ic_cdk::print(&format!("MidCallError returned when calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}.", mid_call_error));
-                                    } else {
-                                        ic_cdk::print(&format!("Error returned when calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}", complete_mint_cycles_error));
-                                        return;
-                                    }
-                                }
-                            }
-                            Err(call_error) => {
-                                ic_cdk::print(&format!("Call error calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}", call_error));
-                                return; 
-                            }
-                        }
-                        i += 1;
-                        const COMPLETE_MINT_CYCLES_MAX_TRIES: usize = 20;
-                        if i == COMPLETE_MINT_CYCLES_MAX_TRIES {
-                            ic_cdk::print(&format!("Called complete_mint_cycles on the CTS-CYCLES-BANK {COMPLETE_MINT_CYCLES_MAX_TRIES} times, got errors."));
-                            return; 
-                        }
-                    }
-                } else {
-                    ic_cdk::print(&format!("Error returned when calling mint_cycles on the CTS-CYCLES-BANK: {:?}", mint_cycles_error));
-                    return;    
-                }
-            }
-        }
-        Err(call_error) => {
-            ic_cdk::print(&format!("Call error calling mint_cycles on the CTS-CYCLES-BANK: {:?}", call_error));
+    // get fueler's bank cycles-balance so we know how much we have on the count. this can come from the shareholder-payouts canister when it collects cycles from the tc-fees.
+    let mut fueler_bank_balance: u128 = match cts_lib::icrc::icrc1_balance_of(cts_cycles_bank, IcrcId{owner: ic_cdk::id(), subaccount: None}).await {
+        Ok(b) => b,
+        Err(e) => {
+            ic_cdk::print(&format!("Call error when trying to view the fueler's cts-cycles-bank balance.\n{:?}", e));
             return;
         }
     };
-    
-    let mut cycles_left: u128 = mint_cycles_success.mint_cycles; // mint_cycles could be less than the sum_fuel if the icp-xdr rate on the cmc can change between the time we got it and now.
-    
+    ic_cdk::print(&format!("fueler's cts-cycles-bank cycles-balance before mint and fuel: {}", fueler_bank_balance));
+
+    if sum_fuel > fueler_bank_balance {
+
+        let icp_need: u128 = (sum_fuel - fueler_bank_balance + BANK_TRANSFER_FEE/*mint-cycles-fee*/) / (xdr_permyriad_per_icp as u128) + 1; // +1 for a possible division remainder
+
+        // call mint_cycles on the cts-cycles-bank. ICP should be in the subaccount from sns-transfer-treasury-funds proposals and the icp-tc fees-collection shareholder treasury transfers.
+        let mint_cycles_success: MintCyclesSuccess = match ic_cdk::call::<(MintCyclesQuest,), (MintCyclesResult,)>(
+            cts_cycles_bank,
+            "mint_cycles",
+            (MintCyclesQuest{
+                burn_icp: icp_need,
+                burn_icp_transfer_fee: ICP_LEDGER_TRANSFER_DEFAULT_FEE.e8s() as u128,
+                to: IcrcId{owner: ic_cdk::api::id(), subaccount: None},
+                fee: None,
+                memo: None,
+                created_at_time: None
+            },)
+        ).await {
+            Ok((mint_cycles_result,)) => match mint_cycles_result {
+                Ok(mint_cycles_success) => {
+                    mint_cycles_success
+                }
+                Err(mint_cycles_error) => {
+                    if let MintCyclesError::MidCallError(mid_call_error) = mint_cycles_error {
+                        ic_cdk::print(&format!("MidCallError returned when calling mint_cycles on the CTS-CYCLES-BANK: {:?}.", mid_call_error));
+                        let mut i: usize = 0;
+                        loop {
+                            ic_cdk::print(&format!("Performing complete_mint_cycles call number {}", i));
+                            match ic_cdk::call::<(Option<Principal>,), (CompleteMintCyclesResult,)>(
+                                cts_cycles_bank,
+                                "complete_mint_cycles",
+                                (None,)
+                            ).await {
+                                Ok((complete_mint_cycles_result,)) => match complete_mint_cycles_result {
+                                    Ok(mint_cycles_success) => {
+                                        break mint_cycles_success;
+                                    }
+                                    Err(complete_mint_cycles_error) => {
+                                        if let CompleteMintCyclesError::MintCyclesError(MintCyclesError::MidCallError(mid_call_error)) = complete_mint_cycles_error {
+                                            ic_cdk::print(&format!("MidCallError returned when calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}.", mid_call_error));
+                                        } else {
+                                            ic_cdk::print(&format!("Error returned when calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}", complete_mint_cycles_error));
+                                            return;
+                                        }
+                                    }
+                                }
+                                Err(call_error) => {
+                                    ic_cdk::print(&format!("Call error calling complete_mint_cycles on the CTS-CYCLES-BANK: {:?}", call_error));
+                                    return;
+                                }
+                            }
+                            i += 1;
+                            const COMPLETE_MINT_CYCLES_MAX_TRIES: usize = 20;
+                            if i == COMPLETE_MINT_CYCLES_MAX_TRIES {
+                                ic_cdk::print(&format!("Called complete_mint_cycles on the CTS-CYCLES-BANK {COMPLETE_MINT_CYCLES_MAX_TRIES} times, got errors."));
+                                return;
+                            }
+                        }
+                    } else {
+                        ic_cdk::print(&format!("Error returned when calling mint_cycles on the CTS-CYCLES-BANK: {:?}", mint_cycles_error));
+                        return;
+                    }
+                }
+            }
+            Err(call_error) => {
+                ic_cdk::print(&format!("Call error calling mint_cycles on the CTS-CYCLES-BANK: {:?}", call_error));
+                return;
+            }
+        };
+
+        // mint_cycles could be less than the (sum_fuel - fueler_bank_balance) if the icp-xdr rate on the cmc can change between the time we got it and now.
+        fueler_bank_balance = fueler_bank_balance.saturating_add(mint_cycles_success.mint_cycles);
+    }
+
+
     for (for_canister, need_cycles) in topup_canisters.into_iter() {
         // call cycles_out on the cts-cycles-bank
-        let quest_cycles = std::cmp::min(need_cycles, cycles_left).saturating_sub(BANK_TRANSFER_FEE);
+        let quest_cycles = std::cmp::min(need_cycles+BANK_TRANSFER_FEE, fueler_bank_balance).saturating_sub(BANK_TRANSFER_FEE);
         match ic_cdk::call::<(CyclesOutQuest,), (Result<BlockId, CyclesOutError>,)>(
             cts_cycles_bank,
             "cycles_out",
             (CyclesOutQuest{
                 cycles: quest_cycles,
-                fee: Some(BANK_TRANSFER_FEE),                   // set the fee here because we need to count for the cycles_left
+                fee: Some(BANK_TRANSFER_FEE),                   // set the fee here because we need to count for the fueler_bank_balance
                 from_subaccount: None,
                 memo: None,
                 for_canister: for_canister,
@@ -274,7 +288,7 @@ async fn fuel() {
             Ok((r,)) => match r {
                 Ok(block_id) => {
                     ic_cdk::print(&format!("Topped up canister {} with {} cycles at block-height {}", for_canister, quest_cycles, block_id));
-                    cycles_left -= quest_cycles + BANK_TRANSFER_FEE;
+                    fueler_bank_balance -= quest_cycles + BANK_TRANSFER_FEE;
                 }
                 Err(cycles_out_error) => {
                     ic_cdk::print(&format!("Error returned when calling cycles_out on the CTS-CYCLES-BANK to top-up canister {} with {} cycles. \n{:?}", for_canister, quest_cycles, cycles_out_error));       

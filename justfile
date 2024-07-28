@@ -92,3 +92,5 @@ show-build-hashes:
         sha256sum build/$file
     done    
     
+live-local: (build "dev")
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test make_live_go -- --include-ignored --nocapture

@@ -8,7 +8,7 @@ use cts_lib::{
         cm::cm_main::*,
         Cycles,
         CanisterCode,
-        fueler::{FuelerData, FUEL_TOPUP_TRIGGER_THRESHOLD},
+        fueler::{self, FuelerData},
         
     },
 };
@@ -35,7 +35,7 @@ pub const SNS_LEDGER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 2
 pub const SNS_LEDGER_INDEX: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 222, 1, 1]);
 pub const SNS_SWAP: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 221, 1, 1]);
 
-pub const START_WITH_FUEL: u128 = FUEL_TOPUP_TRIGGER_THRESHOLD - 5*TRILLION;
+pub const START_WITH_FUEL: u128 = fueler::FUEL_TOPUP_TRIGGER_THRESHOLD - 1;
 
 use std::path::PathBuf;
 
@@ -157,21 +157,22 @@ impl WasmResultUnwrap for WasmResult {
 }
 
 
-pub fn set_up() -> PocketIc {
-    let pic = PocketIcBuilder::new()
-        .with_nns_subnet()
-        .with_fiduciary_subnet()
-        .with_sns_subnet()
-        .build();
-    //let _nns_subnet = pic.topology().get_nns().unwrap();
-    //let _fid_subnet = pic.topology().get_fiduciary().unwrap();
-    
-    // ICP-LEDGER
-    let icp_minter = ICP_MINTER;
-    let icp_ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
-    let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
-    pic.add_cycles(icp_ledger, 1_000 * TRILLION);    
-    
+pub fn range_radius(n: u128, radius: u128) -> std::ops::Range<u128> {
+    (n - radius)..(n + radius)
+}
+
+
+// private
+fn create_ledger_(pic: &PocketIc, symbol: &str, name: &str, opt_canister_id: Option<Principal>) -> Principal {
+
+    let canister = if let Some(canister_id) = opt_canister_id {
+        canister_id
+    } else {
+        pic.create_canister()
+    };
+
+    pic.add_cycles(canister, 1_000 * TRILLION);
+
     #[derive(CandidType, Deserialize)]
     enum IcpLedgerPayload {
         Init(IcpLedgerInitArgs)
@@ -191,28 +192,54 @@ pub fn set_up() -> PocketIc {
         token_name: Option<String>,
         feature_flags: Option<IcpLedgerFeatureFlags>,
     }
+    let ledger_wasm = std::fs::read(workspace_dir().join("pic_tests/pre-built-wasms/ledger-canister-o-98eb213581b239c3829eee7076bea74acad9937b.wasm.gz")).unwrap();
     pic.install_canister(
-        icp_ledger, 
-        icp_ledger_wasm, 
+        canister,
+        ledger_wasm,
         candid::encode_one(
             IcpLedgerPayload::Init(
                 IcpLedgerInitArgs{
-        			minting_account: ic_ledger_types::AccountIdentifier::new(&icp_minter, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex(),
-        			icrc1_minting_account: Some(Account{owner: icp_minter, subaccount: None}),
-        			initial_values: HashMap::new(),
-        			send_whitelist: HashSet::new(),
-        			transfer_fee: Some(ic_ledger_types::Tokens::from_e8s(ICP_LEDGER_TRANSFER_FEE as u64)),
-        			token_symbol: Some("ICP".to_string()),
-    				token_name: Some("Internet-Computer".to_string()),
-    				feature_flags: Some(IcpLedgerFeatureFlags{ icrc2: true }),
-                }   
+                    minting_account: ic_ledger_types::AccountIdentifier::new(&ICP_MINTER, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex(),
+                    icrc1_minting_account: Some(Account{owner: ICP_MINTER, subaccount: None}),
+                    initial_values: HashMap::from([
+                        (
+                            "5b315d2f6702cb3a27d826161797d7b2c2e131cd312aece51d4d5574d1247087".to_string(),
+                            ic_ledger_types::Tokens::from_e8s(10_000_000_000_000_000)
+                        ),
+                    ]),
+                    send_whitelist: HashSet::new(),
+                    transfer_fee: Some(ic_ledger_types::Tokens::from_e8s(ICP_LEDGER_TRANSFER_FEE as u64)),
+                    token_symbol: Some(symbol.to_string()),
+                    token_name: Some(name.to_string()),
+                    feature_flags: Some(IcpLedgerFeatureFlags{ icrc2: true }),
+                }
             )
-        ).unwrap(), 
+        ).unwrap(),
         None
     );
+    canister
+}
+
+
+
+pub fn set_up() -> PocketIc {
     
+    // set pic binary location if not set
+    const POCKET_IC_BIN_VARNAME: &'static str = "POCKET_IC_BIN";
+    if std::env::var(POCKET_IC_BIN_VARNAME).is_err() {
+        println!("setting {} environment variable", POCKET_IC_BIN_VARNAME);
+        std::env::set_var(POCKET_IC_BIN_VARNAME, workspace_dir().join("pic_tests/pocket-ic"));
+    }
     
-    
+    let pic = PocketIcBuilder::new()
+        .with_nns_subnet()
+        .with_fiduciary_subnet()
+        .with_sns_subnet()
+        .build();
+
+    // ICP-LEDGER
+    let icp_ledger = pic.create_canister_with_id(None, None, ICP_LEDGER).unwrap();
+    create_ledger_(&pic, "ICP", "Internet-Computer", Some(icp_ledger));
     
     // CMC
     let nns_governance = NNS_GOVERNANCE;
@@ -234,7 +261,7 @@ pub fn set_up() -> PocketIc {
                 Ia{
                     ledger_canister_id: Some(icp_ledger),
                     governance_canister_id: Some(nns_governance),
-                    minting_account_id: Some(ic_ledger_types::AccountIdentifier::new(&icp_minter, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex()),   
+                    minting_account_id: Some(ic_ledger_types::AccountIdentifier::new(&ICP_MINTER, &ic_ledger_types::DEFAULT_SUBACCOUNT).to_hex()),
                     last_purged_notification: Some(0),
                 }
             }
@@ -370,6 +397,11 @@ pub fn set_up() -> PocketIc {
         Some(SNS_ROOT), 
     );
     
+    pic
+}
+
+// icp tc
+pub fn set_up_tc(pic: &PocketIc) -> Principal {
     for (wasm_path, market_canister_type) in [
         ("cm_tc.wasm", MarketCanisterType::TradeContract),
         ("cm_positions_storage.wasm", MarketCanisterType::PositionsStorage),
@@ -378,36 +410,60 @@ pub fn set_up() -> PocketIc {
         let cc = CanisterCode::new(std::fs::read(wasms_dir().join(wasm_path)).unwrap());
         call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, SNS_GOVERNANCE, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
     }
-    
-    // FUELER
-    pic.create_canister_with_id(Some(SNS_ROOT), None, FUELER).unwrap();
-    pic.add_cycles(FUELER, START_WITH_FUEL);
-    pic.install_canister(
-        FUELER, 
-        std::fs::read(wasms_dir().join("fueler.wasm")).unwrap(), 
-        candid::encode_one(
-            FuelerData{
-                sns_root: SNS_ROOT,
-                cm_main: CM_MAIN,
-                cts_cycles_bank: BANK,
-            }
-        ).unwrap(), 
-        Some(SNS_ROOT)
-    );
-    
-    
-    pic
-}
 
-pub fn set_up_tc(pic: &PocketIc) -> Principal {
-    call_candid_as::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
+    pic.add_cycles(CM_MAIN, NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES);
+
+    let tc = call_candid_as::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
         &pic, CM_MAIN, RawEffectivePrincipal::None, SNS_GOVERNANCE, "controller_create_trade_contract", (
             ControllerCreateIcrc1TokenTradeContractQuest {
                 icrc1_ledger_id: ICP_LEDGER,
                 icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,
             },
         )
-    ).unwrap().0.unwrap().trade_contract_canister_id
+    ).unwrap().0.unwrap().trade_contract_canister_id;
+    println!("tc: {}", tc);
+    tc
+}
+
+pub fn set_up_new_ledger_and_tc(pic: &PocketIc) -> (Principal, Principal)/*(ledger, tc)*/ {
+
+    let tc_i: usize = call_candid::<(), (Vec<(TradeContractIdAndLedgerId, TradeContractData)>,)>(
+        &pic, CM_MAIN, RawEffectivePrincipal::None, "view_icrc1_token_trade_contracts", ()
+    ).unwrap().0.len();
+
+    let ledger = create_ledger_(pic, &format!("TKN{}", tc_i), &format!("Token{}", tc_i), None);
+
+    pic.add_cycles(CM_MAIN, NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES);
+
+    let tc = call_candid_as_::<_, (Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError>,)>(
+        &pic, CM_MAIN, SNS_GOVERNANCE, "controller_create_trade_contract", (
+            ControllerCreateIcrc1TokenTradeContractQuest {
+                icrc1_ledger_id: ledger,
+                icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,
+            },
+        )
+    ).unwrap().0.unwrap().trade_contract_canister_id;
+    println!("ledger: {}, tc: {}", ledger, tc);
+    (ledger, tc)
+}
+
+
+pub fn set_up_fueler(pic: &PocketIc) -> Principal {
+    pic.create_canister_with_id(Some(SNS_ROOT), None, FUELER).unwrap();
+    pic.add_cycles(FUELER, START_WITH_FUEL);
+    pic.install_canister(
+        FUELER,
+        std::fs::read(wasms_dir().join("fueler.wasm")).unwrap(),
+        candid::encode_one(
+            FuelerData{
+                sns_root: SNS_ROOT,
+                cm_main: CM_MAIN,
+                cts_cycles_bank: BANK,
+            }
+        ).unwrap(),
+        Some(SNS_ROOT)
+    );
+    FUELER
 }
 
 

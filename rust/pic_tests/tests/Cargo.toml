@@ -21,6 +21,10 @@ path = "test_cm_tc_100.rs"
 name = "test_fueler"
 path = "test_fueler.rs"
 
+[[test]]
+name = "make_live"
+path = "make_live.rs"
+
 
 [dev-dependencies]
 pic_tools = { path = "../tools" }
