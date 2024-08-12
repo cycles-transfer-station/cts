@@ -9,7 +9,7 @@ RUN apt -yq update && \
 
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
-ENV RUST_VERSION=1.80.0
+ENV RUST_VERSION=1.80.1
 ENV PATH=${CARGO_HOME}/bin:${PATH}
 RUN curl --fail https://sh.rustup.rs -sSf \
         | sh -s -- -y --default-toolchain ${RUST_VERSION}-x86_64-unknown-linux-gnu --no-modify-path && \
