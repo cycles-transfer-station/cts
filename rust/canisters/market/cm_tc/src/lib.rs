@@ -1,8 +1,6 @@
-// positions can be cancel with a 30-days of a lack of a match.
-
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashSet, VecDeque, BTreeMap},
+    collections::{VecDeque, BTreeMap},
     time::Duration,
     thread::LocalKey,
     ops::Bound
@@ -58,7 +56,6 @@ use ic_cdk::{
         trap,
         caller,
         call::{
-            call,
             call_raw128,
             arg_data,
             reply,
@@ -77,31 +74,25 @@ use candid::{
     CandidType,
     Deserialize,
 };
-use serde_bytes::{ByteBuf};
 
 // -------
 
-mod types;
-use types::*;
-
 mod payouts;
-use payouts::do_payouts;
-
 mod flush_logs;
-
 mod candle_counter;
-
-mod trade_quest;
-use trade_quest::TradeQuest;
-
 mod ledger_transfer;
-use ledger_transfer::*;
-
 mod trade_fee;
-use trade_fee::*;
-
 mod transfer_memo;
-use transfer_memo::*;
+mod traits;
+
+use payouts::do_payouts;
+use ledger_transfer::LedgerTransferReturnType;
+use traits::{
+    TradeQuest,
+    CurrentPositionTrait,
+    VoidPositionTrait,
+    LocalKeyRefCellLogStorageDataTrait,
+};
 
 // ---------------
 

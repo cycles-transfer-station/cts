@@ -1,51 +1,65 @@
-use std::thread::LocalKey;
-use std::cell::RefCell;
-use crate::*;
-use cts_lib::icrc::IcrcSubaccount;
-pub use cts_lib::types::cm::tc::storage_logs::{position_log::PositionLog, trade_log::{TradeLog, PayoutData}};
+use cts_lib::{
+    icrc::{
+        Tokens,
+        IcrcSubaccount,
+    },
+    tools::{
+        time_nanos,
+        tokens_transform_cycles,
+        cycles_transform_tokens,
+    },
+    types::{
+        Cycles,
+        cm::tc::{
+            PositionId,
+            CyclesPerToken,
+            PositionKind,
+            CyclesPosition,
+            TokenPosition,
+            VoidCyclesPosition,
+            VoidTokenPosition,
+            VPUpdateStoragePositionData,
+            storage_logs::{
+                position_log::{
+                    PositionLog,
+                    PositionTerminationCause,
+                    PositionTerminationData,
+                }
+            }
+        }
+    },
+};
+use candid::Principal;
+use super::VoidPositionTrait;
+use crate::{
+    trade_fee::calculate_trade_fee
+};
 
-// -------
 
-pub type VoidCyclesPositionId = PositionId;
-pub type VoidTokenPositionId = PositionId;
-
-// -------
-
-pub trait LocalKeyRefCellLogStorageDataTrait {
-    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>>;    
-}
-
-impl LocalKeyRefCellLogStorageDataTrait for PositionLog {
-    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &POSITIONS_STORAGE_DATA;
-}
-
-
-
-// ------------------
 
 pub trait CurrentPositionTrait {
     fn id(&self) -> PositionId;
     fn positor(&self) -> Principal;
     fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken;
-    fn timestamp_nanos(&self) -> u128;
-    
+    //fn timestamp_nanos(&self) -> u128;
+
     type VoidPositionType: VoidPositionTrait;
     fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType;
-    
+
     fn current_position_quantity(&self) -> u128;
-    
+
     fn current_position_tokens(&self, rate: CyclesPerToken) -> Tokens;
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles;
-    
-    // if the position is compatible with the match_rate, 
+
+    // if the position is compatible with the match_rate,
     // returns the middle rate between this position's available rate and between the match_rate.
     fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken>;
-    
+
     const POSITION_KIND: PositionKind;
-            
+
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog;
 
-    fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
+    //fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
     fn payout_to_subaccount(&self) -> Option<IcrcSubaccount>;
 }
 
@@ -53,16 +67,16 @@ pub trait CurrentPositionTrait {
 impl CurrentPositionTrait for CyclesPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
-    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
+    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken {
         self.quest.cycles_per_token_rate
     }
-    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
-    
+    //fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+
     type VoidPositionType = VoidCyclesPosition;
     fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType {
         VoidCyclesPosition{
             position_id: self.id,
-            positor: self.positor,                                
+            positor: self.positor,
             cycles: self.current_position_cycles,
             cycles_payout_lock: false,
             cycles_payout_data: None,
@@ -82,17 +96,17 @@ impl CurrentPositionTrait for CyclesPosition {
         if rate == 0 { return 0; }
         self.current_position_cycles / rate
     }
-    
+
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
         self.fill_quantity_tokens = self.fill_quantity_tokens.saturating_add(sub_tokens);
         let sub_cycles: Cycles = tokens_transform_cycles(sub_tokens, rate);
-        let fee_cycles: Cycles = calculate_trade_fee(self.quest.cycles - self.current_position_cycles, sub_cycles); // calculate trade fee before subtracting from the current_cycles_position in the next line.          
+        let fee_cycles: Cycles = calculate_trade_fee(self.quest.cycles - self.current_position_cycles, sub_cycles); // calculate trade fee before subtracting from the current_cycles_position in the next line.
         self.current_position_cycles = self.current_position_cycles.saturating_sub(sub_cycles);
-        self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);        
+        self.purchases_rates_times_cycles_quantities_sum = self.purchases_rates_times_cycles_quantities_sum.saturating_add(rate * sub_cycles);
         self.tokens_payouts_fees_sum = self.tokens_payouts_fees_sum.saturating_add(cycles_transform_tokens(fee_cycles, rate));
         fee_cycles
     }
-    
+
     fn is_this_position_better_than_or_equal_to_the_match_rate(&self, match_rate: CyclesPerToken) -> Option<CyclesPerToken> {
         let current_position_available_cycles_per_token_rate = self.current_position_available_cycles_per_token_rate();
         (current_position_available_cycles_per_token_rate >= match_rate).then(|| {
@@ -100,9 +114,9 @@ impl CurrentPositionTrait for CyclesPosition {
             current_position_available_cycles_per_token_rate - difference / 2
         })
     }
-    
+
     const POSITION_KIND: PositionKind = PositionKind::Cycles;
-    
+
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
         let cycles_sold: Cycles = self.quest.cycles - self.current_position_cycles;
         let fill_average_rate = {
@@ -132,10 +146,11 @@ impl CurrentPositionTrait for CyclesPosition {
             void_position_payout_ledger_transfer_fee: 0,
         }
     }
-    
+    /*
     fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
         self.quest.return_cycles_to_subaccount.clone()
     }
+    */
     fn payout_to_subaccount(&self) -> Option<IcrcSubaccount> {
         self.quest.payout_tokens_to_subaccount.clone()
     }
@@ -145,11 +160,11 @@ impl CurrentPositionTrait for CyclesPosition {
 impl CurrentPositionTrait for TokenPosition {
     fn id(&self) -> PositionId { self.id }
     fn positor(&self) -> Principal { self.positor }
-    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken { 
+    fn current_position_available_cycles_per_token_rate(&self) -> CyclesPerToken {
         self.quest.cycles_per_token_rate
     }
-    fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
-    
+    //fn timestamp_nanos(&self) -> u128 { self.timestamp_nanos }
+
     type VoidPositionType = VoidTokenPosition;
     fn into_void_position_type(self, position_termination_cause: PositionTerminationCause) -> Self::VoidPositionType {
         VoidTokenPosition{
@@ -162,7 +177,7 @@ impl CurrentPositionTrait for TokenPosition {
             update_storage_position_data: VPUpdateStoragePositionData{
                 status: false,
                 lock: false,
-                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))   
+                update_storage_position_log: self.as_stable_memory_position_log(Some(position_termination_cause))
             },
             return_tokens_to_subaccount: self.quest.return_tokens_to_subaccount,
         }
@@ -175,7 +190,7 @@ impl CurrentPositionTrait for TokenPosition {
     }
     fn subtract_tokens(&mut self, sub_tokens: Tokens, rate: CyclesPerToken) -> /*payout_fee_cycles*/Cycles {
         self.current_position_tokens = self.current_position_tokens.saturating_sub(sub_tokens);
-        let fee_cycles: Cycles = calculate_trade_fee(self.purchases_rates_times_token_quantities_sum, rate * sub_tokens); // make sure we call this line before we add to the purchases_rates_times_token_quantities_sum, bc we need the total position volume in cycles before this purchase for the calculate_trade_fee fn. 
+        let fee_cycles: Cycles = calculate_trade_fee(self.purchases_rates_times_token_quantities_sum, rate * sub_tokens); // make sure we call this line before we add to the purchases_rates_times_token_quantities_sum, bc we need the total position volume in cycles before this purchase for the calculate_trade_fee fn.
         self.purchases_rates_times_token_quantities_sum = self.purchases_rates_times_token_quantities_sum.saturating_add(rate * sub_tokens);
         self.cycles_payouts_fees_sum = self.cycles_payouts_fees_sum.saturating_add(fee_cycles);
         fee_cycles
@@ -187,9 +202,9 @@ impl CurrentPositionTrait for TokenPosition {
             current_position_available_cycles_per_token_rate + difference / 2
         })
     }
-    
+
     const POSITION_KIND: PositionKind = PositionKind::Token;
-    
+
     fn as_stable_memory_position_log(&self, position_termination_cause: Option<PositionTerminationCause>) -> PositionLog {
         let tokens_sold: Cycles = self.quest.tokens - self.current_position_tokens;
         let fill_average_rate = {
@@ -215,105 +230,16 @@ impl CurrentPositionTrait for TokenPosition {
                     cause: c
                 }
             }),
-            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.   
-            void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-position-payout is done.                    
+            void_position_payout_dust_collection: false, // this field is update when void-position-payout is done.
+            void_position_payout_ledger_transfer_fee: 0, // this field is update when a void-position-payout is done.
         }
     }
-    
+    /*
     fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
         self.quest.return_tokens_to_subaccount.clone()
     }
+    */
     fn payout_to_subaccount(&self) -> Option<IcrcSubaccount> {
         self.quest.payout_cycles_to_subaccount.clone()
-    }
-}
-
-// -----------------
-
-impl LocalKeyRefCellLogStorageDataTrait for TradeLog {
-    const LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = &TRADES_STORAGE_DATA;
-}
-
-// --------
-
-pub trait VoidPositionTrait: Clone {
-    fn position_id(&self) -> PositionId;
-    fn positor(&self) -> Principal;    
-    fn quantity(&self) -> u128;
-    fn payout_data(&self) -> &Option<PayoutData>;
-    fn payout_data_mut(&mut self) -> &mut Option<PayoutData>;
-    fn payout_lock(&mut self) -> &mut bool;
-    fn can_remove(&self) -> bool;
-    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData;
-    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData;
-    fn return_to_subaccount(&self) -> Option<IcrcSubaccount>;
-}
-
-
-impl VoidPositionTrait for VoidCyclesPosition {
-    fn position_id(&self) -> PositionId {
-        self.position_id
-    }    
-    fn positor(&self) -> Principal {
-        self.positor
-    }
-    fn quantity(&self) -> u128 {
-        self.cycles
-    }
-    fn payout_data(&self) -> &Option<PayoutData> {
-        &self.cycles_payout_data
-    }
-    fn payout_data_mut(&mut self) -> &mut Option<PayoutData> {
-        &mut self.cycles_payout_data
-    }
-    fn payout_lock(&mut self) -> &mut bool {
-        &mut self.cycles_payout_lock
-    }
-    fn can_remove(&self) -> bool {
-        self.cycles_payout_data.is_some() && self.update_storage_position_data.status == true
-    }
-    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData {
-        &self.update_storage_position_data
-    }
-    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
-        &mut self.update_storage_position_data
-    }
-    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
-        self.return_cycles_to_subaccount.clone()
-    }
-}
-
-// --------
-
-impl VoidPositionTrait for VoidTokenPosition {
-    fn position_id(&self) -> PositionId {
-        self.position_id
-    }    
-    fn positor(&self) -> Principal {
-        self.positor
-    }    
-    fn quantity(&self) -> u128 {
-        self.tokens
-    }
-    fn payout_data(&self) -> &Option<PayoutData> {
-        &self.token_payout_data
-    }
-    fn payout_data_mut(&mut self) -> &mut Option<PayoutData> {
-        &mut self.token_payout_data
-    }
-    fn payout_lock(&mut self) -> &mut bool {
-        &mut self.token_payout_lock
-    }
-    fn can_remove(&self) -> bool {
-        self.token_payout_data.is_some() && self.update_storage_position_data.status == true
-    }
-    fn update_storage_position_data(&self) -> &VPUpdateStoragePositionData {
-        &self.update_storage_position_data
-    }
-    fn update_storage_position_data_mut(&mut self) -> &mut VPUpdateStoragePositionData {
-        &mut self.update_storage_position_data
-    }
-    fn return_to_subaccount(&self) -> Option<IcrcSubaccount> {
-        self.return_tokens_to_subaccount.clone()
     }
 }

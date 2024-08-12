@@ -20,6 +20,11 @@ pub type PositionId = u128;
 pub type PurchaseId = u128;
 pub type CyclesPerToken = Cycles;
 
+pub type VoidCyclesPositionId = PositionId;
+pub type VoidTokenPositionId = PositionId;
+
+
+
 #[derive(Copy, Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum PositionKind {
     Cycles,

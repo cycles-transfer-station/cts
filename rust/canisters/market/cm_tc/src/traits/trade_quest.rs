@@ -1,6 +1,44 @@
-use super::*;
 use core::future::Future;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use cts_lib::{
+    icrc::{
+        Icrc1TransferQuest,
+    },
+    types::{
+        cm::tc::{
+            PositionId,
+            CMData,
+            CyclesPerToken,
+            TradeCyclesQuest,
+            TradeTokensQuest,
+            CyclesPosition,
+            TokenPosition,
+
+        }
+    },
+    tools::{
+        cycles_transform_tokens,
+        tokens_transform_cycles,
+        time_nanos,
+    }
+};
+use super::CurrentPositionTrait;
+use crate::{
+    ledger_transfer::{
+        LedgerTransferReturnType,
+        cycles_transfer,
+        token_transfer,
+    },
+    MAX_CYCLES_POSITIONS,
+    MAX_TOKEN_POSITIONS,
+    MAX_VOID_CYCLES_POSITIONS,
+    MAX_VOID_TOKEN_POSITIONS,
+    minimum_cycles_match,
+    minimum_tokens_match,
+};
+use candid::Principal;
+
+
 
 pub trait TradeQuest {
     
@@ -53,7 +91,7 @@ impl TradeQuest for TradeCyclesQuest {
     fn matcher_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, Self::MatcherPositionType> { &mut cm_data.cycles_positions }    
     fn matcher_void_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, <Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_cycles_positions }
     fn match_trades(cm_data: &mut CMData, matcher_position_id: PositionId) {
-        match_trades(
+        crate::match_trades(
             matcher_position_id,
             &mut cm_data.cycles_positions,
             &mut cm_data.token_positions,
@@ -95,7 +133,7 @@ impl TradeQuest for TradeTokensQuest {
     fn matcher_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, Self::MatcherPositionType> { &mut cm_data.token_positions }
     fn matcher_void_positions(cm_data: &mut CMData) -> &mut BTreeMap<PositionId, <Self::MatcherPositionType as CurrentPositionTrait>::VoidPositionType> { &mut cm_data.void_token_positions }     
     fn match_trades(cm_data: &mut CMData, matcher_position_id: PositionId) {
-        match_trades(
+        crate::match_trades(
             matcher_position_id,
             &mut cm_data.token_positions,
             &mut cm_data.cycles_positions,

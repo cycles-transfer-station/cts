@@ -1,4 +1,30 @@
-use super::*;
+use std::{
+    collections::BTreeMap,
+    future::Future,
+};
+use crate::{
+    traits::VoidPositionTrait,
+    transfer_memo::create_void_token_position_transfer_memo,
+    DO_VOID_POSITIONS_PAYOUTS_CHUNK_SIZE,
+    DO_VOID_POSITIONS_UPDATE_STORAGE_POSITION_CHUNK_SIZE,
+};
+use super::{
+    update_storage_positions::{
+        do_update_storage_position,
+        DoUpdateStoragePositionResult,
+    },
+    do_payout::DoPayoutQuest,
+};
+use cts_lib::{
+    icrc::IcrcId,
+    types::cm::tc::{
+        PositionId,
+        storage_logs::{
+            StorageLogTrait,
+            trade_log::PayoutData,
+        }
+    }
+};
 
 
 pub fn void_positions_payouts<VoidPosition: VoidPositionTrait, DoPayoutFuture: Future<Output=Option<PayoutData>>, F: Fn(DoPayoutQuest)->DoPayoutFuture>(
