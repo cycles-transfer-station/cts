@@ -133,7 +133,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse{
                     .unwrap_or(storage_data.logs_memory_i()) 
             };
             
-            for i in 0..std::cmp::min(logs_storage_till_start_before_id_len_i / storage_data.log_size() as u64, MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA as u64) {
+            for i in (0..std::cmp::min(logs_storage_till_start_before_id_len_i / storage_data.log_size() as u64, MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA as u64)).rev() {
                 
                 let log_finish_i: u64 = logs_storage_till_start_before_id_len_i - i * storage_data.log_size() as u64;
                 
