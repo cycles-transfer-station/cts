@@ -69,3 +69,10 @@ pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 
 
 
 pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
+
+pub mod livetest {
+    use candid::Principal;
+    pub const LIVETEST_CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 1, 144, 8, 138, 1, 1]); // x3ncx-liaaa-aaaam-qbcfa-cai
+    pub const LIVETEST_CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 1, 144, 8, 139, 1, 1]); // x4med-gqaaa-aaaam-qbcfq-cai
+    pub const LIVETEST_CONTROLLER: Principal = Principal::from_slice(&[107, 243, 181, 41, 148, 42, 142, 159, 184, 86, 182, 232, 230, 52, 194, 29, 106, 241, 24, 87, 145, 127, 235, 49, 150, 90, 97, 189, 2]); // 35bfm-o3l6o-2stfb-kr2p3-qvvw5-dtdjq-q5nly-rqv4r-p7vtd-fs2mg-6qe // for the livetest canisters that at this time don't have an sns set up'
+}

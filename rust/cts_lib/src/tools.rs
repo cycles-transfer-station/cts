@@ -279,7 +279,15 @@ pub fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
 
 
 pub fn caller_is_sns_governance_gaurd() {
-    if ic_cdk::caller() != SNS_GOVERNANCE {
+    let must_be_principal: Principal = {
+        use crate::consts::livetest::*;
+        if [LIVETEST_CTS, LIVETEST_CM_MAIN].contains(&ic_cdk::api::id()) {
+            LIVETEST_CONTROLLER
+        } else {
+            SNS_GOVERNANCE
+        }
+    };
+    if ic_cdk::caller() != must_be_principal {
         trap("Caller must be the CTS SNS governance canister.");
     }
 }
