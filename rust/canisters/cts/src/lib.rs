@@ -21,6 +21,7 @@ use ic_cdk::{
         call::{
             arg_data,
             reply,
+            ArgDecoderConfig,
         },
     },
     update, 
@@ -126,7 +127,7 @@ pub struct CTSMetrics {
 pub fn view_metrics() -> CTSMetrics {
     with(&CTS_DATA, |_cts_data| {
         CTSMetrics {
-            stable_size: ic_cdk::api::stable::stable64_size(),
+            stable_size: ic_cdk::api::stable::stable_size(),
             cycles_balance: ic_cdk::api::canister_balance128(),
         }
     })
@@ -341,7 +342,7 @@ pub fn controller_clear_file(filename: String) {
 #[export_name = "canister_query http_request"]
 pub fn http_request() {
     
-    let (quest,): (HttpRequest,) = arg_data::<(HttpRequest,)>(); 
+    let (quest,): (HttpRequest,) = arg_data::<(HttpRequest,)>(ArgDecoderConfig::default());
     
     let file_name: &str = quest.url.split("?").next().unwrap();
     
@@ -390,7 +391,7 @@ pub fn http_request() {
 
 #[export_name = "canister_query http_request_stream_callback"]
 fn http_request_stream_callback() {
-    let (token,): (StreamCallbackTokenBackwards,) = arg_data::<(StreamCallbackTokenBackwards,)>(); 
+    let (token,): (StreamCallbackTokenBackwards,) = arg_data::<(StreamCallbackTokenBackwards,)>(ArgDecoderConfig::default());
     
     with(&CTS_DATA, |cts_data| {
         match cts_data.frontcode_files.get(&token.key) {
@@ -412,10 +413,3 @@ fn http_request_stream_callback() {
 
 
 ic_cdk::export_candid!();
-
-
-
-
-
-
-

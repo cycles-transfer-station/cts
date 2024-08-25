@@ -60,6 +60,7 @@ use ic_cdk::{
             arg_data,
             reply,
             reply_raw,
+            ArgDecoderConfig,
         },
     },
     update,
@@ -747,7 +748,7 @@ pub fn view_latest_trades(q: ViewLatestTradesQuest) -> ViewLatestTradesSponse {
 // frontend method with the custom serialization.
 #[export_name = "canister_query view_user_current_positions"]
 pub extern "C" fn view_user_current_positions() {
-    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data(ArgDecoderConfig::default());
     let v: Vec<PositionLog> = _view_current_positions(q);
     let logs_b: Vec<Vec<u8>> = {
         v.into_iter()
@@ -797,7 +798,7 @@ fn _view_current_positions(q: ViewStorageLogsQuest<<PositionLog as StorageLogTra
 // extra byte for if the void-position-payout is complete
 #[export_name = "canister_query view_void_positions_pending"]
 pub extern "C" fn view_void_positions_pending() {
-    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data(ArgDecoderConfig::default());
     
     fn d<VoidPositionType: VoidPositionTrait>(q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>, void_positions: &BTreeMap<PositionId, VoidPositionType>) -> Box<dyn Iterator<Item=(&PositionLog, bool/*is_payout_complete*/)> + '_> {
         let mut iter: Box<dyn DoubleEndedIterator<Item=(&PositionLog, bool)>> 
@@ -846,7 +847,7 @@ pub extern "C" fn view_void_positions_pending() {
 // these trades are pending (a cycles and/or token payout) and/or waiting for being put into the storage-logs.  
 #[export_name = "canister_query view_position_pending_trades"]
 pub extern "C" fn view_position_pending_trades() {
-    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data(ArgDecoderConfig::default());
 
     with_mut(&CM_DATA, |cm_data| {
         cm_data.trade_logs.make_contiguous();
@@ -886,7 +887,7 @@ pub extern "C" fn view_position_pending_trades() {
 // The position-storage-logs in the buffer on this canister, does not return current positions data or pending-void-positions.
 #[export_name = "canister_query view_user_positions_logs"]
 pub extern "C" fn view_user_positions_logs() {
-    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let (q,): (ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>,) = arg_data(ArgDecoderConfig::default());
  
     let mut v: Vec<u8> = Vec::new();
     with(&PositionLog::LOG_STORAGE_DATA, |log_storage_data| {
@@ -902,7 +903,7 @@ pub extern "C" fn view_user_positions_logs() {
 // The trades-storage-logs in the buffer on this canister. the payout-complete logs, does not return trade-logs pending payouts.
 #[export_name = "canister_query view_position_purchases_logs"]
 pub extern "C" fn view_position_purchases_logs() {
-    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data();
+    let (q,): (ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>,) = arg_data(ArgDecoderConfig::default());
 
     let mut v: Vec<u8> = Vec::new();
     with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
@@ -1013,7 +1014,7 @@ use candle_counter::*;
 
 #[export_name = "canister_query view_candles"]
 pub extern "C" fn view_candles() {
-    let (q,): (ViewCandlesQuest,) = arg_data();
+    let (q,): (ViewCandlesQuest,) = arg_data(ArgDecoderConfig::default());
     
     with(&CM_DATA, |cm_data| {
         reply::<(ViewCandlesSponse,)>((create_candles(&cm_data.candle_counter, q),));
@@ -1034,7 +1035,7 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
 
 #[export_name = "canister_query view_payouts_errors"]
 pub extern "C" fn view_payouts_errors() {
-    let (chunk_i,): (u32,) = arg_data();
+    let (chunk_i,): (u32,) = arg_data(ArgDecoderConfig::default());
     
     with(&CM_DATA, |cm_data| {
         reply::<(Option<&[CallError]>,)>((cm_data.do_payouts_errors.chunks(100).nth(chunk_i as usize),));
@@ -1133,7 +1134,7 @@ pub struct ControllerCallCanisterQuest {
 pub extern "C" fn controller_call_canister() {
     caller_is_controller_gaurd(&caller());
     
-    let (q,): (ControllerCallCanisterQuest,) = arg_data();
+    let (q,): (ControllerCallCanisterQuest,) = arg_data(ArgDecoderConfig::default());
             
     ic_cdk::spawn(async move {
         let r: Result<Vec<u8>, CallError> = call_raw128(
@@ -1154,5 +1155,3 @@ pub extern "C" fn controller_call_canister() {
 
 
 ic_cdk::export_candid!();
-
-
