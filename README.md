@@ -8,7 +8,7 @@ An overview of the CTS Architecture is located in the document in this repo name
 
 
 ### Build
-This build aims to be reproducible on Ubuntu Linux. On a reproducible build, the build output files in the `build` folder have the same hash as the canister modules running on the CTS, therefore the CTS canisters' code is verifiable.
+This build aims to be reproducible on Fedora Linux. On a reproducible build, the build output files in the `build` folder have the same hash as the canister modules running on the CTS, therefore the CTS canisters' code is verifiable.
 
 For a reproducible-build, the single requirement is the `podman` package. Run the following command:
 
