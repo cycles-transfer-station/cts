@@ -119,3 +119,39 @@ fn fueler_test_2() {
 
 }
 
+
+
+
+#[test]
+fn fueler_test_3() {
+    let pic = set_up();
+    let tc = set_up_tc(&pic);
+    set_up_fueler(&pic);
+
+    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
+    
+    for canister in canisters.into_iter() {
+        pic.add_cycles(canister, FUEL_TOPUP_TRIGGER_THRESHOLD + 2*TRILLION - (pic.cycle_balance(canister)));
+        // pre-condition
+        assert!(
+            pic.cycle_balance(canister) > FUEL_TOPUP_TRIGGER_THRESHOLD + 1*TRILLION 
+            && pic.cycle_balance(canister) <= FUEL_TOPUP_TRIGGER_THRESHOLD + 2*TRILLION
+        );
+    }
+        
+    pic.advance_time(RHYTHM);
+    for i in 0..100 {
+        if i % 5 == 0 {
+            pic.advance_time(std::time::Duration::from_secs(60 * 5));
+        }
+        pic.tick();
+    }
+
+    for canister in canisters.iter() {
+        // post-condition
+        assert!(
+            pic.cycle_balance(canister.clone()) <= FUEL_TOPUP_TRIGGER_THRESHOLD + 2*TRILLION
+        );
+    }
+    
+}
