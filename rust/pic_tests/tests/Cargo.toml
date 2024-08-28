@@ -25,6 +25,10 @@ path = "test_fueler.rs"
 name = "make_live"
 path = "make_live.rs"
 
+[[test]]
+name = "test_upgrade"
+path = "test_upgrade.rs"
+
 
 [dev-dependencies]
 pic_tools = { path = "../tools" }
@@ -37,4 +41,6 @@ icrc1-test-suite = { workspace = true }
 icrc1-test-env = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
-
+serde_bytes = { workspace = true }
+serde = { workspace = true }
+outsiders = { workspace = true }

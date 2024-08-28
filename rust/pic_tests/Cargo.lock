@@ -1081,8 +1081,11 @@ dependencies = [
  "icrc1-test-env",
  "icrc1-test-suite",
  "more-asserts",
+ "outsiders",
  "pic_tools",
  "pocket-ic",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]
@@ -1097,6 +1100,7 @@ dependencies = [
  "outsiders",
  "pocket-ic",
  "serde",
+ "serde_bytes",
 ]
 
 [[package]]

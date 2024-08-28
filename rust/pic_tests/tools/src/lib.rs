@@ -9,7 +9,7 @@ use cts_lib::{
         Cycles,
         CanisterCode,
         fueler::{self, FuelerData},
-        
+        cts::*,
     },
 };
 use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError, BlockIndex}};
@@ -53,17 +53,27 @@ fn workspace_dir() -> PathBuf {
     cargo_path.parent().unwrap().to_path_buf()
 }
 */
+
 pub fn workspace_dir() -> PathBuf {
     let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     d = d.parent().unwrap().parent().unwrap().to_path_buf();
     d
 }
 
-pub fn wasms_dir() -> PathBuf {
+pub fn git_dir() -> PathBuf {
+    workspace_dir().parent().unwrap().to_path_buf()
+}
+
+pub fn wasms_dir_dev() -> PathBuf {
     let mut d = workspace_dir();
     d.push("target/wasm32-unknown-unknown/debug");
     d
 }
+
+pub fn wasms_dir_release() -> PathBuf {
+    git_dir().join("build")
+}
+
 
 pub fn pic_get_time_nanos(pic: &PocketIc) -> u128 {
     pic.get_time().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -222,7 +232,59 @@ fn create_ledger_(pic: &PocketIc, symbol: &str, name: &str, opt_canister_id: Opt
 
 
 
+
+
+pub type CanisterModule = Vec<u8>;
+
+#[derive(Clone)]
+pub struct CanisterModules {
+    pub cts: CanisterModule,
+    pub bank: CanisterModule,
+    pub cm_main: CanisterModule,
+    pub fueler: CanisterModule,
+    pub cm_tc: CanisterModule,
+    pub cm_positions_storage: CanisterModule,
+    pub cm_trades_storage: CanisterModule,
+}
+impl CanisterModules {
+    pub fn default_dev() -> Self {
+        Self::of_the_wasms_dir(wasms_dir_dev())
+    }
+    pub fn default_release() -> Self {
+        Self::of_the_wasms_dir(wasms_dir_release())
+    }
+    fn of_the_wasms_dir(dir: PathBuf) -> Self {
+        Self{
+            cts: std::fs::read(dir.join("cts.wasm")).unwrap(),
+            bank: std::fs::read(dir.join("bank.wasm")).unwrap(),
+            cm_main: std::fs::read(dir.join("cm_main.wasm")).unwrap(),
+            fueler: std::fs::read(dir.join("fueler.wasm")).unwrap(),
+            cm_tc: std::fs::read(dir.join("cm_tc.wasm")).unwrap(),
+            cm_positions_storage: std::fs::read(dir.join("cm_positions_storage.wasm")).unwrap(),
+            cm_trades_storage: std::fs::read(dir.join("cm_trades_storage.wasm")).unwrap(),
+        }
+    }
+    pub fn blank() -> Self {
+        Self {
+            cts: Vec::new(),
+            bank: Vec::new(),
+            cm_main: Vec::new(),
+            fueler: Vec::new(),
+            cm_tc: Vec::new(),
+            cm_positions_storage: Vec::new(),
+            cm_trades_storage: Vec::new(),
+        }
+    }
+}
+
+
 pub fn set_up() -> PocketIc {
+    set_up_with_modules(
+        CanisterModules::default_dev(),
+    )
+}
+
+pub fn set_up_with_modules(modules: CanisterModules) -> PocketIc {
     
     // set pic binary location if not set
     const POCKET_IC_BIN_VARNAME: &'static str = "POCKET_IC_BIN";
@@ -373,13 +435,19 @@ pub fn set_up() -> PocketIc {
     // CTS
     pic.create_canister_with_id(Some(SNS_ROOT), None, CTS).unwrap();
     pic.add_cycles(CTS, START_WITH_FUEL);
+    pic.install_canister(
+        CTS, 
+        modules.cts, 
+        candid::encode_one(CTSInit{ batch_creators: Some([CTS_CONTROLLER].into()) }).unwrap(), 
+        Some(SNS_ROOT), 
+    );
     
     // BANK
     pic.create_canister_with_id(Some(SNS_ROOT), None, BANK).unwrap();
     pic.add_cycles(BANK, START_WITH_FUEL);
     pic.install_canister(
         BANK, 
-        std::fs::read(wasms_dir().join("bank.wasm")).unwrap(), 
+        modules.bank, 
         candid::encode_args(()).unwrap(), 
         Some(SNS_ROOT), 
     );
@@ -389,7 +457,7 @@ pub fn set_up() -> PocketIc {
     pic.add_cycles(CM_MAIN, START_WITH_FUEL);
     pic.install_canister(
         CM_MAIN, 
-        std::fs::read(wasms_dir().join("cm_main.wasm")).unwrap(), 
+        modules.cm_main, 
         candid::encode_one(CMMainInit {
             cts_id: CTS,
             cycles_bank_id: BANK,
@@ -397,17 +465,41 @@ pub fn set_up() -> PocketIc {
         Some(SNS_ROOT), 
     );
     
+    // FUELER
+    pic.create_canister_with_id(Some(SNS_ROOT), None, FUELER).unwrap();
+    pic.add_cycles(FUELER, START_WITH_FUEL);
+    pic.install_canister(
+        FUELER,
+        modules.fueler,
+        candid::encode_one(
+            FuelerData{
+                sns_root: SNS_ROOT,
+                cm_main: CM_MAIN,
+                cts_cycles_bank: BANK,
+            }
+        ).unwrap(),
+        Some(SNS_ROOT)
+    );
+    
     pic
 }
 
 // icp tc
 pub fn set_up_tc(pic: &PocketIc) -> Principal {
-    for (wasm_path, market_canister_type) in [
-        ("cm_tc.wasm", MarketCanisterType::TradeContract),
-        ("cm_positions_storage.wasm", MarketCanisterType::PositionsStorage),
-        ("cm_trades_storage.wasm", MarketCanisterType::TradesStorage),
+    set_up_tc_with_modules(
+        pic,
+        CanisterModules::default_dev(),
+    )
+}
+
+pub fn set_up_tc_with_modules(pic: &PocketIc, modules: CanisterModules) -> Principal {
+    
+    for (wasm, market_canister_type) in [
+        (modules.cm_tc, MarketCanisterType::TradeContract),
+        (modules.cm_positions_storage, MarketCanisterType::PositionsStorage),
+        (modules.cm_trades_storage, MarketCanisterType::TradesStorage),
     ] {
-        let cc = CanisterCode::new(std::fs::read(wasms_dir().join(wasm_path)).unwrap());
+        let cc = CanisterCode::new(wasm);
         call_candid_as::<_, ()>(&pic, CM_MAIN, RawEffectivePrincipal::None, SNS_GOVERNANCE, "controller_upload_canister_code", (cc, market_canister_type)).unwrap();
     }
 
@@ -448,28 +540,9 @@ pub fn set_up_new_ledger_and_tc(pic: &PocketIc) -> (Principal, Principal)/*(ledg
 }
 
 
-pub fn set_up_fueler(pic: &PocketIc) -> Principal {
-    pic.create_canister_with_id(Some(SNS_ROOT), None, FUELER).unwrap();
-    pic.add_cycles(FUELER, START_WITH_FUEL);
-    pic.install_canister(
-        FUELER,
-        std::fs::read(wasms_dir().join("fueler.wasm")).unwrap(),
-        candid::encode_one(
-            FuelerData{
-                sns_root: SNS_ROOT,
-                cm_main: CM_MAIN,
-                cts_cycles_bank: BANK,
-            }
-        ).unwrap(),
-        Some(SNS_ROOT)
-    );
-    FUELER
-}
-
-
 pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     let canister_caller: Principal = pic.create_canister();
-    let canister_caller_wasm: Vec<u8> = std::fs::read(wasms_dir().join("canister_caller.wasm")).unwrap();
+    let canister_caller_wasm: Vec<u8> = std::fs::read(wasms_dir_dev().join("canister_caller.wasm")).unwrap();
     pic.add_cycles(canister_caller, 1_000_000_000 * TRILLION);
     pic.install_canister(
         canister_caller, 
@@ -479,4 +552,3 @@ pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     );
     canister_caller
 }
-
