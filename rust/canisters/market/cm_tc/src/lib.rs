@@ -234,9 +234,7 @@ pub fn minimum_tokens_match() -> Tokens {
 pub fn minimum_cycles_match() -> Cycles {
     _minimum_match(localkey::cell::get(&CYCLES_BANK_TRANSFER_FEE))
 }
-pub fn _minimum_match(ledger_transfer_fee: u128) -> Tokens {
-    10_000/*for the fee ten-thousandths*/ + ledger_transfer_fee*10
-}
+
 
 // -----------------
 
