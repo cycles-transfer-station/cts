@@ -74,8 +74,8 @@ build profile *git_commit_id: (cargo-build-wasms profile)
         fi
     done
 
-test-unit:
-    cd {{justfile_directory()}}/rust && cargo test
+test-unit *cargo_test_params:
+    cd {{justfile_directory()}}/rust && cargo test {{cargo_test_params}}
     
 test-pic *cargo_test_params: (build "dev")
     cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}}
