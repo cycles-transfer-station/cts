@@ -14,19 +14,19 @@ impl TradeFeeTier {
 #[allow(non_upper_case_globals)]
 const trade_fees_tiers: &[TradeFeeTier; 5] = &[
     TradeFeeTier{
-        volume_tcycles: 100_000,
+        volume_tcycles: 1_000,
         trade_fee_ten_thousandths: 50,
     },
     TradeFeeTier{
-        volume_tcycles: 500_000,
+        volume_tcycles: 5_000,
         trade_fee_ten_thousandths: 30,
     },
     TradeFeeTier{
-        volume_tcycles: 1_000_000,
+        volume_tcycles: 50_000,
         trade_fee_ten_thousandths: 10,
     },
     TradeFeeTier{
-        volume_tcycles: 5_000_000,
+        volume_tcycles: 100_000,
         trade_fee_ten_thousandths: 5,
     },
     TradeFeeTier{
@@ -56,3 +56,13 @@ pub fn calculate_trade_fee(current_position_trade_volume_cycles: Cycles, trade_c
     
     fee_cycles
 }
+
+
+#[test]
+fn test_trade_fee_calculation_1() {
+    assert_eq!(calculate_trade_fee(0, 1_000_000*TRILLION), 177*TRILLION);
+    assert_eq!(calculate_trade_fee(0, 100_000*TRILLION), 87*TRILLION);
+    assert_eq!(calculate_trade_fee(0, 70_000*TRILLION), 72*TRILLION);
+    
+}
+// 5 + 12 + 45 + 25 + 90
