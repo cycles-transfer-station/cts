@@ -7,6 +7,7 @@ use ic_cdk::{
 };
 use candid::{CandidType, Deserialize, Principal};
 use serde_bytes::ByteBuf;
+use serde::Serialize;
 
 pub use icrc_ledger_types::{
     icrc1::{
@@ -24,7 +25,7 @@ pub use icrc_ledger_types::{
     icrc::generic_metadata_value::MetadataValue as IcrcMetadataValue,
 };
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize)]
 pub struct Icrc1TransferQuest {
     pub to: IcrcId,
     pub fee: Option<Cycles>,
@@ -55,4 +56,3 @@ pub async fn icrc1_balance_of(icrc1_ledger_id: Principal, count_id: IcrcId) -> R
         (count_id,),
     ).await.map_err(|e| (e.0 as u32, e.1)).map(|(s,)| s)
 }
-

@@ -18,3 +18,7 @@ ic-stable-structures = { workspace = true }
 futures = { workspace = true }
 rmp-serde = { workspace = true }
 outsiders = { path = "../outsiders" }
+leb128 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+wasabi_leb128 = { workspace = true }

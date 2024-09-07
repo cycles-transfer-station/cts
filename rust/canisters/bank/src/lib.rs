@@ -39,7 +39,7 @@ use cts_lib::{
         CmcNotifyError
     },
     ic_ledger_types::{IcpBlockHeight, IcpTokens},
-    consts::{MiB, KiB, TRILLION},
+    consts::{MiB, KiB, TRILLION, NANOS_IN_A_SECOND, SECONDS_IN_A_DAY, SECONDS_IN_A_MINUTE},
 };
 use ic_cdk::{
     init,
@@ -301,9 +301,11 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
     let caller = caller();
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller, subaccount: q.from_subaccount };
-        
-    check_for_dup(&q)?; // only valid within this message-execution. make sure icrc1_transfer method stays sync.
-        
+    
+    with_mut(&CB_DATA, |cb_data| {
+        check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, &q) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
+    })?; 
+    
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
             trap("Max memo length is 32 bytes.");
@@ -330,6 +332,8 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         Ok(())
     })?;
     
+    let q_structural_hash: [u8; 32] = icrc1_transfer_quest_structural_hash(&q); 
+    
     let block_height: u64 = with_mut(&LOGS, |logs| {
         logs.push(
             &Log{
@@ -349,9 +353,9 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     
     if let Some(created_at_time) = q.created_at_time {
         with_mut(&CB_DATA, |cb_data| {
-            cd_data.icrc1_transfer_dedup_map.insert(
-                (caller, icrc1_transfer_quest_structural_hash(&q)),
-                (block_height, created_at_time),
+            cb_data.icrc1_transfer_dedup_map.insert(
+                (caller, q_structural_hash),
+                (block_height as u128, created_at_time),
             );
         });
     }

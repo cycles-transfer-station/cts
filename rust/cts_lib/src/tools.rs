@@ -28,6 +28,9 @@ pub fn time_nanos() -> u128 { time_nanos_u64() as u128 }
 pub fn time_seconds() -> u128 { time_nanos() / NANOS_IN_A_SECOND as u128 }
 
 
+mod structural_hash;
+pub use structural_hash::structural_hash;
+
 
 
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
