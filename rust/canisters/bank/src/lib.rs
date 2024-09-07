@@ -339,7 +339,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         
         Ok(())
     })?;
-        
+    
     let block_height: u64 = with_mut(&LOGS, |logs| {
         logs.push(
             &Log{
