@@ -31,7 +31,7 @@ pub struct CyclesOutQuest {
     pub fee: Option<Cycles>,
     pub from_subaccount: Option<IcrcSubaccount>,
     pub memo: Option<ByteBuf>,
-    pub for_canister: Principal,   
+    pub for_canister: Principal,
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]

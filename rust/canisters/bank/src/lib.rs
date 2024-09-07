@@ -71,8 +71,8 @@ use canister_tools::{
     get_virtual_memory,
 };
 
-mod transaction_deduplication;
-use transaction_deduplication::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
+mod dedup;
+use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
 
 
 // --------- TYPES -----------
