@@ -302,9 +302,17 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     let caller = caller();
     let caller_icrc_id: IcrcId = IcrcId{ owner: caller, subaccount: q.from_subaccount };
     
-    with_mut(&CB_DATA, |cb_data| {
-        check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, &q) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
-    })?; 
+    let mut opt_q_structural_hash: Option<[u8; 32]> = None; // some if q.created_at_time.is_some() 
+
+    if let Some(created_at_time) = q.created_at_time {
+        let q_structural_hash = icrc1_transfer_quest_structural_hash(&q);
+        opt_q_structural_hash = Some(q_structural_hash);
+        with_mut(&CB_DATA, |cb_data| {
+            check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, created_at_time, q_structural_hash) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
+        })?; 
+    }
+    
+    let opt_q_structural_hash = opt_q_structural_hash; // remove the mut.
     
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
@@ -331,9 +339,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         
         Ok(())
     })?;
-    
-    let q_structural_hash: [u8; 32] = icrc1_transfer_quest_structural_hash(&q); 
-    
+        
     let block_height: u64 = with_mut(&LOGS, |logs| {
         logs.push(
             &Log{
@@ -354,7 +360,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     if let Some(created_at_time) = q.created_at_time {
         with_mut(&CB_DATA, |cb_data| {
             cb_data.icrc1_transfer_dedup_map.insert(
-                (caller, q_structural_hash),
+                (caller, opt_q_structural_hash.unwrap()), // unwrap safe bc we make sure that if created_at_time.is_some() then q_structural_hash.is_some()
                 (block_height as u128, created_at_time),
             );
         });
