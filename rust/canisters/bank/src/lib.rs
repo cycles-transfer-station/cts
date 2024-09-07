@@ -360,7 +360,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     if let Some(created_at_time) = q.created_at_time {
         with_mut(&CB_DATA, |cb_data| {
             cb_data.icrc1_transfer_dedup_map.insert(
-                (caller, opt_q_structural_hash.unwrap()), // unwrap safe bc we make sure that if created_at_time.is_some() then q_structural_hash.is_some()
+                (caller, opt_q_structural_hash.unwrap()), // unwrap safe bc we make sure that if created_at_time.is_some() then opt_q_structural_hash.is_some()
                 (block_height as u128, created_at_time),
             );
         });
