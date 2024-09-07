@@ -39,7 +39,7 @@ use cts_lib::{
         CmcNotifyError
     },
     ic_ledger_types::{IcpBlockHeight, IcpTokens},
-    consts::{MiB, KiB, TRILLION},
+    consts::{MiB, KiB, TRILLION, NANOS_IN_A_SECOND, SECONDS_IN_A_DAY, SECONDS_IN_A_MINUTE},
 };
 use ic_cdk::{
     init,
@@ -71,6 +71,9 @@ use canister_tools::{
     get_virtual_memory,
 };
 
+mod dedup;
+use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
+
 
 // --------- TYPES -----------
 
@@ -78,6 +81,7 @@ use canister_tools::{
 pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
+    icrc1_transfer_dedup_map: DedupMap,
 }
 
 impl CBData {
@@ -85,6 +89,7 @@ impl CBData {
         Self {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
+            icrc1_transfer_dedup_map: DedupMap::new(),
         }
     }
 }
@@ -136,6 +141,11 @@ pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
 pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
 pub const ICRC1_DECIMALS: u8 = 12;
 
+pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
+pub const PERMITTED_DRIFT_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 2) as u64;
+pub const MAX_LEN_OF_THE_DEDUP_MAP: usize = 1_000_000;
+
+
 // --------- GLOBAL-STATE ----------
 
 thread_local!{
@@ -161,8 +171,23 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() { 
-    canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
-    canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);    
+    //canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
+    #[derive(CandidType, Deserialize)]
+    struct OldCBData {
+        users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
+        total_supply: Cycles,
+    }
+    canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, Some::<fn(OldCBData) -> CBData>(
+        |old| {
+            CBData{
+                users_mint_cycles: old.users_mint_cycles,
+                total_supply: old.total_supply,
+                icrc1_transfer_dedup_map: DedupMap::new(),
+            }
+        }
+    ));
+        
+    canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);
 } 
 
 // ------- FUNCTIONS -------
@@ -271,21 +296,24 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
     })
 }
 
+// make sure the icrc1_transfer method stays synchronous, within one single message execution. bc the transaction dedup check is only valid within it's message execution and we need it to be valid for the whole of the icrc1-transfer
 #[update]
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
-    let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
-        
-    // temporary while waiting to implement transaction-deduplication.
+    let caller = caller();
+    let caller_icrc_id: IcrcId = IcrcId{ owner: caller, subaccount: q.from_subaccount };
+    
+    let mut opt_q_structural_hash: Option<[u8; 32]> = None; // some if q.created_at_time.is_some() 
+
     if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                Icrc1TransferError::TooOld
-            } else {
-                Icrc1TransferError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
+        let q_structural_hash = icrc1_transfer_quest_structural_hash(&q);
+        opt_q_structural_hash = Some(q_structural_hash);
+        with_mut(&CB_DATA, |cb_data| {
+            check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, created_at_time, q_structural_hash) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
+        })?; 
     }
-        
+    
+    let opt_q_structural_hash = opt_q_structural_hash; // remove the mut.
+    
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
             trap("Max memo length is 32 bytes.");
@@ -328,6 +356,15 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         ).unwrap(); // if growfailed then trap and roll back the transfer.
         logs.len() - 1
     });
+    
+    if let Some(created_at_time) = q.created_at_time {
+        with_mut(&CB_DATA, |cb_data| {
+            cb_data.icrc1_transfer_dedup_map.insert(
+                (caller, opt_q_structural_hash.unwrap()), // unwrap safe bc we make sure that if created_at_time.is_some() then opt_q_structural_hash.is_some()
+                (block_height as u128, created_at_time),
+            );
+        });
+    }
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(caller_icrc_id)
@@ -400,16 +437,6 @@ fn controller_clear_user_logs_pointers_cache() {
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
-    if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                CyclesInError::TooOld
-            } else {
-                CyclesInError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
-    }
-    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -445,7 +472,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
                     fee: q.fee,
                     amt: q.cycles,
                     memo: q.memo,
-                    ts: q.created_at_time,
+                    ts: None,
                 }
             }
         ).unwrap(); // if growfailed then trap and roll back.
@@ -471,17 +498,7 @@ pub fn sns_validate_cycles_out(q: CyclesOutQuest) -> Result<String, String> {
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
-    
-     if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                CyclesOutError::TooOld
-            } else {
-                CyclesOutError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
-    }
-    
+        
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -526,7 +543,7 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                             fee: q.fee,
                             amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
                             memo: q.memo,
-                            ts: q.created_at_time,
+                            ts: None,
                         }
                     }
                 ).unwrap(); // what to do if grow-fail here? For now there is a lot of space on the fiduciary subnet so it is ok for now but either put in a buffer wait on a timer or create archives.
@@ -571,16 +588,6 @@ struct MintCyclesMidCallData {
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL {
         trap("This canister is low on cycles.");
-    }
-    
-    if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                MintCyclesError::TooOld
-            } else {
-                MintCyclesError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
     }
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
@@ -683,7 +690,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                     fee: mid_call_data.quest.fee,
                     amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
                     memo: mid_call_data.quest.memo,
-                    ts: mid_call_data.quest.created_at_time,
+                    ts: None,
                 }
             }
         ).unwrap(); // look at comment for cycles_out logs.push 
