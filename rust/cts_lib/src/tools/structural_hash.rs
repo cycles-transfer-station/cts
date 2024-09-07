@@ -8,7 +8,7 @@ pub fn structural_hash<'a, V: 'a + Serialize>(v: &V) -> Result<Sha256Hash, Strin
 
 
 
-/// TAKEN FROM ic-transport-types v0.37.1
+/// ic-transport-types v0.37.1
 
 
 use serde::{
