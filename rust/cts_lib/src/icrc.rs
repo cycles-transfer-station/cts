@@ -1,13 +1,10 @@
 use crate::{
-    types::{CallError, Cycles},
+    types::CallError,
     tools::call_error_as_u32_and_string,
 };
-use ic_cdk::{
-    call,
-};
+use ic_cdk::call;
 use candid::{CandidType, Deserialize, Principal};
 use serde_bytes::ByteBuf;
-use serde::Serialize;
 
 pub use icrc_ledger_types::{
     icrc1::{
@@ -25,14 +22,14 @@ pub use icrc_ledger_types::{
     icrc::generic_metadata_value::MetadataValue as IcrcMetadataValue,
 };
 
-#[derive(CandidType, Serialize, Deserialize)]
+#[derive(CandidType, Deserialize)]
 pub struct Icrc1TransferQuest {
     pub to: IcrcId,
-    pub fee: Option<Cycles>,
+    pub fee: Option<u128>,
     pub memo: Option<ByteBuf>,
     pub from_subaccount: Option<IcrcSub>,
     pub created_at_time: Option<u64>,
-    pub amount: Cycles,
+    pub amount: u128,
 }
 
 pub use u128 as BlockId;

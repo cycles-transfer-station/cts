@@ -12,9 +12,8 @@ type CompleteMintCyclesError = variant {
 };
 type CyclesInError = variant {
   GenericError : record { message : text; error_code : nat };
+  CBIsBusy;
   BadFee : record { expected_fee : nat };
-  CreatedInFuture : record { ledger_time : nat64 };
-  TooOld;
   MsgCyclesTooLow;
 };
 type CyclesInQuest = record {
@@ -22,14 +21,12 @@ type CyclesInQuest = record {
   fee : opt nat;
   memo : opt blob;
   cycles : nat;
-  created_at_time : opt nat64;
 };
 type CyclesOutError = variant {
   GenericError : record { message : text; error_code : nat };
+  CBIsBusy;
   BadFee : record { expected_fee : nat };
   DepositCyclesCallError : record { nat32; text };
-  CreatedInFuture : record { ledger_time : nat64 };
-  TooOld;
   InsufficientFunds : record { balance : nat };
 };
 type CyclesOutQuest = record {
@@ -38,7 +35,6 @@ type CyclesOutQuest = record {
   from_subaccount : opt blob;
   cycles : nat;
   for_canister : principal;
-  created_at_time : opt nat64;
 };
 type GetLogsBackwardsSponse = record {
   logs : vec record { nat; Log };
@@ -84,10 +80,8 @@ type MintCyclesError = variant {
     reason : text;
   };
   BadFee : record { expected_fee : nat };
-  CreatedInFuture : record { ledger_time : nat64 };
   LedgerTopupCyclesCmcIcpTransferError : LedgerTopupCyclesCmcIcpTransferError;
   UserIsInTheMiddleOfADifferentCall : UserIsInTheMiddleOfADifferentCall;
-  TooOld;
 };
 type MintCyclesMidCallError = variant {
   LedgerTopupCyclesCmcNotifyError : LedgerTopupCyclesCmcNotifyError;
@@ -99,7 +93,6 @@ type MintCyclesQuest = record {
   burn_icp : nat;
   burn_icp_transfer_fee : nat;
   memo : opt blob;
-  created_at_time : opt nat64;
 };
 type MintCyclesSuccess = record {
   mint_cycles_block_height : nat;

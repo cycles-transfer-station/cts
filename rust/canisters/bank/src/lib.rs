@@ -143,7 +143,7 @@ pub const ICRC1_DECIMALS: u8 = 12;
 
 pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
 pub const PERMITTED_DRIFT_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 2) as u64;
-pub const MAX_LEN_OF_A_DEDUP_MAP: usize = 86_400; // this is the max-len of one dedup map. there are three dedup maps.
+pub const MAX_LEN_OF_THE_DEDUP_MAP: usize = 1_000_000;
 
 
 // --------- GLOBAL-STATE ----------
