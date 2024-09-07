@@ -744,6 +744,90 @@ pub fn canister_cycles_balance_minus_total_supply() -> i128 {
 }
 
 
+// ICRC-3
+use icrc_ledger_types::icrc::generic_value::{ICRC3Value, ICRC3Map};
+
+fn icrc3_value_of_an_icrc_id(icrc_id: IcrcId) -> ICRC3Value {
+    let mut v = vec![ICRC3Value::Blob(ByteBuf::new(icrc_id.owner.as_slice()))];
+    if let Some(subaccount) = icrc_id.subaccount {
+        if subaccount != [0u8; 32] {
+            v.push(ICRC3Value::Blob(ByteBuf::new(subaccount)));
+        }
+    }
+    ICRC3Value::Array(v)
+}
+
+fn icrc3_value_of_a_block_log(log: &Log) -> ICRC3Value {
+    let mut tx = ICRC3Map::from_iter([
+        ("amt", ICRC3Value::Nat(log.tx.amt.into())),
+    ]);
+    if let Some(fee) = log.tx.fee {
+        tx.insert("fee", ICRC3Value::Nat(fee.into()));
+    }
+    if let Some(memo) = log.tx.memo {
+        tx.insert("memo", ICRC3Value::Blob(memo));
+    }
+    if let Some(created_at_time) = log.tx.ts {
+        tx.insert("ts", ICRC3Value::Nat(created_at_time.into()));
+    }
+    match log.tx.op {
+        Operation::Mint{ to, kind } => {
+            tx.insert("to", icrc3_value_of_an_icrc_id(to));
+            match kind {
+                MintKind::CyclesIn{ from_canister } => {
+                    tx.insert("kind", ICRC3Value::Text("cycin"));
+                    tx.insert("can", ICRC3Value::Blob(ByteBuf::new(from_canister.as_slice())));
+                },
+                MintKind::CMC{ caller, icp_block_height } => {
+                    tx.insert("kind", ICRC3Value::Text("cmc"));
+                    tx.insert("callr", ICRC3Value::Blob(ByteBuf::new(caller.as_slice())));
+                    tx.insert("icpb", ICRC3Value::Nat(icp_block_height.into()));
+                }
+            }
+        }
+        Operation::Burn{ from, for_canister } => {
+            tx.insert("from", icrc3_value_of_an_icrc_id(from));
+            tx.insert("can", ICRC3Value::Blob(ByteBuf::new(for_canister.as_slice())));
+        }
+        Operation::Xfer{ from, to } => {
+            tx.insert("from", icrc3_value_of_an_icrc_id(from));
+            tx.insert("to", icrc3_value_of_an_icrc_id(to));            
+        }
+    }
+    
+    let mut map = ICRC3Map::from_iter([
+        ("btype", ICRC3Value::Text(log.tx.op.icrc3_btype()))
+        ("ts", ICRC3Value::Nat(log.ts.into()),
+        ("tx", ICRC3Value::Map(tx)),
+    ]);
+    if let Some(phash) = log.phash {
+        map.insert("phash", ICRC3Value::Blob(phash));
+    }
+    if let Some(fee) = log.fee {
+        map.insert("fee", ICRC3Value::Nat(fee.into()));
+    }
+    
+    ICRC3Value::Map(map)
+}
+
+fn hash_of_icrc3_block(block: &ICRC3Value) -> [u8; 32] {
+    cts_lib::tools::structural_hash(block).unwrap() // unwrap? maybe try it before any async-await-calls and make sure it works and return err if err. then if good, do calls, and unwrap structural-calls. 
+}
+
+
+
+#[query]
+pub fn icrc3_get_tip_certificate()
+last_block_index
+last_block_hash
+
+
+
+
+
+
+
+
 
 
 ic_cdk::export_candid!();

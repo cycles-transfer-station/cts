@@ -9,6 +9,7 @@ use ic_stable_structures::{Storable, storable::Bound};
 
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Log {
+    //pub phash: Option<ByteArray<32>>, //! check that existing blocks will be able to deserialize a new optional field. // or maybe in the post-upgrade, change these values to a new serialization format with phash, and serde_bytes for the subaccounts.
     pub ts: u64,
     pub fee: Option<Cycles>, // if the user does not specify the fee in the request
     pub tx: LogTX,
@@ -29,7 +30,18 @@ pub enum Operation {
     Burn{ from: IcrcId, for_canister: Principal },
     Xfer{ from: IcrcId, to: IcrcId } 
 }
-    
+
+impl Operation {
+    pub fn icrc3_btype(&self) -> &'static str {
+        match self {
+            Self::Mint{ .. } => "1mint",
+            Self::Burn{ .. } => "1burn", 
+            Self::Xfer{ .. } => "1xfer",
+        }
+    }
+}
+
+
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MintKind {
     CyclesIn{ from_canister: Principal },
@@ -50,4 +62,3 @@ impl Storable for Log {
         }
     };
 }
-    
