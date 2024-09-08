@@ -30,7 +30,7 @@ use cts_lib::{
     management_canister::CanisterIdRecord,
     types::{
         Cycles,
-        bank::{*, log_types::{Log, LogTX, Operation, MintKind}},
+        bank::{*, old_log_types, new_log_types},
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,
@@ -70,10 +70,14 @@ use canister_tools::{
     MemoryId,
     get_virtual_memory,
 };
+use serde_bytes::ByteArray;
+
 
 mod dedup;
 use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
 
+mod icrc3;
+use icrc3::*;
 
 // --------- TYPES -----------
 
@@ -82,6 +86,7 @@ pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
     icrc1_transfer_dedup_map: DedupMap,
+    latest_block_hash: Option<ByteArray<32>>, // none if no blocks have been create yet
 }
 
 impl CBData {
@@ -90,6 +95,7 @@ impl CBData {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
             icrc1_transfer_dedup_map: DedupMap::new(),
+            latest_block_hash: None,
         }
     }
 }
@@ -105,7 +111,7 @@ impl Storable for StorableIcrcId {
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         let owner = thirty_bytes_as_principal(&bytes[..30].try_into().unwrap());
-        let subaccount: IcrcSubaccount = bytes[30..].try_into().unwrap();
+        let subaccount: IcrcSubaccount = ByteArray::new(bytes[30..].try_into().unwrap());
         Self(IcrcId{ owner, subaccount: if subaccount == *ICRC_DEFAULT_SUBACCOUNT { None } else { Some(subaccount) }})
     }
     const BOUND: Bound = {
@@ -122,15 +128,17 @@ impl From<IcrcId> for StorableIcrcId {
 }
 
 type CyclesBalances = StableBTreeMap<StorableIcrcId, Cycles, VirtualMemory<DefaultMemoryImpl>>;
-type Logs = StableVec<Log, VirtualMemory<DefaultMemoryImpl>>;
+type OldLogs = StableVec<old_log_types::Log, VirtualMemory<DefaultMemoryImpl>>;
+type NewLogs = StableVec<new_log_types::Log, VirtualMemory<DefaultMemoryImpl>>;
 type UserLogsPointers = HashMap<IcrcId, Vec<u32>>;
 
 // --------- CONSTS --------
 
 pub const CB_DATA_MEMORY_ID: MemoryId = MemoryId::new(0);
 pub const CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
-pub const LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
+pub const OLD_LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
 pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
+pub const NEW_LOGS_MEMORY_ID: MemoryId = MemoryId::new(4);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
@@ -153,7 +161,9 @@ thread_local!{
     pub static USER_LOGS_POINTERS: RefCell<UserLogsPointers> = RefCell::new(UserLogsPointers::new());
     // stable-structures
     pub static CYCLES_BALANCES: RefCell<CyclesBalances> = RefCell::new(CyclesBalances::init(get_virtual_memory(CYCLES_BALANCES_MEMORY_ID)));
-    pub static LOGS: RefCell<Logs> = RefCell::new(Logs::init(get_virtual_memory(LOGS_MEMORY_ID)).unwrap());
+    pub static OLD_LOGS: RefCell<OldLogs> = RefCell::new(OldLogs::init(get_virtual_memory(OLD_LOGS_MEMORY_ID)).unwrap());
+    pub static NEW_LOGS: RefCell<NewLogs> = RefCell::new(NewLogs::init(get_virtual_memory(NEW_LOGS_MEMORY_ID)).unwrap());
+    
 }
 
 // ---------- LIFECYCLE ---------
@@ -183,11 +193,152 @@ fn post_upgrade() {
                 users_mint_cycles: old.users_mint_cycles,
                 total_supply: old.total_supply,
                 icrc1_transfer_dedup_map: DedupMap::new(),
+                latest_block_hash: None, // it will update in the next section
             }
         }
     ));
         
     canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);
+
+    // ---------------------------
+    // MIGRATE LOGS // dont delete old logs just yet.
+    with(&OLD_LOGS, |old_logs| {
+        with_mut(&NEW_LOGS, |new_logs| {
+            
+            let mut phash: Option<ByteArray<32>> = None; 
+            
+            for i in 0..old_logs.len() {
+                
+                let old_log: old_log_types::Log = old_logs.get(i).unwrap(); 
+                
+                let new_log: new_log_types::Log = new_log_types::Log{
+                    phash: phash,
+                    ts: old_log.ts,
+                    fee: old_log.fee,
+                    tx: new_log_types::LogTX{
+                        fee: old_log.tx.fee,
+                        amt: old_log.tx.amt,
+                        ts: old_log.tx.ts,
+                        memo: old_log.tx.memo,
+                        op: match old_log.tx.op {
+                            old_log_types::Operation::Mint{ to, kind } => {
+                                new_log_types::Operation::Mint{ 
+                                    to: IcrcId{ owner: to.owner, subaccount: to.subaccount.map(ByteArray::new) }, 
+                                    kind: match kind {
+                                        old_log_types::MintKind::CyclesIn{ from_canister } => {
+                                            new_log_types::MintKind::CyclesIn{ from_canister }
+                                        }
+                                        old_log_types::MintKind::CMC{ caller, icp_block_height } => {
+                                            new_log_types::MintKind::CMC{ caller, icp_block_height }
+                                        }
+                                    }  
+                                }
+                            }
+                            old_log_types::Operation::Burn{ from, for_canister } => {
+                                new_log_types::Operation::Burn{ 
+                                    from: IcrcId{ owner: from.owner, subaccount: from.subaccount.map(ByteArray::new) }, 
+                                    for_canister: for_canister, 
+                                }
+                            }
+                            old_log_types::Operation::Xfer{ from, to } => {
+                                new_log_types::Operation::Xfer{ 
+                                    from: IcrcId{ owner: from.owner, subaccount: from.subaccount.map(ByteArray::new) }, 
+                                    to: IcrcId{ owner: to.owner, subaccount: to.subaccount.map(ByteArray::new) },  
+                                }
+                            }
+                        }
+                    }
+                };
+                    
+                phash = Some(ByteArray::new(icrc3_value_of_a_block_log(&new_log).hash()));
+                
+                new_logs.push(&new_log).unwrap();     
+            }
+            
+            with_mut(&CB_DATA, |cb_data| {
+                cb_data.latest_block_hash = phash; 
+            });
+
+        });
+    });
+    
+    // LOGS-MIGRATION-SANITY-CHECK
+    with(&OLD_LOGS, |old_logs| {
+        with(&NEW_LOGS, |new_logs| {
+            if old_logs.len() != new_logs.len() {
+                trap("old_logs.len() != new_logs.len()");
+            }
+            
+            let mut phash: Option<ByteArray<32>> = None;
+            
+            for i in 0..new_logs.len() {
+                let old_log: old_log_types::Log = old_logs.get(i).unwrap(); 
+                let new_log: new_log_types::Log = new_logs.get(i).unwrap(); 
+                
+                assert_eq!(new_log.phash, phash);
+                phash = Some(ByteArray::new(icrc3_value_of_a_block_log(&new_log).hash()));
+                
+                assert_eq!(old_log.ts, new_log.ts);
+                assert_eq!(old_log.fee, new_log.fee);
+                assert_eq!(old_log.tx.amt, new_log.tx.amt);
+                assert_eq!(old_log.tx.fee, new_log.tx.fee);
+                assert_eq!(old_log.tx.memo, new_log.tx.memo);
+                assert_eq!(old_log.tx.ts, new_log.tx.ts);
+                match old_log.tx.op {
+                    old_log_types::Operation::Mint{ to: old_to, kind: old_kind } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Mint{ to: new_to, kind: new_kind } => {
+                                assert_eq!(old_to.owner, new_to.owner);
+                                assert_eq!(old_to.subaccount.as_ref(), new_to.subaccount.as_deref());
+                                match old_kind {
+                                    old_log_types::MintKind::CyclesIn{ from_canister: old_from_canister } => {
+                                        match new_kind {
+                                            new_log_types::MintKind::CyclesIn{ from_canister: new_from_canister } => {
+                                                assert_eq!(old_from_canister, new_from_canister);
+                                            },
+                                            _ => trap(&format!("Different logs {}", i)),
+                                        }
+                                    }
+                                    old_log_types::MintKind::CMC{ caller: old_caller, icp_block_height: old_icp_block_height } => {
+                                        match new_kind {
+                                            new_log_types::MintKind::CMC{ caller: new_caller, icp_block_height: new_icp_block_height } => {
+                                                assert_eq!(old_caller, new_caller);
+                                                assert_eq!(old_icp_block_height, new_icp_block_height);
+                                            },
+                                            _ => trap(&format!("Different logs {}", i)),
+                                        }
+                                    }
+                                }
+                            }
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    },
+                    old_log_types::Operation::Burn{ from: old_from, for_canister: old_for_canister } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Burn{ from: new_from, for_canister: new_for_canister } => {
+                                assert_eq!(old_from.owner, new_from.owner);
+                                assert_eq!(old_from.subaccount.as_ref(), new_from.subaccount.as_deref());
+                                assert_eq!(old_for_canister, new_for_canister);
+                            }
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    },
+                    old_log_types::Operation::Xfer{ from: old_from, to: old_to } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Xfer{ from: new_from, to: new_to } => {
+                                assert_eq!(old_from.owner, new_from.owner);
+                                assert_eq!(old_from.subaccount.as_ref(), new_from.subaccount.as_deref());
+                                assert_eq!(old_to.owner, new_to.owner);
+                                assert_eq!(old_to.subaccount.as_ref(), new_to.subaccount.as_deref());                                
+                            } 
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    }
+                }    
+            }
+        });
+    });
+
 } 
 
 // ------- FUNCTIONS -------
@@ -340,22 +491,34 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         Ok(())
     })?;
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
-                ts: time_nanos_u64(),
-                fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                tx: LogTX{
-                    op: Operation::Xfer{ from: caller_icrc_id, to: q.to },
-                    fee: q.fee,
-                    amt: q.amount,
-                    memo: q.memo,
-                    ts: q.created_at_time,
-                }
-            }
-        ).unwrap(); // if growfailed then trap and roll back the transfer.
-        logs.len() - 1
-    });
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+            with_mut(&CB_DATA, |cb_data| { 
+                
+                let log: new_log_types::Log = new_log_types::Log{
+                    phash: cb_data.latest_block_hash, 
+                    ts: time_nanos_u64(),
+                    fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                    tx: new_log_types::LogTX{
+                        op: new_log_types::Operation::Xfer{ from: caller_icrc_id, to: q.to },
+                        fee: q.fee,
+                        amt: q.amount,
+                        memo: q.memo,
+                        ts: q.created_at_time,
+                    }
+                };
+                
+                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
+                
+                new_logs.push(&log).unwrap(); // if growfailed then trap and roll back the transfer.
+                let block_height = new_logs.len() - 1;
+                
+                set_root_hash(block_height, cb_data);
+                
+                block_height
+            })
+        })
+    };
     
     if let Some(created_at_time) = q.created_at_time {
         with_mut(&CB_DATA, |cb_data| {
@@ -390,7 +553,7 @@ const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;
 
 #[query]
 pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
-    let mut v: Vec<(BlockId, Log)> = Vec::new();
+    let mut v: Vec<(BlockId, new_log_types::Log)> = Vec::new();
     let mut is_last_chunk = true;
     with(&USER_LOGS_POINTERS, |user_logs_pointers| {
         let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id) {
@@ -404,7 +567,7 @@ pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>)
         };
         let start_i: usize = end_i.saturating_sub(LOGS_CHUNK_SIZE);
         is_last_chunk = start_i == 0; 
-        with(&LOGS, |logs| {
+        with(&NEW_LOGS, |logs| {
             for block_height in list[start_i..end_i].iter() {
                 v.push((block_height.clone() as u128, logs.get(block_height.clone() as u64).unwrap()));     
             }
@@ -449,8 +612,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
         }
     }
     
-    let msg_cycles_available = msg_cycles_available128();
-    if msg_cycles_available < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
+    if msg_cycles_available128() < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
         return Err(CyclesInError::MsgCyclesTooLow);
     }
     
@@ -462,22 +624,35 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
-                ts: time_nanos_u64(),
-                fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                tx: LogTX{
-                    op: Operation::Mint{ to: q.to, kind: MintKind::CyclesIn{ from_canister: caller() } },
-                    fee: q.fee,
-                    amt: q.cycles,
-                    memo: q.memo,
-                    ts: None,
-                }
-            }
-        ).unwrap(); // if growfailed then trap and roll back.
-        logs.len() - 1
-    });
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+            with_mut(&CB_DATA, |cb_data| {
+                
+                let log = new_log_types::Log{
+                    phash: cb_data.latest_block_hash, 
+                    ts: time_nanos_u64(),
+                    fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                    tx: new_log_types::LogTX{
+                        op: new_log_types::Operation::Mint{ to: q.to, kind: new_log_types::MintKind::CyclesIn{ from_canister: caller() } },
+                        fee: q.fee,
+                        amt: q.cycles,
+                        memo: q.memo,
+                        ts: None,
+                    }
+                };
+                
+                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
+                
+                new_logs.push(&log).unwrap();
+                let block_height = new_logs.len() - 1;
+                
+                set_root_hash(block_height, cb_data);
+                
+                block_height
+                
+            })
+        })
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(q.to)
@@ -533,22 +708,35 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     match r {
         Ok(()) => {
-            let block_height: u64 = with_mut(&LOGS, |logs| {
-                logs.push(
-                    &Log{
-                        ts: time_nanos_u64(),
-                        fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                        tx: LogTX{
-                            op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
-                            fee: q.fee,
-                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
-                            memo: q.memo,
-                            ts: None,
-                        }
-                    }
-                ).unwrap(); // what to do if grow-fail here? For now there is a lot of space on the fiduciary subnet so it is ok for now but either put in a buffer wait on a timer or create archives.
-                logs.len() - 1
-            });
+            let block_height: u64 = {
+                with_mut(&NEW_LOGS, |new_logs| {
+                    with_mut(&CB_DATA, |cb_data| {
+                        let log = new_log_types::Log{
+                            phash: cb_data.latest_block_hash,
+                            ts: time_nanos_u64(),
+                            fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                            tx: new_log_types::LogTX{
+                                op: new_log_types::Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
+                                fee: q.fee,
+                                amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
+                                memo: q.memo,
+                                ts: None,
+                            }
+                        };
+                        
+                        cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
+                        
+                        new_logs.push(&log).unwrap();
+                        let block_height = new_logs.len() - 1;
+                        
+                        set_root_hash(block_height, cb_data);
+                        
+                        block_height
+                        
+                    })
+                })
+            };
+                    
             
             with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
                 user_logs_pointers.entry(caller_icrc_id)
@@ -680,22 +868,34 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
-                ts: time_nanos_u64(),
-                fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
-                tx: LogTX{
-                    op: Operation::Mint{ to: mid_call_data.quest.to, kind: MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
-                    fee: mid_call_data.quest.fee,
-                    amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
-                    memo: mid_call_data.quest.memo,
-                    ts: None,
-                }
-            }
-        ).unwrap(); // look at comment for cycles_out logs.push 
-        logs.len() - 1
-    });
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+            with_mut(&CB_DATA, |cb_data| {
+                let log = new_log_types::Log{
+                    phash: cb_data.latest_block_hash,
+                    ts: time_nanos_u64(),
+                    fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
+                    tx: new_log_types::LogTX{
+                        op: new_log_types::Operation::Mint{ to: mid_call_data.quest.to, kind: new_log_types::MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
+                        fee: mid_call_data.quest.fee,
+                        amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
+                        memo: mid_call_data.quest.memo,
+                        ts: None,
+                    }
+                };
+                
+                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
+                
+                new_logs.push(&log).unwrap();
+                let block_height = new_logs.len() - 1;
+                
+                set_root_hash(block_height, cb_data);
+                
+                block_height
+                
+            })
+        })
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(mid_call_data.quest.to)
@@ -744,88 +944,260 @@ pub fn canister_cycles_balance_minus_total_supply() -> i128 {
 }
 
 
-// ICRC-3
-use icrc_ledger_types::icrc::generic_value::{ICRC3Value, ICRC3Map};
+// ICRC-3 METHODS
 
-fn icrc3_value_of_an_icrc_id(icrc_id: IcrcId) -> ICRC3Value {
-    let mut v = vec![ICRC3Value::Blob(ByteBuf::new(icrc_id.owner.as_slice()))];
-    if let Some(subaccount) = icrc_id.subaccount {
-        if subaccount != [0u8; 32] {
-            v.push(ICRC3Value::Blob(ByteBuf::new(subaccount)));
-        }
-    }
-    ICRC3Value::Array(v)
+#[derive(CandidType, Deserialize, Copy, Clone)]
+pub struct StartAndLength{
+    start: u128,
+    length: u128,
 }
 
-fn icrc3_value_of_a_block_log(log: &Log) -> ICRC3Value {
-    let mut tx = ICRC3Map::from_iter([
-        ("amt", ICRC3Value::Nat(log.tx.amt.into())),
-    ]);
-    if let Some(fee) = log.tx.fee {
-        tx.insert("fee", ICRC3Value::Nat(fee.into()));
+#[derive(CandidType)]
+pub struct IdAndBlock<'a>{
+    id: u128,
+    block: Icrc3Value<'a>,
+}
+
+#[derive(CandidType)]
+pub struct GetBlocksArgsAndCallback {
+    args : GetBlocksArgs,
+    callback : Icrc3Callback,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "candid::types::reference::Func")]
+pub struct Icrc3Callback {
+    pub canister_id: Principal,
+    pub method: String,
+}
+impl PartialOrd for Icrc3Callback {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
-    if let Some(memo) = log.tx.memo {
-        tx.insert("memo", ICRC3Value::Blob(memo));
+}
+impl Ord for Icrc3Callback {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.canister_id.cmp(&other.canister_id) {
+            std::cmp::Ordering::Equal => self.method.cmp(&other.method),
+            c => c,
+        }
     }
-    if let Some(created_at_time) = log.tx.ts {
-        tx.insert("ts", ICRC3Value::Nat(created_at_time.into()));
+}
+impl Icrc3Callback {
+    pub fn new(canister_id: Principal, method: impl Into<String>) -> Self {
+        Self {
+            canister_id,
+            method: method.into(),
+        }
     }
-    match log.tx.op {
-        Operation::Mint{ to, kind } => {
-            tx.insert("to", icrc3_value_of_an_icrc_id(to));
-            match kind {
-                MintKind::CyclesIn{ from_canister } => {
-                    tx.insert("kind", ICRC3Value::Text("cycin"));
-                    tx.insert("can", ICRC3Value::Blob(ByteBuf::new(from_canister.as_slice())));
-                },
-                MintKind::CMC{ caller, icp_block_height } => {
-                    tx.insert("kind", ICRC3Value::Text("cmc"));
-                    tx.insert("callr", ICRC3Value::Blob(ByteBuf::new(caller.as_slice())));
-                    tx.insert("icpb", ICRC3Value::Nat(icp_block_height.into()));
+}
+impl Clone for Icrc3Callback {
+    fn clone(&self) -> Self {
+        Self {
+            canister_id: self.canister_id,
+            method: self.method.clone(),
+        }
+    }
+}
+impl From<Icrc3Callback> for candid::types::reference::Func {
+    fn from(archive_fn: Icrc3Callback) -> Self {
+        let p: &Principal = &Principal::try_from(archive_fn.canister_id.as_ref())
+            .expect("could not deserialize principal");
+        Self {
+            principal: *p,
+            method: archive_fn.method,
+        }
+    }
+}
+impl TryFrom<candid::types::reference::Func> for Icrc3Callback {
+    type Error = String;
+    fn try_from(func: candid::types::reference::Func) -> Result<Self, Self::Error> {
+        let canister_id = Principal::try_from(func.principal.as_slice())
+            .map_err(|e| format!("principal is not a canister id: {}", e))?;
+        Ok(Self {
+            canister_id,
+            method: func.method,
+        })
+    }
+}
+impl CandidType for Icrc3Callback {
+    fn _ty() -> candid::types::Type {
+        candid::func!((GetBlocksArgs) -> (GetBlocksResult) query)
+    }
+    fn idl_serialize<S>(&self, serializer: S) -> Result<(), S::Error>
+    where
+        S: candid::types::Serializer,
+    {
+        candid::types::reference::Func::from(self.clone()).idl_serialize(serializer)
+    }
+}
+
+
+
+
+
+
+
+pub type GetBlocksArgs = Vec<StartAndLength>;
+
+#[derive(CandidType)]
+pub struct GetBlocksResult<'a> {
+    // Total number of blocks in the block log
+    log_length : u128,
+
+    // Blocks found locally to the Ledger
+    blocks : Vec<IdAndBlock<'a>>,
+
+    // List of callbacks to fetch the blocks that are not local
+    // to the Ledger, i.e. archived blocks
+    archived_blocks : Vec<GetBlocksArgsAndCallback>,
+}
+impl GetBlocksResult<'static> {
+    fn placeholder() -> Self {
+        Self{
+            log_length: 0,
+            blocks: vec![],
+            archived_blocks: vec![],
+        }
+    }
+}
+
+const GET_BLOCKS_CHUNK_SIZE: usize = 2_000;
+
+use std::cmp::min;
+use serde::Serialize;
+use serde_bytes::ByteBuf;
+use ic_cdk::api::call::reply;
+
+
+// we do manual-reply bc the Icrc3Value type borrows its values so we can't return a borrowed value.
+// be careful because the compiler does not check to make sure that we call the ic_cdk::reply function and that we call it (only) once.
+#[query(manual_reply = true)]
+pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // return type is just for candid did file generation. we use ic_cdk::reply here.
+    
+    with(&NEW_LOGS, |new_logs| { 
+        
+        // make sure at least one StartAndLength
+        if q.len() == 0 {
+            reply((GetBlocksResult {
+                log_length: new_logs.len() as u128,
+                blocks: vec![],
+                archived_blocks : vec![],
+            },));
+            return;
+        }
+        
+        // do first range
+        let end_first_range: u64 = min(q[0].start as u64 + min(q[0].length as u64, GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
+        let mut first_chunk_logs: Vec<new_log_types::Log> = vec![]; 
+        for i in (q[0].start as u64)..end_first_range {
+            first_chunk_logs.push(new_logs.get(i).unwrap());
+        }
+        let blocks = (q[0].start..(end_first_range as u128)).zip(first_chunk_logs.iter().map(icrc3_value_of_a_block_log)).map(|(i, b)| IdAndBlock{ id: i, block: b }).collect();    
+        let mut archived_blocks_args: GetBlocksArgs = q.iter().copied().skip(1).collect(); // skip first range 
+        if end_first_range < (q[0].start + q[0].length) as u64 && end_first_range < new_logs.len() {
+            archived_blocks_args.insert(
+                0,
+                StartAndLength{
+                    start: end_first_range as u128,
+                    length: q[0].start + q[0].length - (end_first_range as u128),
                 }
-            }
+            );
         }
-        Operation::Burn{ from, for_canister } => {
-            tx.insert("from", icrc3_value_of_an_icrc_id(from));
-            tx.insert("can", ICRC3Value::Blob(ByteBuf::new(for_canister.as_slice())));
-        }
-        Operation::Xfer{ from, to } => {
-            tx.insert("from", icrc3_value_of_an_icrc_id(from));
-            tx.insert("to", icrc3_value_of_an_icrc_id(to));            
-        }
-    }
+        let result = GetBlocksResult {
+            log_length: new_logs.len() as u128,
+            blocks: blocks,
+            archived_blocks : vec![ // one item in this bc right now every block is on this canister
+                GetBlocksArgsAndCallback{
+                    args: archived_blocks_args,
+                    callback: Icrc3Callback::new(ic_cdk::api::id(), "icrc3_get_blocks"),
+                }
+            ],
+        };
+        reply((result,));
+        return;
+    });
     
-    let mut map = ICRC3Map::from_iter([
-        ("btype", ICRC3Value::Text(log.tx.op.icrc3_btype()))
-        ("ts", ICRC3Value::Nat(log.ts.into()),
-        ("tx", ICRC3Value::Map(tx)),
-    ]);
-    if let Some(phash) = log.phash {
-        map.insert("phash", ICRC3Value::Blob(phash));
-    }
-    if let Some(fee) = log.fee {
-        map.insert("fee", ICRC3Value::Nat(fee.into()));
-    }
-    
-    ICRC3Value::Map(map)
+    GetBlocksResult::placeholder()
 }
 
-fn hash_of_icrc3_block(block: &ICRC3Value) -> [u8; 32] {
-    cts_lib::tools::structural_hash(block).unwrap() // unwrap? maybe try it before any async-await-calls and make sure it works and return err if err. then if good, do calls, and unwrap structural-calls. 
+#[derive(CandidType, Deserialize)]
+pub struct SupportBlockType {
+    block_type: &'static str,
+    url: &'static str,
 }
-
-
 
 #[query]
-pub fn icrc3_get_tip_certificate()
-last_block_index
-last_block_hash
+pub fn icrc3_supported_block_types() -> Vec<SupportBlockType> {
+    vec![
+        SupportBlockType{
+            block_type: "1mint",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#mint-block-schema",
+        },
+        SupportBlockType{
+            block_type: "1burn",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#burn-block-schema",
+        },
+        SupportBlockType{
+            block_type: "1xfer",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#transfer-and-transfer-from-block-schema",
+        }
+    ]
+}
 
 
+#[derive(CandidType, Deserialize)]
+pub struct GetArchivesArgs {
+    // The last archive seen by the client.
+    // The Ledger will return archives coming
+    // after this one if set, otherwise it
+    // will return the first archives.
+    from : Option<Principal>,
+}
 
+#[derive(CandidType, Deserialize)]
+pub struct ArchiveData{
+    // The id of the archive
+    canister_id : Principal,
 
+    // The first block in the archive
+    start : u128,
 
+    // The last block in the archive
+    end : u128,
+}
+type GetArchivesResult = Vec<ArchiveData>;
 
+#[query]
+pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
+    let mut v = vec![];
+    if ( q.from.is_some() && q.from.unwrap() < ic_cdk::api::id() ) || q.from.is_none() {
+        v.push(ArchiveData{
+            canister_id: ic_cdk::api::id(),
+            start: 0,
+            end: with(&NEW_LOGS, |new_logs| new_logs.len()) as u128,
+        });
+    }
+    v
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct Icrc3DataCertificate {
+    // Signature of the root of the hash_tree
+    certificate : ByteBuf,
+    // CBOR encoded hash_tree
+    hash_tree : ByteBuf,
+}
+
+#[query]
+pub fn icrc3_get_tip_certificate() -> Option<Icrc3DataCertificate> {
+    None // DO THIS
+}
+
+pub fn set_root_hash(block_height: u64, cb_data: &crate::CBData) {
+    
+}
 
 
 

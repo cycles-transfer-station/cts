@@ -75,6 +75,7 @@ use candid::{
     CandidType,
     Deserialize,
 };
+use serde_bytes::ByteArray;
 
 // -------
 
@@ -306,8 +307,8 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
             memo: None,
             amount: q.quantity(),
             fee: q.posit_transfer_ledger_fee(),
-            from_subaccount: Some(principal_token_subaccount(&caller)),
-            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_SUBACCOUNT)},
+            from_subaccount: Some(ByteArray::new(principal_token_subaccount(&caller))),
+            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(ByteArray::new(*POSITIONS_SUBACCOUNT))},
             created_at_time: None,
         }
     ).await {
@@ -578,7 +579,7 @@ async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: Tra
             memo: None,
             amount: q.amount,
             fee: q.ledger_transfer_fee,
-            from_subaccount: Some(principal_token_subaccount(&caller)),
+            from_subaccount: Some(ByteArray::new(principal_token_subaccount(&caller))),
             to: q.to,
             created_at_time: None
         }   

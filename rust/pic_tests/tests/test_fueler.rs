@@ -96,9 +96,9 @@ fn fueler_test_2() {
     let fueler_mint_cycles_log = &bank::get_logs_backwards(&pic, BANK, &Account{owner: FUELER, subaccount: None}, None).logs[1].1;
     assert_eq!(
         fueler_mint_cycles_log.tx.op,
-        cts_lib::types::bank::log_types::Operation::Mint{
+        cts_lib::types::bank::new_log_types::Operation::Mint{
             to: cts_lib::icrc::IcrcId{owner: FUELER, subaccount: None},
-            kind: cts_lib::types::bank::log_types::MintKind::CMC{caller: FUELER, icp_block_height: 5}
+            kind: cts_lib::types::bank::new_log_types::MintKind::CMC{caller: FUELER, icp_block_height: 5}
         },
     );
 

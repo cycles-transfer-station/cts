@@ -479,4 +479,3 @@ pub fn set_up_canister_caller(pic: &PocketIc) -> Principal {
     );
     canister_caller
 }
-

@@ -14,7 +14,7 @@ use cts_lib::{
     },
     tools::localkey,
 };
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteBuf, ByteArray};
 
 
 
@@ -51,7 +51,7 @@ where F: Fn(Icrc1TransferQuest) -> LedgerTransferFuture {
                 to: q.payee,
                 fee: Some(ledger_transfer_fee),
                 memo: Some(q.memo),
-                from_subaccount: Some(*POSITIONS_SUBACCOUNT),
+                from_subaccount: Some(ByteArray::new(*POSITIONS_SUBACCOUNT)),
                 created_at_time: None,
                 amount: q.trade_mount.saturating_sub(q.cts_payout_fee).saturating_sub(ledger_transfer_fee),
             }

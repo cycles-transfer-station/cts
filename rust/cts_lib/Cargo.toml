@@ -22,3 +22,4 @@ leb128 = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }
 wasabi_leb128 = { workspace = true }
+postcard = { workspace = true }

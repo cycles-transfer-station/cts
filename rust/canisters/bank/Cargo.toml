@@ -18,3 +18,4 @@ ic-stable-structures = { workspace = true }
 serde_bytes = { workspace = true }
 rmp-serde = { workspace = true }
 icrc-ledger-types = { workspace = true }
+hex = { workspace = true }

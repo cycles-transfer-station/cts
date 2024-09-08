@@ -13,3 +13,4 @@ serde = { workspace = true }
 icrc-ledger-types = { workspace = true }
 more-asserts = { workspace = true }
 ic-ledger-types = { workspace = true }
+serde_bytes = { workspace = true }
