@@ -17,6 +17,7 @@ use cts_lib::{
         IcrcSubaccount,
         ICRC_DEFAULT_SUBACCOUNT,
         IcrcMetadataValue,
+        icrc3::Icrc3Value,
     },
     tools::{
         localkey::refcell::{with, with_mut},

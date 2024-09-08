@@ -16,7 +16,7 @@ pub use icrc_ledger_types::{
     icrc::generic_metadata_value::MetadataValue as IcrcMetadataValue,
 };
 
-
+pub mod icrc3;
 
 
 pub type IcrcSub = ByteArray<32>;

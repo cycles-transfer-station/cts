@@ -1,12 +1,10 @@
 use serde_bytes::Bytes;
 use cts_lib::{
     types::bank::new_log_types::{Log, Operation, MintKind},
-    icrc::IcrcId,
+    icrc::{IcrcId, icrc3::{Icrc3Value, Icrc3Map}},
 };
 
 
-mod value;
-pub use value::{Icrc3Value, Icrc3Map};
 
 
 
