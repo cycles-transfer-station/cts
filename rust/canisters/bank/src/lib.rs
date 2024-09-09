@@ -433,6 +433,10 @@ pub fn icrc1_supported_standards() -> Vec<SupportedStandard> {
             name: "ICRC-1".to_string(),
             url: "https://github.com/dfinity/ICRC-1".to_string(),
         },
+        SupportedStandard{
+            name: "ICRC-3".to_string(),
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3".to_string(),
+        },
     ]
 }
 
