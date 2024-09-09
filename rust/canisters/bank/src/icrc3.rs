@@ -1,12 +1,10 @@
+use serde::Serialize;
+use candid::{CandidType, Principal, Deserialize};
 use serde_bytes::{ByteBuf, Bytes};
 use cts_lib::{
     types::bank::new_log_types::{Log, Operation, MintKind},
     icrc::{IcrcId, icrc3::{Icrc3Value, Icrc3Map}},
 };
-
-
-
-
 
 
 
@@ -63,7 +61,6 @@ pub fn icrc3_value_of_a_block_log<'a>(log: &'a Log) -> Icrc3Value<'a> {
     Icrc3Value::Map(map)
 }
 
-
 fn icrc3_value_of_an_icrc_id<'a>(icrc_id: &'a IcrcId) -> Icrc3Value<'a> {
     let mut v = vec![Icrc3Value::Blob(Bytes::new(icrc_id.owner.as_slice()))];
     if let Some(ref subaccount) = icrc_id.subaccount {
@@ -73,8 +70,6 @@ fn icrc3_value_of_an_icrc_id<'a>(icrc_id: &'a IcrcId) -> Icrc3Value<'a> {
     }
     Icrc3Value::Array(v)
 }
-
-
 
 
 #[test]
@@ -112,7 +107,6 @@ const LABEL_LATEST_BLOCK_HASH: &[u8; 15] = b"last_block_hash";
 
 use ic_cdk::api::set_certified_data;
 use ic_certified_map::{HashTree, fork_hash, labeled_hash, leaf_hash, fork, labeled};
-use serde::Serialize;
 
 
 pub fn set_root_hash(last_block_index: u64, last_block_hash: [u8; 32]) {    
@@ -142,4 +136,154 @@ pub fn make_data_certificate_hash_tree(last_block_index: u64, last_block_hash: [
     serializer.self_describe().unwrap();
     tree.serialize(&mut serializer).unwrap();
     ByteBuf::from(serializer.into_inner())    
+}
+
+
+// --- TYPES ---
+
+#[derive(CandidType, Deserialize, Copy, Clone)]
+pub struct StartAndLength{
+    pub start: u128,
+    pub length: u128,
+}
+
+#[derive(CandidType)]
+pub struct IdAndBlock<'a>{
+    pub id: u128,
+    pub block: Icrc3Value<'a>,
+}
+
+#[derive(CandidType)]
+pub struct GetBlocksArgsAndCallback {
+    pub args : GetBlocksArgs,
+    pub callback : Icrc3Callback,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "candid::types::reference::Func")]
+pub struct Icrc3Callback {
+    pub canister_id: Principal,
+    pub method: String,
+}
+impl PartialOrd for Icrc3Callback {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Icrc3Callback {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.canister_id.cmp(&other.canister_id) {
+            std::cmp::Ordering::Equal => self.method.cmp(&other.method),
+            c => c,
+        }
+    }
+}
+impl Icrc3Callback {
+    pub fn new(canister_id: Principal, method: impl Into<String>) -> Self {
+        Self {
+            canister_id,
+            method: method.into(),
+        }
+    }
+}
+impl Clone for Icrc3Callback {
+    fn clone(&self) -> Self {
+        Self {
+            canister_id: self.canister_id,
+            method: self.method.clone(),
+        }
+    }
+}
+impl From<Icrc3Callback> for candid::types::reference::Func {
+    fn from(archive_fn: Icrc3Callback) -> Self {
+        let p: &Principal = &Principal::try_from(archive_fn.canister_id.as_ref())
+            .expect("could not deserialize principal");
+        Self {
+            principal: *p,
+            method: archive_fn.method,
+        }
+    }
+}
+impl TryFrom<candid::types::reference::Func> for Icrc3Callback {
+    type Error = String;
+    fn try_from(func: candid::types::reference::Func) -> Result<Self, Self::Error> {
+        let canister_id = Principal::try_from(func.principal.as_slice())
+            .map_err(|e| format!("principal is not a canister id: {}", e))?;
+        Ok(Self {
+            canister_id,
+            method: func.method,
+        })
+    }
+}
+impl CandidType for Icrc3Callback {
+    fn _ty() -> candid::types::Type {
+        candid::func!((GetBlocksArgs) -> (GetBlocksResult) query)
+    }
+    fn idl_serialize<S>(&self, serializer: S) -> Result<(), S::Error>
+    where
+        S: candid::types::Serializer,
+    {
+        candid::types::reference::Func::from(self.clone()).idl_serialize(serializer)
+    }
+}
+
+pub type GetBlocksArgs = Vec<StartAndLength>;
+
+#[derive(CandidType)]
+pub struct GetBlocksResult<'a> {
+    // Total number of blocks in the block log
+    pub log_length : u128,
+
+    // Blocks found locally to the Ledger
+    pub blocks : Vec<IdAndBlock<'a>>,
+
+    // List of callbacks to fetch the blocks that are not local
+    // to the Ledger, i.e. archived blocks
+    pub archived_blocks : Vec<GetBlocksArgsAndCallback>,
+}
+impl GetBlocksResult<'static> {
+    pub fn placeholder() -> Self {
+        Self{
+            log_length: 0,
+            blocks: vec![],
+            archived_blocks: vec![],
+        }
+    }
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct SupportBlockType {
+    pub block_type: &'static str,
+    pub url: &'static str,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct GetArchivesArgs {
+    // The last archive seen by the client.
+    // The Ledger will return archives coming
+    // after this one if set, otherwise it
+    // will return the first archives.
+    pub from : Option<Principal>,
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ArchiveData{
+    // The id of the archive
+    pub canister_id : Principal,
+
+    // The first block in the archive
+    pub start : u128,
+
+    // The last block in the archive
+    pub end : u128,
+}
+
+pub type GetArchivesResult = Vec<ArchiveData>;
+
+#[derive(CandidType, Deserialize)]
+pub struct Icrc3DataCertificate {
+    // Signature of the root of the hash_tree
+    pub certificate : ByteBuf,
+    // CBOR encoded hash_tree
+    pub hash_tree : ByteBuf,
 }

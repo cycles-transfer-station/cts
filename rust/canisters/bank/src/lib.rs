@@ -17,7 +17,6 @@ use cts_lib::{
         IcrcSubaccount,
         ICRC_DEFAULT_SUBACCOUNT,
         IcrcMetadataValue,
-        icrc3::Icrc3Value,
     },
     tools::{
         localkey::refcell::{with, with_mut},
@@ -54,6 +53,7 @@ use ic_cdk::{
             msg_cycles_available128,
             msg_cycles_accept128,
             call_with_payment128,
+            reply,
         },
         is_controller,
         canister_balance128,
@@ -71,7 +71,7 @@ use canister_tools::{
     MemoryId,
     get_virtual_memory,
 };
-use serde_bytes::ByteArray;
+use serde_bytes::{ByteArray, ByteBuf};
 
 
 mod dedup;
@@ -152,6 +152,7 @@ pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
 pub const PERMITTED_DRIFT_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 2) as u64;
 pub const MAX_LEN_OF_THE_DEDUP_MAP: usize = 1_000_000;
 
+pub const ICRC3_GET_BLOCKS_CHUNK_SIZE: usize = 2_000;
 
 // --------- GLOBAL-STATE ----------
 
@@ -925,136 +926,12 @@ pub fn canister_cycles_balance_minus_total_supply() -> i128 {
 
 // ICRC-3 METHODS
 
-#[derive(CandidType, Deserialize, Copy, Clone)]
-pub struct StartAndLength{
-    start: u128,
-    length: u128,
-}
-
-#[derive(CandidType)]
-pub struct IdAndBlock<'a>{
-    id: u128,
-    block: Icrc3Value<'a>,
-}
-
-#[derive(CandidType)]
-pub struct GetBlocksArgsAndCallback {
-    args : GetBlocksArgs,
-    callback : Icrc3Callback,
-}
-
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "candid::types::reference::Func")]
-pub struct Icrc3Callback {
-    pub canister_id: Principal,
-    pub method: String,
-}
-impl PartialOrd for Icrc3Callback {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for Icrc3Callback {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.canister_id.cmp(&other.canister_id) {
-            std::cmp::Ordering::Equal => self.method.cmp(&other.method),
-            c => c,
-        }
-    }
-}
-impl Icrc3Callback {
-    pub fn new(canister_id: Principal, method: impl Into<String>) -> Self {
-        Self {
-            canister_id,
-            method: method.into(),
-        }
-    }
-}
-impl Clone for Icrc3Callback {
-    fn clone(&self) -> Self {
-        Self {
-            canister_id: self.canister_id,
-            method: self.method.clone(),
-        }
-    }
-}
-impl From<Icrc3Callback> for candid::types::reference::Func {
-    fn from(archive_fn: Icrc3Callback) -> Self {
-        let p: &Principal = &Principal::try_from(archive_fn.canister_id.as_ref())
-            .expect("could not deserialize principal");
-        Self {
-            principal: *p,
-            method: archive_fn.method,
-        }
-    }
-}
-impl TryFrom<candid::types::reference::Func> for Icrc3Callback {
-    type Error = String;
-    fn try_from(func: candid::types::reference::Func) -> Result<Self, Self::Error> {
-        let canister_id = Principal::try_from(func.principal.as_slice())
-            .map_err(|e| format!("principal is not a canister id: {}", e))?;
-        Ok(Self {
-            canister_id,
-            method: func.method,
-        })
-    }
-}
-impl CandidType for Icrc3Callback {
-    fn _ty() -> candid::types::Type {
-        candid::func!((GetBlocksArgs) -> (GetBlocksResult) query)
-    }
-    fn idl_serialize<S>(&self, serializer: S) -> Result<(), S::Error>
-    where
-        S: candid::types::Serializer,
-    {
-        candid::types::reference::Func::from(self.clone()).idl_serialize(serializer)
-    }
-}
-
-
-
-
-
-
-
-pub type GetBlocksArgs = Vec<StartAndLength>;
-
-#[derive(CandidType)]
-pub struct GetBlocksResult<'a> {
-    // Total number of blocks in the block log
-    log_length : u128,
-
-    // Blocks found locally to the Ledger
-    blocks : Vec<IdAndBlock<'a>>,
-
-    // List of callbacks to fetch the blocks that are not local
-    // to the Ledger, i.e. archived blocks
-    archived_blocks : Vec<GetBlocksArgsAndCallback>,
-}
-impl GetBlocksResult<'static> {
-    fn placeholder() -> Self {
-        Self{
-            log_length: 0,
-            blocks: vec![],
-            archived_blocks: vec![],
-        }
-    }
-}
-
-const GET_BLOCKS_CHUNK_SIZE: usize = 2_000;
-
-use std::cmp::min;
-use serde::Serialize;
-use serde_bytes::ByteBuf;
-use ic_cdk::api::call::reply;
-
 
 // we do manual-reply bc the Icrc3Value type borrows its values so we can't return a borrowed value.
 // be careful because the compiler does not check to make sure that we call the ic_cdk::reply function and that we call it (only) once.
 #[query(manual_reply = true)]
 pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // return type is just for candid did file generation. we use ic_cdk::reply here.
-    
+    use std::cmp::min;
     with(&NEW_LOGS, |new_logs| { 
         
         // make sure at least one StartAndLength
@@ -1068,7 +945,7 @@ pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // retur
         }
         
         // do first range
-        let end_first_range: u64 = min(q[0].start as u64 + min(q[0].length as u64, GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
+        let end_first_range: u64 = min(q[0].start as u64 + min(q[0].length as u64, ICRC3_GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
         let mut first_chunk_logs: Vec<new_log_types::Log> = vec![]; 
         for i in (q[0].start as u64)..end_first_range {
             first_chunk_logs.push(new_logs.get(i).unwrap());
@@ -1101,12 +978,6 @@ pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // retur
     GetBlocksResult::placeholder()
 }
 
-#[derive(CandidType, Deserialize)]
-pub struct SupportBlockType {
-    block_type: &'static str,
-    url: &'static str,
-}
-
 #[query]
 pub fn icrc3_supported_block_types() -> Vec<SupportBlockType> {
     vec![
@@ -1125,29 +996,6 @@ pub fn icrc3_supported_block_types() -> Vec<SupportBlockType> {
     ]
 }
 
-
-#[derive(CandidType, Deserialize)]
-pub struct GetArchivesArgs {
-    // The last archive seen by the client.
-    // The Ledger will return archives coming
-    // after this one if set, otherwise it
-    // will return the first archives.
-    from : Option<Principal>,
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct ArchiveData{
-    // The id of the archive
-    canister_id : Principal,
-
-    // The first block in the archive
-    start : u128,
-
-    // The last block in the archive
-    end : u128,
-}
-type GetArchivesResult = Vec<ArchiveData>;
-
 #[query]
 pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
     let mut v = vec![];
@@ -1159,14 +1007,6 @@ pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
         });
     }
     v
-}
-
-#[derive(CandidType, Deserialize)]
-pub struct Icrc3DataCertificate {
-    // Signature of the root of the hash_tree
-    certificate : ByteBuf,
-    // CBOR encoded hash_tree
-    hash_tree : ByteBuf,
 }
 
 #[query]
