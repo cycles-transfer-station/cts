@@ -13,7 +13,7 @@ candid = { workspace = true }
 sha2 = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
-icrc-ledger-types = { workspace = true }
+icrc-ledger-types = "0.1.6" # canisters use the cts_lib::icrc module for the icrc-types.
 ic-stable-structures = { workspace = true }
 futures = { workspace = true }
 rmp-serde = { workspace = true }
