@@ -226,6 +226,7 @@ pub mod upgrade_canisters {
     use std::collections::HashSet;
     use crate::types::{CallError, CanisterCode};
     use candid::{CandidType, Deserialize, Principal};
+    use outsiders::management_canister::{Service as ManagementCanisterService, TakeCanisterSnapshotArgs, Snapshot, SnapshotId};
     
     #[derive(CandidType, Deserialize)]
     pub struct ControllerUpgradeCSQuest {
@@ -238,18 +239,25 @@ pub mod upgrade_canisters {
     #[derive(CandidType, Deserialize, Default, Debug, PartialEq, Eq)]
     pub struct UpgradeOutcome {
         pub stop_canister_result: Option<Result<(), CallError>>,
+        pub take_canister_snapshot_result: Option<Result<Snapshot, CallError>>,
         pub install_code_result: Option<Result<(), CallError>>,    
         pub start_canister_result: Option<Result<(), CallError>>,
     }
-    
-    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> Vec<(Principal, UpgradeOutcome)> {    
-        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest))).await // // use async fn upgrade_canister_, (not async block)
+        
+    pub struct UpgradeCanister{
+        pub canister_id: Principal,
+        pub take_canister_snapshot: Option<Option<SnapshotId>>, // outer option is whether to take a snapshot or not. second/inner option is if want to replace a snapshot
+    }
+    pub async fn upgrade_canisters(ucs: Vec<UpgradeCanister>, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> Vec<(Principal, UpgradeOutcome)> {    
+        futures::future::join_all(ucs.into_iter().map(|uc| upgrade_canister_(uc, canister_code, post_upgrade_quest))).await // // use async fn upgrade_canister_, (not async block)
     }
     
-    async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
+    async fn upgrade_canister_(uc: UpgradeCanister, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
         use ic_cdk::api::management_canister::main::{start_canister,stop_canister, CanisterIdRecord};
         use crate::management_canister::{InstallCodeQuest, InstallCodeMode, install_code};    
         use crate::tools::call_error_as_u32_and_string;
+        
+        let UpgradeCanister{ canister_id: c, take_canister_snapshot, } = uc;
         
         let mut upgrade_outcome = UpgradeOutcome::default();
                 
@@ -257,15 +265,30 @@ pub mod upgrade_canisters {
         if upgrade_outcome.stop_canister_result.as_ref().unwrap().is_err() {
             return (c, upgrade_outcome);
         } 
-                
-        let a = InstallCodeQuest {
-            mode: InstallCodeMode::upgrade,
-            canister_id: c,
-            wasm_module: canister_code.module(),
-            arg: post_upgrade_quest,
-        };
-        upgrade_outcome.install_code_result = Some(install_code(a).await);
-                
+        
+        if let Some(replace_snapshot) = take_canister_snapshot {
+            let mc_service = ManagementCanisterService(Principal::management_canister());
+            upgrade_outcome.take_canister_snapshot_result = Some(mc_service.take_canister_snapshot(
+                TakeCanisterSnapshotArgs{
+                    canister_id: c,
+                    replace_snapshot,
+                }
+            ).await.map(|t|t.0).map_err(call_error_as_u32_and_string));
+        }
+        
+        if upgrade_outcome.take_canister_snapshot_result.is_none() 
+        || upgrade_outcome.take_canister_snapshot_result.as_ref().unwrap().is_ok() {
+            
+            let a = InstallCodeQuest {
+                mode: InstallCodeMode::upgrade,
+                canister_id: c,
+                wasm_module: canister_code.module(),
+                arg: post_upgrade_quest,
+            };
+            upgrade_outcome.install_code_result = Some(install_code(a).await);
+        
+        }    
+        
         upgrade_outcome.start_canister_result = Some(start_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
                 
         return (c, upgrade_outcome);

@@ -22,6 +22,7 @@ use cts_lib::{
         call_error_as_u32_and_string,
         sha256,
         upgrade_canisters::{
+            UpgradeCanister,
             upgrade_canisters, 
             ControllerUpgradeCSQuest, 
             UpgradeOutcome,
@@ -1095,7 +1096,7 @@ pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQues
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs, &cc, &q.post_upgrade_quest).await; 
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs.into_iter().map(|c| UpgradeCanister{ canister_id: c, take_canister_snapshot: None}).collect(), &cc, &q.post_upgrade_quest).await; 
     
     // update successes in the main data.
     with_mut(&LOG_STORAGE_DATA, |log_storage_data| {

@@ -280,6 +280,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                 mid_call_data.icrc1token_trade_contract_data = Some(TradeContractData{
                     tc_module_hash,
                     latest_upgrade_timestamp_nanos: time_nanos_u64(),
+                    latest_snapshot: None,
                 });
             } 
             Err(call_error) => {
@@ -382,29 +383,47 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
         cm_main_data.tc_canister_code.clone()
     });
     
-    let tcs: Vec<Principal> = match q.specific_cs {
-        Some(tcs) => tcs.into_iter().collect(),
-        None => {
-            with(&CM_MAIN_DATA, |cm_main_data| {
-                cm_main_data.trade_contracts.iter()
-                .filter_map(|tc| {
-                    if &tc.1.tc_module_hash != tc_cc.module_hash() {
-                        Some(tc.0.trade_contract_canister_id.clone())
-                    } else {
-                        None
-                    }
-                })
-                .take(200)
-                .collect()
-            })
-        }
-    };
+    let ucs: Vec<UpgradeCanister> = with(&CM_MAIN_DATA, |cm_main_data| {
+        cm_main_data.trade_contracts.iter()
+        .filter_map(|tc| {
+            if let Some(ref specific_cs) = q.specific_cs {
+                if specific_cs.contains(&tc.0.trade_contract_canister_id) == false {
+                    return None;
+                }
+            } else if &tc.1.tc_module_hash == tc_cc.module_hash() {
+                return None; // if no specific cs are chosen, then don't upgrade canisters that already have the latest module hash.
+            }
+            Some(
+                UpgradeCanister{
+                    canister_id: tc.0.trade_contract_canister_id.clone(),
+                    take_canister_snapshot: Some(tc.1.latest_snapshot.as_ref().map(|snapshot| snapshot.id.clone())),
+                }
+            )
+        })
+        .take(200)
+        .collect()
+    });
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest).await;
+    if let Some(ref specific_cs) = q.specific_cs {
+        if specific_cs.len() != ucs.len() {
+            trap("specific_cs.len() != ucs.len()");
+        }
+    }
+    
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(ucs, &tc_cc, &q.post_upgrade_quest).await;
     
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         for (tc, uo) in rs.iter() {
+            if let Some(ref r) = uo.take_canister_snapshot_result {
+                if let Ok(ref new_snapshot) = r {
+                    if let Some(i) = cm_main_data.trade_contracts.iter_mut().find(|i| i.0.trade_contract_canister_id == *tc) {
+                        i.1.latest_snapshot = Some(new_snapshot.clone());
+                    } else {
+                        ic_cdk::print("check this");
+                    }
+                }
+            }
             if let Some(ref r) = uo.install_code_result {
                 if r.is_ok() {
                     if let Some(i) = cm_main_data.trade_contracts.iter_mut().find(|i| i.0.trade_contract_canister_id == *tc) {
