@@ -1004,7 +1004,7 @@ pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
         v.push(ArchiveData{
             canister_id: ic_cdk::api::id(),
             start: 0,
-            end: with(&NEW_LOGS, |new_logs| new_logs.len()) as u128,
+            end: with(&NEW_LOGS, |new_logs| new_logs.len() - 1) as u128,
         });
     }
     v
