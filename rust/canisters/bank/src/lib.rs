@@ -87,7 +87,6 @@ pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
     icrc1_transfer_dedup_map: DedupMap,
-    latest_block_hash: Option<ByteArray<32>>, // none if no blocks have been create yet
 }
 
 impl CBData {
@@ -96,7 +95,6 @@ impl CBData {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
             icrc1_transfer_dedup_map: DedupMap::new(),
-            latest_block_hash: None,
         }
     }
 }
@@ -194,7 +192,6 @@ fn post_upgrade() {
                 users_mint_cycles: old.users_mint_cycles,
                 total_supply: old.total_supply,
                 icrc1_transfer_dedup_map: DedupMap::new(),
-                latest_block_hash: None, // it will update in the next section
             }
         }
     ));
@@ -224,7 +221,7 @@ fn post_upgrade() {
                         op: match old_log.tx.op {
                             old_log_types::Operation::Mint{ to, kind } => {
                                 new_log_types::Operation::Mint{ 
-                                    to: IcrcId{ owner: to.owner, subaccount: to.subaccount.map(ByteArray::new) }, 
+                                    to: to.into(), 
                                     kind: match kind {
                                         old_log_types::MintKind::CyclesIn{ from_canister } => {
                                             new_log_types::MintKind::CyclesIn{ from_canister }
@@ -237,14 +234,14 @@ fn post_upgrade() {
                             }
                             old_log_types::Operation::Burn{ from, for_canister } => {
                                 new_log_types::Operation::Burn{ 
-                                    from: IcrcId{ owner: from.owner, subaccount: from.subaccount.map(ByteArray::new) }, 
+                                    from: from.into(), 
                                     for_canister: for_canister, 
                                 }
                             }
                             old_log_types::Operation::Xfer{ from, to } => {
                                 new_log_types::Operation::Xfer{ 
-                                    from: IcrcId{ owner: from.owner, subaccount: from.subaccount.map(ByteArray::new) }, 
-                                    to: IcrcId{ owner: to.owner, subaccount: to.subaccount.map(ByteArray::new) },  
+                                    from: from.into(), 
+                                    to: to.into(),  
                                 }
                             }
                         }
@@ -255,11 +252,6 @@ fn post_upgrade() {
                 
                 new_logs.push(&new_log).unwrap();     
             }
-            
-            with_mut(&CB_DATA, |cb_data| {
-                cb_data.latest_block_hash = phash; 
-            });
-
         });
     });
     
@@ -289,8 +281,7 @@ fn post_upgrade() {
                     old_log_types::Operation::Mint{ to: old_to, kind: old_kind } => {
                         match new_log.tx.op {
                             new_log_types::Operation::Mint{ to: new_to, kind: new_kind } => {
-                                assert_eq!(old_to.owner, new_to.owner);
-                                assert_eq!(old_to.subaccount.as_ref(), new_to.subaccount.as_deref());
+                                assert_eq!(old_to, new_to.into());
                                 match old_kind {
                                     old_log_types::MintKind::CyclesIn{ from_canister: old_from_canister } => {
                                         match new_kind {
@@ -317,8 +308,7 @@ fn post_upgrade() {
                     old_log_types::Operation::Burn{ from: old_from, for_canister: old_for_canister } => {
                         match new_log.tx.op {
                             new_log_types::Operation::Burn{ from: new_from, for_canister: new_for_canister } => {
-                                assert_eq!(old_from.owner, new_from.owner);
-                                assert_eq!(old_from.subaccount.as_ref(), new_from.subaccount.as_deref());
+                                assert_eq!(old_from, new_from.into());
                                 assert_eq!(old_for_canister, new_for_canister);
                             }
                             _ => trap(&format!("Different logs {}", i)),
@@ -327,10 +317,8 @@ fn post_upgrade() {
                     old_log_types::Operation::Xfer{ from: old_from, to: old_to } => {
                         match new_log.tx.op {
                             new_log_types::Operation::Xfer{ from: new_from, to: new_to } => {
-                                assert_eq!(old_from.owner, new_from.owner);
-                                assert_eq!(old_from.subaccount.as_ref(), new_from.subaccount.as_deref());
-                                assert_eq!(old_to.owner, new_to.owner);
-                                assert_eq!(old_to.subaccount.as_ref(), new_to.subaccount.as_deref());                                
+                                assert_eq!(old_from, new_from.into());
+                                assert_eq!(old_to, new_to.into());                                
                             } 
                             _ => trap(&format!("Different logs {}", i)),
                         }
