@@ -377,6 +377,13 @@ fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut C
     cb_data.total_supply = cb_data.total_supply.saturating_sub(sub_cycles);    
 }
 
+fn get_latest_block_hash(logs: &NewLogs) -> Option<ByteArray<32>> {
+    match logs.len() {
+        0 => None,
+        x => Some(ByteArray::new(icrc3_value_of_a_block_log(&logs.get(x - 1).unwrap()).hash())),      
+    }
+}
+
 
 
 // ------- METHODS ---------
@@ -494,30 +501,26 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     
     let block_height: u64 = {
         with_mut(&NEW_LOGS, |new_logs| {
-            with_mut(&CB_DATA, |cb_data| { 
-                
-                let log: new_log_types::Log = new_log_types::Log{
-                    phash: cb_data.latest_block_hash, 
-                    ts: time_nanos_u64(),
-                    fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                    tx: new_log_types::LogTX{
-                        op: new_log_types::Operation::Xfer{ from: caller_icrc_id, to: q.to },
-                        fee: q.fee,
-                        amt: q.amount,
-                        memo: q.memo,
-                        ts: q.created_at_time,
-                    }
-                };
-                
-                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
-                
-                new_logs.push(&log).unwrap(); // if growfailed then trap and roll back the transfer.
-                let block_height = new_logs.len() - 1;
-                
-                set_root_hash(block_height, cb_data);
-                
-                block_height
-            })
+                                
+            let log: new_log_types::Log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs), 
+                ts: time_nanos_u64(),
+                fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Xfer{ from: caller_icrc_id, to: q.to },
+                    fee: q.fee,
+                    amt: q.amount,
+                    memo: q.memo,
+                    ts: q.created_at_time,
+                }
+            };
+                            
+            new_logs.push(&log).unwrap(); // if growfailed then trap and roll back the transfer.
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
         })
     };
     
@@ -627,31 +630,27 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
     let block_height: u64 = {
         with_mut(&NEW_LOGS, |new_logs| {
-            with_mut(&CB_DATA, |cb_data| {
                 
-                let log = new_log_types::Log{
-                    phash: cb_data.latest_block_hash, 
-                    ts: time_nanos_u64(),
-                    fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                    tx: new_log_types::LogTX{
-                        op: new_log_types::Operation::Mint{ to: q.to, kind: new_log_types::MintKind::CyclesIn{ from_canister: caller() } },
-                        fee: q.fee,
-                        amt: q.cycles,
-                        memo: q.memo,
-                        ts: None,
-                    }
-                };
-                
-                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
-                
-                new_logs.push(&log).unwrap();
-                let block_height = new_logs.len() - 1;
-                
-                set_root_hash(block_height, cb_data);
-                
-                block_height
-                
-            })
+            let log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs), 
+                ts: time_nanos_u64(),
+                fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Mint{ to: q.to, kind: new_log_types::MintKind::CyclesIn{ from_canister: caller() } },
+                    fee: q.fee,
+                    amt: q.cycles,
+                    memo: q.memo,
+                    ts: None,
+                }
+            };
+                            
+            new_logs.push(&log).unwrap();
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
+            
         })
     };
     
@@ -711,30 +710,26 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
         Ok(()) => {
             let block_height: u64 = {
                 with_mut(&NEW_LOGS, |new_logs| {
-                    with_mut(&CB_DATA, |cb_data| {
-                        let log = new_log_types::Log{
-                            phash: cb_data.latest_block_hash,
-                            ts: time_nanos_u64(),
-                            fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                            tx: new_log_types::LogTX{
-                                op: new_log_types::Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
-                                fee: q.fee,
-                                amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
-                                memo: q.memo,
-                                ts: None,
-                            }
-                        };
+                    let log = new_log_types::Log{
+                        phash: get_latest_block_hash(new_logs),
+                        ts: time_nanos_u64(),
+                        fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
+                        tx: new_log_types::LogTX{
+                            op: new_log_types::Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
+                            fee: q.fee,
+                            amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
+                            memo: q.memo,
+                            ts: None,
+                        }
+                    };
+                    
+                    new_logs.push(&log).unwrap();
+                    let block_height = new_logs.len() - 1;
+                    
+                    set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+                    
+                    block_height
                         
-                        cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
-                        
-                        new_logs.push(&log).unwrap();
-                        let block_height = new_logs.len() - 1;
-                        
-                        set_root_hash(block_height, cb_data);
-                        
-                        block_height
-                        
-                    })
                 })
             };
                     
@@ -871,30 +866,25 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
     
     let block_height: u64 = {
         with_mut(&NEW_LOGS, |new_logs| {
-            with_mut(&CB_DATA, |cb_data| {
-                let log = new_log_types::Log{
-                    phash: cb_data.latest_block_hash,
-                    ts: time_nanos_u64(),
-                    fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
-                    tx: new_log_types::LogTX{
-                        op: new_log_types::Operation::Mint{ to: mid_call_data.quest.to, kind: new_log_types::MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
-                        fee: mid_call_data.quest.fee,
-                        amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
-                        memo: mid_call_data.quest.memo,
-                        ts: None,
-                    }
-                };
-                
-                cb_data.latest_block_hash = Some(ByteArray::new(icrc3_value_of_a_block_log(&log).hash()));
-                
-                new_logs.push(&log).unwrap();
-                let block_height = new_logs.len() - 1;
-                
-                set_root_hash(block_height, cb_data);
-                
-                block_height
-                
-            })
+            let log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs),
+                ts: time_nanos_u64(),
+                fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Mint{ to: mid_call_data.quest.to, kind: new_log_types::MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
+                    fee: mid_call_data.quest.fee,
+                    amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
+                    memo: mid_call_data.quest.memo,
+                    ts: None,
+                }
+            };
+            
+            new_logs.push(&log).unwrap();
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
         })
     };
     
@@ -1193,11 +1183,23 @@ pub struct Icrc3DataCertificate {
 
 #[query]
 pub fn icrc3_get_tip_certificate() -> Option<Icrc3DataCertificate> {
-    None // DO THIS
-}
-
-pub fn set_root_hash(block_height: u64, cb_data: &crate::CBData) {
-    
+    with(&NEW_LOGS, |new_logs| {
+        if new_logs.len() == 0 {
+            return None;
+        }
+        ic_cdk::api::data_certificate()
+            .map(|certificate| {
+                Icrc3DataCertificate{
+                    certificate: ByteBuf::from(certificate),
+                    hash_tree: {
+                        let last_block_index = new_logs.len() - 1;
+                        let last_block_hash: [u8; 32] 
+                            = icrc3_value_of_a_block_log(&new_logs.get(last_block_index).unwrap()).hash();
+                        make_data_certificate_hash_tree(last_block_index, last_block_hash) 
+                    }
+                }
+            })  
+    })
 }
 
 

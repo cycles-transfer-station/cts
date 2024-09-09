@@ -38,11 +38,14 @@ dependencies = [
  "cts_lib",
  "hex",
  "ic-cdk 0.15.1",
+ "ic-certified-map",
  "ic-stable-structures",
  "icrc-ledger-types",
+ "leb128",
  "rmp-serde",
  "serde",
  "serde_bytes",
+ "serde_cbor",
 ]
 
 [[package]]
