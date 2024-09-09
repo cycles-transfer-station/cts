@@ -14,7 +14,7 @@ use ic_stable_structures::{Storable, storable::Bound};
 
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Log {
-    pub phash: Option<ByteArray<32>>, // none if first block // check that existing blocks will be able to deserialize a new optional field. // or maybe in the post-upgrade, change these values to a new serialization format with phash, and serde_bytes for the subaccounts.
+    pub phash: Option<ByteArray<32>>, // none if first block
     pub ts: u64,
     pub fee: Option<Cycles>, // if the user does not specify the fee in the request
     pub tx: LogTX,
