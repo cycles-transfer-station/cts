@@ -935,7 +935,7 @@ pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // retur
     with(&NEW_LOGS, |new_logs| { 
         
         // make sure at least one StartAndLength
-        if q.len() == 0 {
+        if q.len() == 0 || q[0].start >= (new_logs.len() as u128) {
             reply((GetBlocksResult {
                 log_length: new_logs.len() as u128,
                 blocks: vec![],
@@ -945,19 +945,20 @@ pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // retur
         }
         
         // do first range
-        let end_first_range: u64 = min(q[0].start as u64 + min(q[0].length as u64, ICRC3_GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
+        let first_range = q[0];
+        let end_first_range: u64 = min(first_range.start as u64 + min(first_range.length as u64, ICRC3_GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
         let mut first_chunk_logs: Vec<new_log_types::Log> = vec![]; 
-        for i in (q[0].start as u64)..end_first_range {
+        for i in (first_range.start as u64)..end_first_range {
             first_chunk_logs.push(new_logs.get(i).unwrap());
         }
-        let blocks = (q[0].start..(end_first_range as u128)).zip(first_chunk_logs.iter().map(icrc3_value_of_a_block_log)).map(|(i, b)| IdAndBlock{ id: i, block: b }).collect();    
+        let blocks = (first_range.start..(end_first_range as u128)).zip(first_chunk_logs.iter().map(icrc3_value_of_a_block_log)).map(|(i, b)| IdAndBlock{ id: i, block: b }).collect();    
         let mut archived_blocks_args: GetBlocksArgs = q.iter().copied().skip(1).collect(); // skip first range 
-        if end_first_range < (q[0].start + q[0].length) as u64 && end_first_range < new_logs.len() {
+        if end_first_range < (first_range.start + first_range.length) as u64 && end_first_range < new_logs.len() {
             archived_blocks_args.insert(
                 0,
                 StartAndLength{
                     start: end_first_range as u128,
-                    length: q[0].start + q[0].length - (end_first_range as u128),
+                    length: first_range.start + first_range.length - (end_first_range as u128),
                 }
             );
         }
