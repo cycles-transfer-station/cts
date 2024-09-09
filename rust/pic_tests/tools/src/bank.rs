@@ -6,7 +6,7 @@ pub fn mint_cycles(pic: &PocketIc, countid: &Account, burn_icp: u128) -> Cycles 
     let mint_cycles_quest = MintCyclesQuest{ 
         burn_icp,
         burn_icp_transfer_fee: ICP_LEDGER_TRANSFER_FEE, 
-        to: countid.clone(),
+        to: countid.clone().into(),
         fee: None,
         memo: None,
     };
