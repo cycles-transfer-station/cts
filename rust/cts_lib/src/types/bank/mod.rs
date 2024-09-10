@@ -3,7 +3,8 @@ use crate::icrc::{IcrcId, BlockId, IcrcSubaccount};
 use serde_bytes::ByteBuf;
 use crate::cmc::{LedgerTopupCyclesCmcIcpTransferError, LedgerTopupCyclesCmcNotifyError};
 
-pub mod log_types;
+pub mod old_log_types;
+pub mod new_log_types;
 
 
 pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
@@ -15,7 +16,6 @@ pub struct CyclesInQuest {
     pub fee: Option<Cycles>,
     pub to: IcrcId,
     pub memo: Option<ByteBuf>,
-    pub created_at_time: Option<u64>
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
@@ -23,8 +23,7 @@ pub enum CyclesInError {
     MsgCyclesTooLow,
     BadFee{ expected_fee: Cycles },
     GenericError{ error_code: u128, message: String },
-    TooOld,
-    CreatedInFuture{ ledger_time: u64 }, 
+    CBIsBusy,
 }
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -34,7 +33,6 @@ pub struct CyclesOutQuest {
     pub from_subaccount: Option<IcrcSubaccount>,
     pub memo: Option<ByteBuf>,
     pub for_canister: Principal,
-    pub created_at_time: Option<u64>   
 }
 
 #[derive(CandidType, Deserialize, Debug, PartialEq, Eq)]
@@ -42,9 +40,8 @@ pub enum CyclesOutError {
     InsufficientFunds{ balance: Cycles },
     BadFee{ expected_fee: Cycles },
     DepositCyclesCallError(CallError),
-    TooOld,
-    CreatedInFuture{ ledger_time: u64 }, 
     GenericError{ error_code: u128, message: String },    
+    CBIsBusy,
 }
 
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
@@ -54,7 +51,6 @@ pub struct MintCyclesQuest {
     pub to: IcrcId,   
     pub fee: Option<Cycles>,
     pub memo: Option<ByteBuf>,    
-    pub created_at_time: Option<u64>    
 }
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -62,8 +58,6 @@ pub enum MintCyclesError {
     UserIsInTheMiddleOfADifferentCall(UserIsInTheMiddleOfADifferentCall),
     MinimumBurnIcp{ minimum_burn_icp: u128 },
     BadFee{ expected_fee: Cycles },
-    TooOld,
-    CreatedInFuture{ ledger_time: u64 },
     GenericError{ error_code: u128, message: String },
     CBIsBusy,
     LedgerTopupCyclesCmcIcpTransferError(LedgerTopupCyclesCmcIcpTransferError),
@@ -101,6 +95,6 @@ pub enum UserIsInTheMiddleOfADifferentCall {
 
 #[derive(CandidType, Deserialize)]
 pub struct GetLogsBackwardsSponse {
-    pub logs: Vec<(BlockId, log_types::Log)>,
+    pub logs: Vec<(BlockId, new_log_types::Log)>,
     pub is_last_chunk: bool,
 }

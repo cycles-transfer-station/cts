@@ -18,7 +18,7 @@ use cts_lib::{
         time_nanos,
         time_nanos_u64,
         time_seconds,
-        caller_is_controller_gaurd,
+        caller_is_controller_guard,
         call_error_as_u32_and_string,
         sha256,
         upgrade_canisters::{
@@ -75,6 +75,7 @@ use candid::{
     CandidType,
     Deserialize,
 };
+use serde_bytes::ByteArray;
 
 // -------
 
@@ -234,9 +235,7 @@ pub fn minimum_tokens_match() -> Tokens {
 pub fn minimum_cycles_match() -> Cycles {
     _minimum_match(localkey::cell::get(&CYCLES_BANK_TRANSFER_FEE))
 }
-pub fn _minimum_match(ledger_transfer_fee: u128) -> Tokens {
-    10_000/*for the fee ten-thousandths*/ + ledger_transfer_fee*10
-}
+
 
 // -----------------
 
@@ -308,8 +307,8 @@ async fn __trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestTyp
             memo: None,
             amount: q.quantity(),
             fee: q.posit_transfer_ledger_fee(),
-            from_subaccount: Some(principal_token_subaccount(&caller)),
-            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(*POSITIONS_SUBACCOUNT)},
+            from_subaccount: Some(ByteArray::new(principal_token_subaccount(&caller))),
+            to: IcrcId{owner: ic_cdk::id(), subaccount: Some(ByteArray::new(*POSITIONS_SUBACCOUNT))},
             created_at_time: None,
         }
     ).await {
@@ -580,7 +579,7 @@ async fn _transfer_balance<TradeQuestType: TradeQuest>(caller: Principal, q: Tra
             memo: None,
             amount: q.amount,
             fee: q.ledger_transfer_fee,
-            from_subaccount: Some(principal_token_subaccount(&caller)),
+            from_subaccount: Some(ByteArray::new(principal_token_subaccount(&caller))),
             to: q.to,
             created_at_time: None
         }   
@@ -1045,7 +1044,7 @@ pub extern "C" fn view_payouts_errors() {
 #[export_name = "canister_update controller_clear_payouts_errors"]
 pub extern "C" fn controller_clear_payouts_errors() {
 
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.do_payouts_errors = Vec::new();
@@ -1059,7 +1058,7 @@ pub extern "C" fn controller_clear_payouts_errors() {
 
 #[update]
 pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Vec<(Principal, UpgradeOutcome)> {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     #[allow(non_snake_case)]
     let LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = match log_storage_type {
@@ -1096,7 +1095,7 @@ pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQues
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs, &cc, &q.post_upgrade_quest).await; 
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs, &cc, &q.post_upgrade_quest, true).await; 
     
     // update successes in the main data.
     with_mut(&LOG_STORAGE_DATA, |log_storage_data| {
@@ -1132,7 +1131,7 @@ pub struct ControllerCallCanisterQuest {
 
 #[export_name = "canister_update controller_call_canister"]
 pub extern "C" fn controller_call_canister() {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     let (q,): (ControllerCallCanisterQuest,) = arg_data(ArgDecoderConfig::default());
             

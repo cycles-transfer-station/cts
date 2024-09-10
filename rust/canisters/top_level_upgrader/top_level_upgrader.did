@@ -1,0 +1,2 @@
+type CanisterCode = record { module_hash : blob; module : blob };
+service : { upgrade_top_level_canister : (principal, CanisterCode, blob) -> () }

@@ -26,6 +26,8 @@ cm_trades_storage_did_path := rust_canisters_path / "market/cm_trades_storage/cm
 fueler_filename := "fueler.wasm"
 fueler_did_path := rust_canisters_path / "fueler/fueler.did"
 
+top_level_upgrader_filename := "top_level_upgrader.wasm"
+top_level_upgrader_did_path := rust_canisters_path / "top_level_upgrader/top_level_upgrader.did"
 
 cargo-build-wasms profile:
     rm -rf build && mkdir build
@@ -60,7 +62,8 @@ build profile *git_commit_id: (cargo-build-wasms profile)
         "{{cm_tc_filename}}","{{cm_tc_did_path}}" \
         "{{cm_positions_storage_filename}}","{{cm_positions_storage_did_path}}" \
         "{{cm_trades_storage_filename}}","{{cm_trades_storage_did_path}}" \
-        "{{fueler_filename}}","{{fueler_did_path}}"; \
+        "{{fueler_filename}}","{{fueler_did_path}}" \
+        "{{top_level_upgrader_filename}}","{{top_level_upgrader_did_path}}"; \
     do
         IFS=","
         set -- $i
@@ -74,8 +77,8 @@ build profile *git_commit_id: (cargo-build-wasms profile)
         fi
     done
 
-test-unit:
-    cd {{justfile_directory()}}/rust && cargo test
+test-unit *cargo_test_params:
+    cd {{justfile_directory()}}/rust && cargo test {{cargo_test_params}}
     
 test-pic *cargo_test_params: (build "dev")
     cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test {{cargo_test_params}}

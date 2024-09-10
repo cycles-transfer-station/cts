@@ -6,11 +6,11 @@ use cts_lib::{
     types::{
         CallError,
         CallCanisterQuest,
-        bank::{*, log_types::*},
+        bank::{*, new_log_types::*},
     },
     icrc::BlockId,
 };
-use icrc_ledger_types::icrc1::{account::Account, account::Account as IcrcId, transfer::{TransferArg, TransferError}};
+use icrc_ledger_types::icrc1::{account::Account, transfer::{TransferArg, TransferError}};
 use more_asserts::*;
 use pic_tools::{*, bank::*};
 
@@ -28,10 +28,9 @@ fn test_mint_cycles() {
     let mint_cycles_quest = MintCyclesQuest{ 
         burn_icp,
         burn_icp_transfer_fee: ICP_LEDGER_TRANSFER_FEE, 
-        to: Account{owner: user, subaccount: None},
+        to: Account{owner: user, subaccount: None}.into(),
         fee: None,
         memo: None,    
-        created_at_time: None,
     };
     
     let mint_cycles_result = call_candid_as::<_, (MintCyclesResult,)>(&pic, BANK, RawEffectivePrincipal::None, user, "mint_cycles", (mint_cycles_quest.clone(),)).unwrap().0;
@@ -55,10 +54,11 @@ fn test_mint_cycles() {
     assert_eq!(
         user_logs[0].1,
         Log{
+            phash: user_logs[0].1.phash, // forthedo! verify this.
             ts: user_logs[0].1.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: IcrcId{owner:user, subaccount: None}, kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
+                op: Operation::Mint{ to: Account{owner:user, subaccount: None}.into(), kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
                 fee: None,
                 amt: mint_cycles_mount,
                 memo: None,
@@ -83,10 +83,11 @@ fn test_mint_for_subaccount() {
     assert_eq!(
         log,
         &Log{
+            phash: log.phash, // forthedo! verify this.
             ts: log.ts,
             fee: Some(BANK_TRANSFER_FEE),
             tx: LogTX{
-                op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
+                op: Operation::Mint{ to: Account{owner: user, subaccount: Some(subaccount)}.into(), kind: MintKind::CMC{ caller: user, icp_block_height: 2 } },
                 fee: None,
                 amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
                 memo: None,
@@ -123,10 +124,11 @@ fn test_transfer() {
         assert_eq!(
             log,
             &Log{
+                phash: log.phash, // forthedo! verify this.
                 ts: log.ts,
                 fee: None,
                 tx: LogTX{
-                    op: Operation::Xfer{ from: IcrcId{owner: user, subaccount: None}, to: IcrcId{owner: user2, subaccount: None} },
+                    op: Operation::Xfer{ from: Account{owner: user, subaccount: None }.into(), to: Account{owner: user2, subaccount: None}.into() },
                     fee: Some(BANK_TRANSFER_FEE),
                     amt: transfer_cycles_mount,
                     memo: None,
@@ -197,9 +199,8 @@ fn test_cycles_in() {
             arg_raw: candid::encode_one(CyclesInQuest{
                 cycles,
                 fee: Some(BANK_TRANSFER_FEE),
-                to: for_account,
+                to: for_account.into(),
                 memo: None,
-                created_at_time: None,
             }).unwrap(),
             cycles: if i == 0 { 
                 cycles + BANK_TRANSFER_FEE - 1// wrong amount of cycles in the call
@@ -220,10 +221,11 @@ fn test_cycles_in() {
             assert_eq!(
                 log,
                 &Log{
+                    phash: log.phash, // forthedo! verify this.
                     ts: log.ts,
                     fee: None,
                     tx: LogTX{
-                        op: Operation::Mint{ to: IcrcId{owner: user, subaccount: Some(subaccount)}, kind: MintKind::CyclesIn{ from_canister: canister_caller } },
+                        op: Operation::Mint{ to: Account{owner: user, subaccount: Some(subaccount)}.into(), kind: MintKind::CyclesIn{ from_canister: canister_caller } },
                         fee: Some(BANK_TRANSFER_FEE),
                         amt: cycles,
                         memo: None,
@@ -252,10 +254,9 @@ fn test_cycles_out() {
     let block = call_candid_as::<_, (Result<BlockId, CyclesOutError>,)>(&pic, BANK, RawEffectivePrincipal::None, user, "cycles_out", (CyclesOutQuest{
         cycles: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2,
         fee: Some(BANK_TRANSFER_FEE),
-        from_subaccount: Some(subaccount),
+        from_subaccount: Some(subaccount.into()),
         for_canister: receiving_canister,
         memo: None,
-        created_at_time: None,
     },)).unwrap().0.unwrap();
     assert_eq!(block, 1);
     assert_le!(pic.cycle_balance(BANK), bank_cycles_balance_before_cycles_out - (tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE*2));
@@ -265,10 +266,11 @@ fn test_cycles_out() {
     assert_eq!(
         log,
         &Log{
+            phash: log.phash, // forthedo! verify this.
             ts: log.ts,
             fee: None,
             tx: LogTX{
-                op: Operation::Burn{ from: IcrcId{owner: user, subaccount: Some(subaccount)}, for_canister: receiving_canister },
+                op: Operation::Burn{ from: Account{owner: user, subaccount: Some(subaccount)}.into(), for_canister: receiving_canister },
                 fee: Some(BANK_TRANSFER_FEE),
                 amt: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE,
                 memo: None,
@@ -293,7 +295,6 @@ fn test_cycles_out_fails_when_not_enough_balance() {
         from_subaccount: None,
         for_canister: receiving_canister,
         memo: None,
-        created_at_time: None,
     },)).unwrap().0.unwrap_err();
     assert_eq!(cycles_out_error, CyclesOutError::InsufficientFunds{balance: tokens_transform_cycles(burn_icp, CMC_RATE) - BANK_TRANSFER_FEE});
     assert_ge!(pic.cycle_balance(BANK), bank_cycles_balance_before_cycles_out - 100_000_000);
@@ -314,7 +315,6 @@ fn test_cycles_out_fails_when_invalid_for_canister() {
         from_subaccount: None,
         for_canister: Principal::management_canister(),
         memo: None,
-        created_at_time: None,
     },)).unwrap().0.unwrap_err();
     if let CyclesOutError::DepositCyclesCallError(_) = cycles_out_error {} else { panic!("must be CyclesOutError::DepositCyclesCallError") }
     assert_ge!(pic.cycle_balance(BANK), bank_cycles_balance_before_cycles_out - 100_000_000);
@@ -450,5 +450,3 @@ fn icrc1_test_suite_crate() {
     });
     
 }
-
-

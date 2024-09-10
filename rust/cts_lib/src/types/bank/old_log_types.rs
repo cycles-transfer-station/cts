@@ -3,7 +3,7 @@ use serde::Serialize;
 use candid::{Principal, CandidType, Deserialize};
 use crate::types::Cycles;
 use serde_bytes::ByteBuf;
-use crate::icrc::IcrcId;
+use icrc_ledger_types::icrc1::account::Account as IcrcId; // temp for the old types
 use ic_stable_structures::{Storable, storable::Bound};
 
 
@@ -29,7 +29,7 @@ pub enum Operation {
     Burn{ from: IcrcId, for_canister: Principal },
     Xfer{ from: IcrcId, to: IcrcId } 
 }
-    
+
 #[derive(CandidType, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MintKind {
     CyclesIn{ from_canister: Principal },
@@ -50,4 +50,3 @@ impl Storable for Log {
         }
     };
 }
-    

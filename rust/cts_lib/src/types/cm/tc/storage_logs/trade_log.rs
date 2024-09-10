@@ -130,3 +130,54 @@ pub fn timestamp_nanos_of_the_log_serialization(log_b: &[u8]) -> u128 {
 }
 
 
+#[test]
+fn test_trade_log_forward_backward_1() {
+    let tl = TradeLog{
+        position_id_matcher: 65798321,
+        position_id_matchee: 3546462123,
+        id: 635468421,
+        matchee_position_positor: Principal::from_slice(&[0,1,2,3,4]),
+        matcher_position_positor: Principal::from_slice(&[5,6,7,8,9]),
+        tokens: 246842318,
+        cycles: 65464321684321684321,
+        cycles_per_token_rate: 6547684321,
+        matchee_position_kind: PositionKind::Cycles,
+        timestamp_nanos: 6846513218,
+        tokens_payout_fee: 3254684321,
+        cycles_payout_fee: 32458654321,
+        cycles_payout_data: None,
+        token_payout_data: None,        
+    };    
+    let s = tl.stable_memory_serialize();
+    let tl2 = TradeLog::stable_memory_serialize_backwards(&s);
+    assert_eq!(tl, tl2);
+}
+
+#[test]
+fn test_trade_log_forward_backward_2() {
+    let tl = TradeLog{
+        position_id_matcher: 68762138321,
+        position_id_matchee: 68222882,
+        id: 3548648222,
+        matchee_position_positor: Principal::from_slice(&[0,1,2,3,4,5,6,4,7,89,54,65]),
+        matcher_position_positor: Principal::from_slice(&[5,6,7,8,9]),
+        tokens: 557568431,
+        cycles: 6549876549777777,
+        cycles_per_token_rate: 32165222222,
+        matchee_position_kind: PositionKind::Token,
+        timestamp_nanos: 257845311698461,
+        tokens_payout_fee: 654864321321,
+        cycles_payout_fee: 654313218642,
+        cycles_payout_data: Some(PayoutData{
+            ledger_transfer_fee: 789798754522,  // 0 fee deserializes the Option<PayoutData> to None even if did-transfer is true.
+            did_transfer: true,                 // false means dust-collection
+        }),
+        token_payout_data: Some(PayoutData{
+            ledger_transfer_fee: 87982222558888,  // 0 fee deserializes the Option<PayoutData> to None even if did-transfer is true.
+            did_transfer: false,            // false means dust collection                         
+        })
+    };    
+    let s = tl.stable_memory_serialize();
+    let tl2 = TradeLog::stable_memory_serialize_backwards(&s);
+    assert_eq!(tl, tl2);    
+}

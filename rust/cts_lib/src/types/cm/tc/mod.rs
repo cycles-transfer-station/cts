@@ -15,6 +15,10 @@ use storage_logs::{
 
 pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
 
+pub fn _minimum_match(ledger_transfer_fee: u128) -> Tokens {
+    10_000/*for the fee ten-thousandths*/ + ledger_transfer_fee*10
+}
+
 
 pub type PositionId = u128;
 pub type PurchaseId = u128;

@@ -401,3 +401,206 @@ fn test_candle_counter_1() {
 
 
 
+
+
+
+
+
+#[test]
+fn test_111() {
+    let pic = set_up();
+    let tc = set_up_tc(&pic);
+    
+    let (p1,p2): (Principal,Principal) = (
+        Principal::from_slice(&[1,1,1,1,1]),
+        Principal::from_slice(&[2,2,2,2,2]),
+    );
+    
+    let p2_mint_cycles = mint_cycles(&pic, &Account{owner: tc, subaccount: Some(principal_token_subaccount(&p2))}, 5700000000);
+    let p2_trade_cycles = p2_mint_cycles - BANK_TRANSFER_FEE;
+    let p2_trade_rate = 98952;
+    
+    let p2_position_id = call_candid_as_::<_, (TradeResult,)>(&pic, tc, p2, "trade_cycles", (
+        TradeCyclesQuest{
+            cycles: p2_trade_cycles,
+            cycles_per_token_rate: p2_trade_rate,
+            posit_transfer_ledger_fee: Some(BANK_TRANSFER_FEE),
+            return_cycles_to_subaccount: None,
+            payout_tokens_to_subaccount: None,
+        },
+    )).unwrap().0.unwrap().position_id;    
+    assert_eq!(p2_position_id, 0);
+    
+    let p2_view_user_current_positions_sponse_b = pic.query_call(tc, Principal::anonymous(), "view_user_current_positions",
+        candid::encode_one(ViewStorageLogsQuest{
+            opt_start_before_id: None,
+            index_key: Some(p2)
+        }).unwrap(),
+    ).unwrap().unwrap();
+    assert_eq!(p2_view_user_current_positions_sponse_b.len(), PositionLog::STABLE_MEMORY_SERIALIZE_SIZE);
+    let p2_position = PositionLog::stable_memory_serialize_backwards(&p2_view_user_current_positions_sponse_b);
+    assert_eq!(
+        p2_position, 
+        PositionLog{
+            id: 0,
+            positor: p2,
+            quest: CreatePositionQuestLog{
+                quantity: p2_trade_cycles,
+                cycles_per_token_rate: p2_trade_rate,
+            },
+            position_kind: PositionKind::Cycles,
+            mainder_position_quantity: p2_trade_cycles,
+            fill_quantity: 0,
+            fill_average_rate: p2_trade_rate,
+            payouts_fees_sum: 0,
+            creation_timestamp_nanos: p2_position.creation_timestamp_nanos,
+            position_termination: None,
+            void_position_payout_dust_collection: false,
+            void_position_payout_ledger_transfer_fee: 0,
+        }
+    );
+    
+    // p1
+    let p1_trade_icp = 14987500000000;
+    let p1_trade_rate = 78951;
+    mint_icp(&pic, &Account{owner: tc, subaccount: Some(principal_token_subaccount(&p1))}, p1_trade_icp + ICP_LEDGER_TRANSFER_FEE);
+    
+    let p1_position_id = call_candid_as_::<_, (TradeResult,)>(&pic, tc, p1, "trade_tokens", (
+        TradeTokensQuest{
+            tokens: p1_trade_icp,
+            cycles_per_token_rate: p1_trade_rate,
+            posit_transfer_ledger_fee: Some(ICP_LEDGER_TRANSFER_FEE),
+            return_tokens_to_subaccount: None,
+            payout_cycles_to_subaccount: None,
+        },
+    )).unwrap().0.unwrap().position_id;    
+    assert_eq!(p1_position_id, 1);
+    
+    // time for two rounds of do_payouts.
+    // since update-storage-position only happens after payouts,
+    // the first do_payouts is the payouts, but the position-logs are still pending for the update-storage-position.
+    // the second do_payouts triggers the update-storage-position.
+    for _ in 0..2 {
+        pic.advance_time(Duration::from_secs(31));
+        pic.tick();
+        pic.tick();
+        pic.tick();
+    }    
+    
+    let trade_rate = p2_trade_rate - ((p2_trade_rate - p1_trade_rate) / 2);
+    let trade_quantity_tokens = std::cmp::min(p2_trade_cycles / trade_rate, p1_trade_icp);
+    let trade_quantity_cycles = trade_quantity_tokens * trade_rate; 
+    
+    let p1_view_user_current_positions_sponse_b = pic.query_call(tc, Principal::anonymous(), "view_user_current_positions",
+        candid::encode_one(ViewStorageLogsQuest{
+            opt_start_before_id: None,
+            index_key: Some(p1)
+        }).unwrap(),
+    ).unwrap().unwrap();
+    assert_eq!(p1_view_user_current_positions_sponse_b.len(), PositionLog::STABLE_MEMORY_SERIALIZE_SIZE);
+    let p1_position = PositionLog::stable_memory_serialize_backwards(&p1_view_user_current_positions_sponse_b);
+    assert_eq!(
+        p1_position, 
+        PositionLog{
+            id: 1,
+            positor: p1,
+            quest: CreatePositionQuestLog{
+                quantity: p1_trade_icp,
+                cycles_per_token_rate: p1_trade_rate,
+            },
+            position_kind: PositionKind::Token,
+            mainder_position_quantity: p1_trade_icp - trade_quantity_tokens,
+            fill_quantity: trade_quantity_cycles,     
+            fill_average_rate: trade_rate,
+            payouts_fees_sum: trade_quantity_cycles / 10000 * 50,
+            creation_timestamp_nanos: p1_position.creation_timestamp_nanos,
+            position_termination: if p1_trade_icp - trade_quantity_tokens < _minimum_match(ICP_LEDGER_TRANSFER_FEE) {
+                Some(PositionTerminationData{
+                    cause: PositionTerminationCause::Fill,
+                    timestamp_nanos: p1_position.position_termination.as_ref().unwrap().timestamp_nanos,   
+                })
+            } else {
+                None
+            },
+            void_position_payout_dust_collection: if p1_trade_icp - trade_quantity_tokens <= ICP_LEDGER_TRANSFER_FEE {
+                true
+            } else {
+                false
+            },
+            void_position_payout_ledger_transfer_fee: if p1_trade_icp - trade_quantity_tokens < _minimum_match(ICP_LEDGER_TRANSFER_FEE) {
+                ICP_LEDGER_TRANSFER_FEE as u64
+            } else {
+                0
+            }
+        }
+    );
+    
+    // check p2 
+    println!("{:?}", trade_quantity_tokens);
+    println!("{:?}", trade_quantity_cycles);
+
+    
+    
+    let b = pic.query_call(tc, Principal::anonymous(), "view_user_current_positions",
+        candid::encode_one(ViewStorageLogsQuest::<Principal>{
+            opt_start_before_id: None,
+            index_key: Some(p2),
+        }).unwrap(),
+    ).unwrap().unwrap();
+    assert_eq!(b.len(), 0);
+    
+    let b = pic.query_call(tc, Principal::anonymous(), "view_user_positions_logs",
+        candid::encode_one(ViewStorageLogsQuest::<Principal>{
+            opt_start_before_id: None,
+            index_key: Some(p2),
+        }).unwrap(),
+    ).unwrap().unwrap();
+    assert_eq!(b.len(), PositionLog::STABLE_MEMORY_SERIALIZE_SIZE);
+    
+    let p2_position = PositionLog::stable_memory_serialize_backwards(&b);
+    println!("{:?}", p2_position);
+    assert_eq!(
+        p2_position, 
+        PositionLog{
+            id: 0,
+            positor: p2,
+            quest: CreatePositionQuestLog{
+                quantity: p2_trade_cycles,
+                cycles_per_token_rate: p2_trade_rate,
+            },
+            position_kind: PositionKind::Cycles,
+            mainder_position_quantity: p2_trade_cycles - trade_quantity_cycles,
+            fill_quantity: trade_quantity_tokens,
+            fill_average_rate: trade_rate,
+            payouts_fees_sum: (trade_quantity_tokens*trade_rate) / 10000 * 50 / trade_rate,
+            creation_timestamp_nanos: p2_position.creation_timestamp_nanos,
+            position_termination: if p2_trade_cycles - trade_quantity_cycles < _minimum_match(BANK_TRANSFER_FEE) {
+                Some(PositionTerminationData{
+                    cause: PositionTerminationCause::Fill,
+                    timestamp_nanos: p2_position.position_termination.as_ref().unwrap().timestamp_nanos,   
+                })
+            } else {
+                None
+            },
+            void_position_payout_dust_collection: if p2_trade_cycles - trade_quantity_cycles <= BANK_TRANSFER_FEE {
+                true
+            } else {
+                false
+            },
+            void_position_payout_ledger_transfer_fee: if p2_trade_cycles - trade_quantity_cycles < _minimum_match(BANK_TRANSFER_FEE) {
+                BANK_TRANSFER_FEE as u64
+            } else {
+                0
+            }
+        }
+    );
+    
+    
+    
+    
+    
+    
+    
+    
+    
+}

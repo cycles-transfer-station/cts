@@ -210,7 +210,6 @@ async fn fuel() {
                 to: IcrcId{owner: ic_cdk::api::id(), subaccount: None},
                 fee: None,
                 memo: None,
-                created_at_time: None
             },)
         ).await {
             Ok((mint_cycles_result,)) => match mint_cycles_result {
@@ -282,7 +281,6 @@ async fn fuel() {
                 from_subaccount: None,
                 memo: None,
                 for_canister: for_canister,
-                created_at_time: None,   
             },)
         ).await {
             Ok((r,)) => match r {

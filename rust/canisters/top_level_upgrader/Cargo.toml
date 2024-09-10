@@ -1,0 +1,14 @@
+[package]
+name = "top_level_upgrader"
+version = "0.1.0"
+edition = "2021"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[dependencies]
+cts_lib = { path = "../../cts_lib" }
+candid = { workspace = true }
+ic-cdk = { workspace = true }

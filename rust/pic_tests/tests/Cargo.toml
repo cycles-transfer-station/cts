@@ -26,6 +26,10 @@ name = "make_live"
 path = "make_live.rs"
 
 [[test]]
+name = "test_bank_icrc3"
+path = "test_bank_icrc3.rs"
+
+[[test]]
 name = "test_upgrade"
 path = "test_upgrade.rs"
 
@@ -41,6 +45,9 @@ icrc1-test-suite = { workspace = true }
 icrc1-test-env = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
+<<<<<<< HEAD
 serde_bytes = { workspace = true }
 serde = { workspace = true }
 outsiders = { workspace = true }
+=======
+>>>>>>> master

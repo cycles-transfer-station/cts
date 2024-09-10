@@ -30,7 +30,7 @@ use cts_lib::{
     management_canister::CanisterIdRecord,
     types::{
         Cycles,
-        bank::{*, log_types::{Log, LogTX, Operation, MintKind}},
+        bank::{*, old_log_types, new_log_types},
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,
@@ -39,7 +39,7 @@ use cts_lib::{
         CmcNotifyError
     },
     ic_ledger_types::{IcpBlockHeight, IcpTokens},
-    consts::{MiB, KiB, TRILLION},
+    consts::{MiB, KiB, TRILLION, NANOS_IN_A_SECOND, SECONDS_IN_A_DAY, SECONDS_IN_A_MINUTE},
 };
 use ic_cdk::{
     init,
@@ -53,6 +53,7 @@ use ic_cdk::{
             msg_cycles_available128,
             msg_cycles_accept128,
             call_with_payment128,
+            reply,
         },
         is_controller,
         canister_balance128,
@@ -70,7 +71,14 @@ use canister_tools::{
     MemoryId,
     get_virtual_memory,
 };
+use serde_bytes::{ByteArray, ByteBuf};
 
+
+mod dedup;
+use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
+
+mod icrc3;
+use icrc3::*;
 
 // --------- TYPES -----------
 
@@ -78,6 +86,7 @@ use canister_tools::{
 pub struct CBData {
     users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
     total_supply: Cycles,
+    icrc1_transfer_dedup_map: DedupMap,
 }
 
 impl CBData {
@@ -85,6 +94,7 @@ impl CBData {
         Self {
             users_mint_cycles: HashMap::new(),    
             total_supply: 0,
+            icrc1_transfer_dedup_map: DedupMap::new(),
         }
     }
 }
@@ -100,7 +110,7 @@ impl Storable for StorableIcrcId {
     }
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
         let owner = thirty_bytes_as_principal(&bytes[..30].try_into().unwrap());
-        let subaccount: IcrcSubaccount = bytes[30..].try_into().unwrap();
+        let subaccount: IcrcSubaccount = ByteArray::new(bytes[30..].try_into().unwrap());
         Self(IcrcId{ owner, subaccount: if subaccount == *ICRC_DEFAULT_SUBACCOUNT { None } else { Some(subaccount) }})
     }
     const BOUND: Bound = {
@@ -117,15 +127,17 @@ impl From<IcrcId> for StorableIcrcId {
 }
 
 type CyclesBalances = StableBTreeMap<StorableIcrcId, Cycles, VirtualMemory<DefaultMemoryImpl>>;
-type Logs = StableVec<Log, VirtualMemory<DefaultMemoryImpl>>;
+type OldLogs = StableVec<old_log_types::Log, VirtualMemory<DefaultMemoryImpl>>;
+type NewLogs = StableVec<new_log_types::Log, VirtualMemory<DefaultMemoryImpl>>;
 type UserLogsPointers = HashMap<IcrcId, Vec<u32>>;
 
 // --------- CONSTS --------
 
 pub const CB_DATA_MEMORY_ID: MemoryId = MemoryId::new(0);
 pub const CYCLES_BALANCES_MEMORY_ID: MemoryId = MemoryId::new(1);
-pub const LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
+pub const OLD_LOGS_MEMORY_ID: MemoryId = MemoryId::new(2);
 pub const USER_LOGS_POINTERS_MEMORY_ID: MemoryId = MemoryId::new(3);
+pub const NEW_LOGS_MEMORY_ID: MemoryId = MemoryId::new(4);
 
 pub const MINIMUM_BURN_ICP: u128 = 10_000_000/*0.1-icp*/; // When changing this value, change the frontcode burn-icp form field validator with the new value.
 pub const MAX_USERS_MINT_CYCLES: usize = 170;
@@ -133,8 +145,14 @@ pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles =
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
-pub const ICRC1_SYMBOL: &'static str = "CTS-CYCLES";
+pub const ICRC1_SYMBOL: &'static str = "T-CYCLES-CTS";
 pub const ICRC1_DECIMALS: u8 = 12;
+
+pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
+pub const PERMITTED_DRIFT_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_MINUTE * 2) as u64;
+pub const MAX_LEN_OF_THE_DEDUP_MAP: usize = 1_000_000;
+
+pub const ICRC3_GET_BLOCKS_CHUNK_SIZE: usize = 2_000;
 
 // --------- GLOBAL-STATE ----------
 
@@ -143,7 +161,9 @@ thread_local!{
     pub static USER_LOGS_POINTERS: RefCell<UserLogsPointers> = RefCell::new(UserLogsPointers::new());
     // stable-structures
     pub static CYCLES_BALANCES: RefCell<CyclesBalances> = RefCell::new(CyclesBalances::init(get_virtual_memory(CYCLES_BALANCES_MEMORY_ID)));
-    pub static LOGS: RefCell<Logs> = RefCell::new(Logs::init(get_virtual_memory(LOGS_MEMORY_ID)).unwrap());
+    pub static OLD_LOGS: RefCell<OldLogs> = RefCell::new(OldLogs::init(get_virtual_memory(OLD_LOGS_MEMORY_ID)).unwrap());
+    pub static NEW_LOGS: RefCell<NewLogs> = RefCell::new(NewLogs::init(get_virtual_memory(NEW_LOGS_MEMORY_ID)).unwrap());
+    
 }
 
 // ---------- LIFECYCLE ---------
@@ -161,8 +181,154 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() { 
-    canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
-    canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);    
+    //canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, None::<fn(CBData) -> CBData>);    
+    #[derive(CandidType, Deserialize)]
+    struct OldCBData {
+        users_mint_cycles: HashMap<Principal, MintCyclesMidCallData>,
+        total_supply: Cycles,
+    }
+    canister_tools::post_upgrade(&CB_DATA, CB_DATA_MEMORY_ID, Some::<fn(OldCBData) -> CBData>(
+        |old| {
+            CBData{
+                users_mint_cycles: old.users_mint_cycles,
+                total_supply: old.total_supply,
+                icrc1_transfer_dedup_map: DedupMap::new(),
+            }
+        }
+    ));
+        
+    canister_tools::post_upgrade(&USER_LOGS_POINTERS, USER_LOGS_POINTERS_MEMORY_ID, None::<fn(UserLogsPointers) -> UserLogsPointers>);
+
+    // ---------------------------
+    // MIGRATE LOGS // dont delete old logs just yet.
+    with(&OLD_LOGS, |old_logs| {
+        with_mut(&NEW_LOGS, |new_logs| {
+            
+            let mut phash: Option<ByteArray<32>> = None; 
+            
+            for i in 0..old_logs.len() {
+                
+                let old_log: old_log_types::Log = old_logs.get(i).unwrap(); 
+                
+                let new_log: new_log_types::Log = new_log_types::Log{
+                    phash: phash,
+                    ts: old_log.ts,
+                    fee: old_log.fee,
+                    tx: new_log_types::LogTX{
+                        fee: old_log.tx.fee,
+                        amt: old_log.tx.amt,
+                        ts: old_log.tx.ts,
+                        memo: old_log.tx.memo,
+                        op: match old_log.tx.op {
+                            old_log_types::Operation::Mint{ to, kind } => {
+                                new_log_types::Operation::Mint{ 
+                                    to: to.into(), 
+                                    kind: match kind {
+                                        old_log_types::MintKind::CyclesIn{ from_canister } => {
+                                            new_log_types::MintKind::CyclesIn{ from_canister }
+                                        }
+                                        old_log_types::MintKind::CMC{ caller, icp_block_height } => {
+                                            new_log_types::MintKind::CMC{ caller, icp_block_height }
+                                        }
+                                    }  
+                                }
+                            }
+                            old_log_types::Operation::Burn{ from, for_canister } => {
+                                new_log_types::Operation::Burn{ 
+                                    from: from.into(), 
+                                    for_canister: for_canister, 
+                                }
+                            }
+                            old_log_types::Operation::Xfer{ from, to } => {
+                                new_log_types::Operation::Xfer{ 
+                                    from: from.into(), 
+                                    to: to.into(),  
+                                }
+                            }
+                        }
+                    }
+                };
+                    
+                phash = Some(ByteArray::new(icrc3_value_of_a_block_log(&new_log).hash()));
+                
+                new_logs.push(&new_log).unwrap();     
+            }
+        });
+    });
+    
+    // LOGS-MIGRATION-SANITY-CHECK
+    with(&OLD_LOGS, |old_logs| {
+        with(&NEW_LOGS, |new_logs| {
+            if old_logs.len() != new_logs.len() {
+                trap("old_logs.len() != new_logs.len()");
+            }
+            
+            let mut phash: Option<ByteArray<32>> = None;
+            
+            for i in 0..new_logs.len() {
+                let old_log: old_log_types::Log = old_logs.get(i).unwrap(); 
+                let new_log: new_log_types::Log = new_logs.get(i).unwrap(); 
+                
+                assert_eq!(new_log.phash, phash);
+                phash = Some(ByteArray::new(icrc3_value_of_a_block_log(&new_log).hash()));
+                
+                assert_eq!(old_log.ts, new_log.ts);
+                assert_eq!(old_log.fee, new_log.fee);
+                assert_eq!(old_log.tx.amt, new_log.tx.amt);
+                assert_eq!(old_log.tx.fee, new_log.tx.fee);
+                assert_eq!(old_log.tx.memo, new_log.tx.memo);
+                assert_eq!(old_log.tx.ts, new_log.tx.ts);
+                match old_log.tx.op {
+                    old_log_types::Operation::Mint{ to: old_to, kind: old_kind } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Mint{ to: new_to, kind: new_kind } => {
+                                assert_eq!(old_to, new_to.into());
+                                match old_kind {
+                                    old_log_types::MintKind::CyclesIn{ from_canister: old_from_canister } => {
+                                        match new_kind {
+                                            new_log_types::MintKind::CyclesIn{ from_canister: new_from_canister } => {
+                                                assert_eq!(old_from_canister, new_from_canister);
+                                            },
+                                            _ => trap(&format!("Different logs {}", i)),
+                                        }
+                                    }
+                                    old_log_types::MintKind::CMC{ caller: old_caller, icp_block_height: old_icp_block_height } => {
+                                        match new_kind {
+                                            new_log_types::MintKind::CMC{ caller: new_caller, icp_block_height: new_icp_block_height } => {
+                                                assert_eq!(old_caller, new_caller);
+                                                assert_eq!(old_icp_block_height, new_icp_block_height);
+                                            },
+                                            _ => trap(&format!("Different logs {}", i)),
+                                        }
+                                    }
+                                }
+                            }
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    },
+                    old_log_types::Operation::Burn{ from: old_from, for_canister: old_for_canister } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Burn{ from: new_from, for_canister: new_for_canister } => {
+                                assert_eq!(old_from, new_from.into());
+                                assert_eq!(old_for_canister, new_for_canister);
+                            }
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    },
+                    old_log_types::Operation::Xfer{ from: old_from, to: old_to } => {
+                        match new_log.tx.op {
+                            new_log_types::Operation::Xfer{ from: new_from, to: new_to } => {
+                                assert_eq!(old_from, new_from.into());
+                                assert_eq!(old_to, new_to.into());                                
+                            } 
+                            _ => trap(&format!("Different logs {}", i)),
+                        }
+                    }
+                }    
+            }
+        });
+    });
+
 } 
 
 // ------- FUNCTIONS -------
@@ -198,6 +364,13 @@ fn subtract_cycles_balance(cycles_balances: &mut CyclesBalances, cb_data: &mut C
         cycles_balances.get(&icrc_id).unwrap_or(0).saturating_sub(sub_cycles)
     );
     cb_data.total_supply = cb_data.total_supply.saturating_sub(sub_cycles);    
+}
+
+fn get_latest_block_hash(logs: &NewLogs) -> Option<ByteArray<32>> {
+    match logs.len() {
+        0 => None,
+        x => Some(ByteArray::new(icrc3_value_of_a_block_log(&logs.get(x - 1).unwrap()).hash())),      
+    }
 }
 
 
@@ -260,6 +433,10 @@ pub fn icrc1_supported_standards() -> Vec<SupportedStandard> {
             name: "ICRC-1".to_string(),
             url: "https://github.com/dfinity/ICRC-1".to_string(),
         },
+        SupportedStandard{
+            name: "ICRC-3".to_string(),
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3".to_string(),
+        },
     ]
 }
 
@@ -271,21 +448,24 @@ pub fn icrc1_balance_of(icrc_id: IcrcId) -> Cycles {
     })
 }
 
+// make sure the icrc1_transfer method stays synchronous, within one single message execution. bc the transaction dedup check is only valid within it's message execution and we need it to be valid for the whole of the icrc1-transfer
 #[update]
 pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferError> {
-    let caller_icrc_id: IcrcId = IcrcId{ owner: caller(), subaccount: q.from_subaccount };
-        
-    // temporary while waiting to implement transaction-deduplication.
+    let caller = caller();
+    let caller_icrc_id: IcrcId = IcrcId{ owner: caller, subaccount: q.from_subaccount };
+    
+    let mut opt_q_structural_hash: Option<[u8; 32]> = None; // some if q.created_at_time.is_some() 
+
     if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                Icrc1TransferError::TooOld
-            } else {
-                Icrc1TransferError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
+        let q_structural_hash = icrc1_transfer_quest_structural_hash(&q);
+        opt_q_structural_hash = Some(q_structural_hash);
+        with_mut(&CB_DATA, |cb_data| {
+            check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, created_at_time, q_structural_hash) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
+        })?; 
     }
-        
+    
+    let opt_q_structural_hash = opt_q_structural_hash; // remove the mut.
+    
     if let Some(ref memo) = q.memo {
         if memo.len() > 32 {
             trap("Max memo length is 32 bytes.");
@@ -312,22 +492,39 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
         Ok(())
     })?;
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+                                
+            let log: new_log_types::Log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs), 
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                tx: LogTX{
-                    op: Operation::Xfer{ from: caller_icrc_id, to: q.to },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Xfer{ from: caller_icrc_id, to: q.to },
                     fee: q.fee,
                     amt: q.amount,
                     memo: q.memo,
                     ts: q.created_at_time,
                 }
-            }
-        ).unwrap(); // if growfailed then trap and roll back the transfer.
-        logs.len() - 1
-    });
+            };
+                            
+            new_logs.push(&log).unwrap(); // if growfailed then trap and roll back the transfer.
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
+        })
+    };
+    
+    if let Some(created_at_time) = q.created_at_time {
+        with_mut(&CB_DATA, |cb_data| {
+            cb_data.icrc1_transfer_dedup_map.insert(
+                (caller, opt_q_structural_hash.unwrap()), // unwrap safe bc we make sure that if created_at_time.is_some() then opt_q_structural_hash.is_some()
+                (block_height as u128, created_at_time),
+            );
+        });
+    }
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(caller_icrc_id)
@@ -353,7 +550,7 @@ const LOGS_CHUNK_SIZE: usize = (1*MiB + 512*KiB) / 400;
 
 #[query]
 pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>) -> GetLogsBackwardsSponse {
-    let mut v: Vec<(BlockId, Log)> = Vec::new();
+    let mut v: Vec<(BlockId, new_log_types::Log)> = Vec::new();
     let mut is_last_chunk = true;
     with(&USER_LOGS_POINTERS, |user_logs_pointers| {
         let list: &Vec<u32> = match user_logs_pointers.get(&icrc_id) {
@@ -367,7 +564,7 @@ pub fn get_logs_backwards(icrc_id: IcrcId, opt_start_before_block: Option<u128>)
         };
         let start_i: usize = end_i.saturating_sub(LOGS_CHUNK_SIZE);
         is_last_chunk = start_i == 0; 
-        with(&LOGS, |logs| {
+        with(&NEW_LOGS, |logs| {
             for block_height in list[start_i..end_i].iter() {
                 v.push((block_height.clone() as u128, logs.get(block_height.clone() as u64).unwrap()));     
             }
@@ -400,16 +597,6 @@ fn controller_clear_user_logs_pointers_cache() {
 #[update]
 pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
     
-    if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                CyclesInError::TooOld
-            } else {
-                CyclesInError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
-    }
-    
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesInError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -422,8 +609,7 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
         }
     }
     
-    let msg_cycles_available = msg_cycles_available128();
-    if msg_cycles_available < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
+    if msg_cycles_available128() < q.cycles.saturating_add(BANK_TRANSFER_FEE) {
         return Err(CyclesInError::MsgCyclesTooLow);
     }
     
@@ -435,22 +621,31 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+                
+            let log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs), 
                 ts: time_nanos_u64(),
                 fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                tx: LogTX{
-                    op: Operation::Mint{ to: q.to, kind: MintKind::CyclesIn{ from_canister: caller() } },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Mint{ to: q.to, kind: new_log_types::MintKind::CyclesIn{ from_canister: caller() } },
                     fee: q.fee,
                     amt: q.cycles,
                     memo: q.memo,
-                    ts: q.created_at_time,
+                    ts: None,
                 }
-            }
-        ).unwrap(); // if growfailed then trap and roll back.
-        logs.len() - 1
-    });
+            };
+                            
+            new_logs.push(&log).unwrap();
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
+            
+        })
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(q.to)
@@ -471,17 +666,7 @@ pub fn sns_validate_cycles_out(q: CyclesOutQuest) -> Result<String, String> {
 
 #[update]
 pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
-    
-     if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                CyclesOutError::TooOld
-            } else {
-                CyclesOutError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
-    }
-    
+        
     if let Some(quest_fee) = q.fee {
         if quest_fee != BANK_TRANSFER_FEE {
             return Err(CyclesOutError::BadFee{ expected_fee: BANK_TRANSFER_FEE });
@@ -516,22 +701,31 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
     
     match r {
         Ok(()) => {
-            let block_height: u64 = with_mut(&LOGS, |logs| {
-                logs.push(
-                    &Log{
+            let block_height: u64 = {
+                with_mut(&NEW_LOGS, |new_logs| {
+                    let log = new_log_types::Log{
+                        phash: get_latest_block_hash(new_logs),
                         ts: time_nanos_u64(),
                         fee: if q.fee.is_none() { Some(BANK_TRANSFER_FEE) } else { None },
-                        tx: LogTX{
-                            op: Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
+                        tx: new_log_types::LogTX{
+                            op: new_log_types::Operation::Burn{ from: caller_icrc_id, for_canister: q.for_canister },
                             fee: q.fee,
                             amt: q.cycles.saturating_add(BANK_TRANSFER_FEE), // include the fee in the amount here because icrc1 does not have fees for a burn. so we put the amount here that is getting subtracted from the caller's account.
                             memo: q.memo,
-                            ts: q.created_at_time,
+                            ts: None,
                         }
-                    }
-                ).unwrap(); // what to do if grow-fail here? For now there is a lot of space on the fiduciary subnet so it is ok for now but either put in a buffer wait on a timer or create archives.
-                logs.len() - 1
-            });
+                    };
+                    
+                    new_logs.push(&log).unwrap();
+                    let block_height = new_logs.len() - 1;
+                    
+                    set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+                    
+                    block_height
+                        
+                })
+            };
+                    
             
             with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
                 user_logs_pointers.entry(caller_icrc_id)
@@ -571,16 +765,6 @@ struct MintCyclesMidCallData {
 pub async fn mint_cycles(q: MintCyclesQuest) -> MintCyclesResult {
     if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL {
         trap("This canister is low on cycles.");
-    }
-    
-    if let Some(created_at_time) = q.created_at_time {
-        return Err(
-            if created_at_time <= time_nanos_u64() {
-                MintCyclesError::TooOld
-            } else {
-                MintCyclesError::CreatedInFuture{ ledger_time: time_nanos_u64() }
-            }
-        );
     }
     
     if q.burn_icp > u64::MAX as u128 || q.burn_icp_transfer_fee > u64::MAX as u128 { trap("burn_icp or burn_icp_transfer_fee amount too large. Max u64::MAX."); }
@@ -673,22 +857,29 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         });
     });
     
-    let block_height: u64 = with_mut(&LOGS, |logs| {
-        logs.push(
-            &Log{
+    let block_height: u64 = {
+        with_mut(&NEW_LOGS, |new_logs| {
+            let log = new_log_types::Log{
+                phash: get_latest_block_hash(new_logs),
                 ts: time_nanos_u64(),
                 fee: if mid_call_data.quest.fee.is_none() { Some(mid_call_data.fee) } else { None },
-                tx: LogTX{
-                    op: Operation::Mint{ to: mid_call_data.quest.to, kind: MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
+                tx: new_log_types::LogTX{
+                    op: new_log_types::Operation::Mint{ to: mid_call_data.quest.to, kind: new_log_types::MintKind::CMC{ caller: user_id, icp_block_height: mid_call_data.cmc_icp_transfer_block_height.unwrap() } },
                     fee: mid_call_data.quest.fee,
                     amt: mid_call_data.cmc_cycles.unwrap().saturating_sub(mid_call_data.fee),
                     memo: mid_call_data.quest.memo,
-                    ts: mid_call_data.quest.created_at_time,
+                    ts: None,
                 }
-            }
-        ).unwrap(); // look at comment for cycles_out logs.push 
-        logs.len() - 1
-    });
+            };
+            
+            new_logs.push(&log).unwrap();
+            let block_height = new_logs.len() - 1;
+            
+            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            
+            block_height
+        })
+    };
     
     with_mut(&USER_LOGS_POINTERS, |user_logs_pointers| {
         user_logs_pointers.entry(mid_call_data.quest.to)
@@ -734,6 +925,114 @@ async fn complete_mint_cycles_(user_id: Principal) -> Result<MintCyclesSuccess, 
 #[query]
 pub fn canister_cycles_balance_minus_total_supply() -> i128 {
     (canister_balance128() as i128).saturating_sub(with(&CB_DATA, |cb_data| { cb_data.total_supply }) as i128)
+}
+
+
+// ICRC-3 METHODS
+
+
+// we do manual-reply bc the Icrc3Value type borrows its values so we can't return a borrowed value.
+// be careful because the compiler does not check to make sure that we call the ic_cdk::reply function and that we call it (only) once.
+#[query(manual_reply = true)]
+pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // return type is just for candid did file generation. we use ic_cdk::reply here.
+    use std::cmp::min;
+    with(&NEW_LOGS, |new_logs| { 
+        
+        // make sure at least one StartAndLength
+        if q.len() == 0 || q[0].start >= (new_logs.len() as u128) {
+            reply((GetBlocksResult {
+                log_length: new_logs.len() as u128,
+                blocks: vec![],
+                archived_blocks : vec![],
+            },));
+            return;
+        }
+        
+        // do first range
+        let first_range = q[0];
+        let end_first_range: u64 = min(first_range.start as u64 + min(first_range.length as u64, ICRC3_GET_BLOCKS_CHUNK_SIZE as u64), new_logs.len()); 
+        let mut first_chunk_logs: Vec<new_log_types::Log> = vec![]; 
+        for i in (first_range.start as u64)..end_first_range {
+            first_chunk_logs.push(new_logs.get(i).unwrap());
+        }
+        let blocks = (first_range.start..(end_first_range as u128)).zip(first_chunk_logs.iter().map(icrc3_value_of_a_block_log)).map(|(i, b)| IdAndBlock{ id: i, block: b }).collect();    
+        let mut archived_blocks_args: GetBlocksArgs = q.iter().copied().skip(1).collect(); // skip first range 
+        if end_first_range < (first_range.start + first_range.length) as u64 && end_first_range < new_logs.len() {
+            archived_blocks_args.insert(
+                0,
+                StartAndLength{
+                    start: end_first_range as u128,
+                    length: first_range.start + first_range.length - (end_first_range as u128),
+                }
+            );
+        }
+        let result = GetBlocksResult {
+            log_length: new_logs.len() as u128,
+            blocks: blocks,
+            archived_blocks : vec![ // one item in this bc right now every block is on this canister
+                GetBlocksArgsAndCallback{
+                    args: archived_blocks_args,
+                    callback: Icrc3Callback::new(ic_cdk::api::id(), "icrc3_get_blocks"),
+                }
+            ],
+        };
+        reply((result,));
+        return;
+    });
+    
+    GetBlocksResult::placeholder()
+}
+
+#[query]
+pub fn icrc3_supported_block_types() -> Vec<SupportBlockType> {
+    vec![
+        SupportBlockType{
+            block_type: "1mint",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#mint-block-schema",
+        },
+        SupportBlockType{
+            block_type: "1burn",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#burn-block-schema",
+        },
+        SupportBlockType{
+            block_type: "1xfer",
+            url: "https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-3#transfer-and-transfer-from-block-schema",
+        }
+    ]
+}
+
+#[query]
+pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
+    let mut v = vec![];
+    if ( q.from.is_some() && q.from.unwrap() < ic_cdk::api::id() ) || q.from.is_none() {
+        v.push(ArchiveData{
+            canister_id: ic_cdk::api::id(),
+            start: 0,
+            end: with(&NEW_LOGS, |new_logs| new_logs.len() - 1) as u128,
+        });
+    }
+    v
+}
+
+#[query]
+pub fn icrc3_get_tip_certificate() -> Option<Icrc3DataCertificate> {
+    with(&NEW_LOGS, |new_logs| {
+        if new_logs.len() == 0 {
+            return None;
+        }
+        ic_cdk::api::data_certificate()
+            .map(|certificate| {
+                Icrc3DataCertificate{
+                    certificate: ByteBuf::from(certificate),
+                    hash_tree: {
+                        let last_block_index = new_logs.len() - 1;
+                        let last_block_hash: [u8; 32] 
+                            = icrc3_value_of_a_block_log(&new_logs.get(last_block_index).unwrap()).hash();
+                        make_data_certificate_hash_tree(last_block_index, last_block_hash) 
+                    }
+                }
+            })  
+    })
 }
 
 

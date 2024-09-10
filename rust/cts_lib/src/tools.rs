@@ -28,6 +28,9 @@ pub fn time_nanos() -> u128 { time_nanos_u64() as u128 }
 pub fn time_seconds() -> u128 { time_nanos() / NANOS_IN_A_SECOND as u128 }
 
 
+mod structural_hash;
+pub use structural_hash::structural_hash;
+
 
 
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -196,7 +199,7 @@ pub fn round_robin<T: Copy>(ctcs: &Vec<T>, round_robin_counter: &'static LocalKe
 
 
 
-pub fn caller_is_controller_gaurd(caller: &Principal) {
+pub fn caller_is_controller_guard(caller: &Principal) {
     if is_controller(caller) == false {
         trap("Caller must be a controller for this method.");
     }
@@ -221,8 +224,15 @@ pub fn stable_read_into_vec<M: Memory>(memory: &M, start: u64, len: usize) -> Ve
 pub mod upgrade_canisters {
     
     use std::collections::HashSet;
-    use crate::types::{CallError, CanisterCode};
     use candid::{CandidType, Deserialize, Principal};
+    use outsiders::management_canister::{Service as ManagementCanisterService, ListCanisterSnapshotsArgs, TakeCanisterSnapshotArgs, Snapshot, SnapshotId};
+    use ic_cdk::api::management_canister::main::{start_canister, stop_canister, CanisterIdRecord};
+    use crate::{
+        types::{CallError, CanisterCode},
+        tools::call_error_as_u32_and_string,
+        management_canister::{InstallCodeQuest, InstallCodeMode, install_code},    
+    };    
+    
     
     #[derive(CandidType, Deserialize)]
     pub struct ControllerUpgradeCSQuest {
@@ -235,34 +245,63 @@ pub mod upgrade_canisters {
     #[derive(CandidType, Deserialize, Default, Debug, PartialEq, Eq)]
     pub struct UpgradeOutcome {
         pub stop_canister_result: Option<Result<(), CallError>>,
+        pub take_canister_snapshot_result: Option<Result<Snapshot, CallError>>, // this can also contain an error for the list_canister_snapshots call which is done before any other calls if take_canister_snapshot = true
         pub install_code_result: Option<Result<(), CallError>>,    
         pub start_canister_result: Option<Result<(), CallError>>,
     }
-    
-    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> Vec<(Principal, UpgradeOutcome)> {    
-        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest))).await // // use async fn upgrade_canister_, (not async block)
+        
+    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> Vec<(Principal, UpgradeOutcome)> {    
+        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest, take_canister_snapshot))).await // // use async fn upgrade_canister_, (not async block)
     }
     
-    async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
-        use ic_cdk::api::management_canister::main::{start_canister,stop_canister, CanisterIdRecord};
-        use crate::management_canister::{InstallCodeQuest, InstallCodeMode, install_code};    
-        use crate::tools::call_error_as_u32_and_string;
-        
+    async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> (Principal, UpgradeOutcome) {
+                
         let mut upgrade_outcome = UpgradeOutcome::default();
                 
+        let mc_service = ManagementCanisterService(Principal::management_canister());
+        
+        let mut possible_earliest_snapshot_id: Option<SnapshotId> = None;
+        if take_canister_snapshot == true {
+            match mc_service.list_canister_snapshots(ListCanisterSnapshotsArgs{ canister_id: c }).await.map(|t|t.0) {   
+                Ok(vec_snapshots) => {
+                    if vec_snapshots.len() != 0 {
+                        possible_earliest_snapshot_id = Some(vec_snapshots.into_iter().next().unwrap().id);
+                    }
+                }
+                Err(call_error) => {
+                    upgrade_outcome.take_canister_snapshot_result = Some(Err((0, format!("Error when calling list_canister_snapshots for canister_id: {}:\n{:?}", c, call_error))));
+                    return (c, upgrade_outcome)
+                }
+            }
+        }
+        
         upgrade_outcome.stop_canister_result = Some(stop_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
         if upgrade_outcome.stop_canister_result.as_ref().unwrap().is_err() {
             return (c, upgrade_outcome);
         } 
-                
-        let a = InstallCodeQuest {
-            mode: InstallCodeMode::upgrade,
-            canister_id: c,
-            wasm_module: canister_code.module(),
-            arg: post_upgrade_quest,
-        };
-        upgrade_outcome.install_code_result = Some(install_code(a).await);
-                
+        
+        if take_canister_snapshot == true {
+            upgrade_outcome.take_canister_snapshot_result = Some(mc_service.take_canister_snapshot(
+                TakeCanisterSnapshotArgs{
+                    canister_id: c,
+                    replace_snapshot: possible_earliest_snapshot_id,
+                }
+            ).await.map(|t|t.0).map_err(call_error_as_u32_and_string));
+        }
+        
+        if upgrade_outcome.take_canister_snapshot_result.is_none() 
+        || upgrade_outcome.take_canister_snapshot_result.as_ref().unwrap().is_ok() {
+            
+            let a = InstallCodeQuest {
+                mode: InstallCodeMode::upgrade,
+                canister_id: c,
+                wasm_module: canister_code.module(),
+                arg: post_upgrade_quest,
+            };
+            upgrade_outcome.install_code_result = Some(install_code(a).await);
+        
+        }
+        
         upgrade_outcome.start_canister_result = Some(start_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
                 
         return (c, upgrade_outcome);
@@ -278,7 +317,7 @@ pub fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
 
 
 
-pub fn caller_is_sns_governance_gaurd() {
+pub fn caller_is_sns_governance_guard() {
     let must_be_principal: Principal = {
         use crate::consts::livetest::*;
         if [LIVETEST_CTS, LIVETEST_CM_MAIN].contains(&ic_cdk::api::id()) {

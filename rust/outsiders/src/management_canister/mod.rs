@@ -1,4 +1,4 @@
-// interface-spec-version: 0.25.0 (2024-06-14)
+// https://github.com/dfinity/interface-spec/blob/59fb2ec99f671704dfc4caed48b227571c5a8849/spec/_attachments/ic.did
 
 // This is an experimental feature to generate Rust binding from Candid.
 // You may want to manually adjust some of the types.
@@ -29,6 +29,19 @@ pub struct BitcoinGetBalanceQueryArgs {
   pub min_confirmations: Option<u32>,
 }
 pub type BitcoinGetBalanceQueryResult = Satoshi;
+pub type BitcoinBlockHeight = u32;
+#[derive(CandidType, Deserialize)]
+pub struct BitcoinGetBlockHeadersArgs {
+  pub start_height: BitcoinBlockHeight,
+  pub end_height: Option<BitcoinBlockHeight>,
+  pub network: BitcoinNetwork,
+}
+pub type BitcoinBlockHeader = serde_bytes::ByteBuf;
+#[derive(CandidType, Deserialize)]
+pub struct BitcoinGetBlockHeadersResult {
+  pub tip_height: BitcoinBlockHeight,
+  pub block_headers: Vec<BitcoinBlockHeader>,
+}
 #[derive(CandidType, Deserialize)]
 pub struct BitcoinGetCurrentFeePercentilesArgs { pub network: BitcoinNetwork }
 pub type MillisatoshiPerByte = u64;
@@ -46,7 +59,7 @@ pub struct BitcoinGetUtxosArgs {
   pub filter: Option<BitcoinGetUtxosArgsFilterInner>,
   pub address: BitcoinAddress,
 }
-pub type BlockHash = serde_bytes::ByteBuf;
+pub type BitcoinBlockHash = serde_bytes::ByteBuf;
 #[derive(CandidType, Deserialize)]
 pub struct Outpoint { pub txid: serde_bytes::ByteBuf, pub vout: u32 }
 #[derive(CandidType, Deserialize)]
@@ -54,8 +67,8 @@ pub struct Utxo { pub height: u32, pub value: Satoshi, pub outpoint: Outpoint }
 #[derive(CandidType, Deserialize)]
 pub struct BitcoinGetUtxosResult {
   pub next_page: Option<serde_bytes::ByteBuf>,
-  pub tip_height: u32,
-  pub tip_block_hash: BlockHash,
+  pub tip_height: BitcoinBlockHeight,
+  pub tip_block_hash: BitcoinBlockHash,
   pub utxos: Vec<Utxo>,
 }
 #[derive(CandidType, Deserialize)]
@@ -74,8 +87,8 @@ pub struct BitcoinGetUtxosQueryArgs {
 #[derive(CandidType, Deserialize)]
 pub struct BitcoinGetUtxosQueryResult {
   pub next_page: Option<serde_bytes::ByteBuf>,
-  pub tip_height: u32,
-  pub tip_block_hash: BlockHash,
+  pub tip_height: BitcoinBlockHeight,
+  pub tip_block_hash: BitcoinBlockHash,
   pub utxos: Vec<Utxo>,
 }
 #[derive(CandidType, Deserialize)]
@@ -105,6 +118,7 @@ pub enum ChangeDetailsCodeDeploymentMode {
   #[serde(rename="install")]
   Install,
 }
+pub type SnapshotId = serde_bytes::ByteBuf;
 #[derive(CandidType, Deserialize)]
 pub enum ChangeDetails {
   #[serde(rename="creation")]
@@ -113,6 +127,12 @@ pub enum ChangeDetails {
   CodeDeployment{
     mode: ChangeDetailsCodeDeploymentMode,
     module_hash: serde_bytes::ByteBuf,
+  },
+  #[serde(rename="load_snapshot")]
+  LoadSnapshot{
+    canister_version: u64,
+    taken_at_timestamp: u64,
+    snapshot_id: SnapshotId,
   },
   #[serde(rename="controllers_change")]
   ControllersChange{ controllers: Vec<Principal> },
@@ -200,6 +220,11 @@ pub struct CreateCanisterArgs {
 pub struct CreateCanisterResult { pub canister_id: CanisterId }
 #[derive(CandidType, Deserialize)]
 pub struct DeleteCanisterArgs { pub canister_id: CanisterId }
+#[derive(CandidType, Deserialize)]
+pub struct DeleteCanisterSnapshotArgs {
+  pub canister_id: CanisterId,
+  pub snapshot_id: SnapshotId,
+}
 #[derive(CandidType, Deserialize)]
 pub struct DepositCyclesArgs { pub canister_id: CanisterId }
 #[derive(CandidType, Deserialize)]
@@ -313,6 +338,21 @@ pub struct InstallCodeArgs {
   pub sender_canister_version: Option<u64>,
 }
 #[derive(CandidType, Deserialize)]
+pub struct ListCanisterSnapshotsArgs { pub canister_id: CanisterId }
+#[derive(CandidType, Deserialize, Clone, PartialEq, Eq, serde::Serialize, Debug)]
+pub struct Snapshot {
+  pub id: SnapshotId,
+  pub total_size: u64,
+  pub taken_at_timestamp: u64,
+}
+pub type ListCanisterSnapshotsResult = Vec<Snapshot>;
+#[derive(CandidType, Deserialize)]
+pub struct LoadCanisterSnapshotArgs {
+  pub canister_id: CanisterId,
+  pub sender_canister_version: Option<u64>,
+  pub snapshot_id: SnapshotId,
+}
+#[derive(CandidType, Deserialize)]
 pub struct NodeMetricsHistoryArgs {
   pub start_at_timestamp_nanos: u64,
   pub subnet_id: Principal,
@@ -347,6 +387,29 @@ pub struct ProvisionalTopUpCanisterArgs {
 }
 pub type RawRandResult = serde_bytes::ByteBuf;
 #[derive(CandidType, Deserialize)]
+pub enum SchnorrAlgorithm {
+  #[serde(rename="ed25519")]
+  Ed25519,
+  #[serde(rename="bip340secp256k1")]
+  Bip340Secp256K1,
+}
+#[derive(CandidType, Deserialize)]
+pub struct SchnorrPublicKeyArgsKeyId {
+  pub algorithm: SchnorrAlgorithm,
+  pub name: String,
+}
+#[derive(CandidType, Deserialize)]
+pub struct SchnorrPublicKeyArgs {
+  pub key_id: SchnorrPublicKeyArgsKeyId,
+  pub canister_id: Option<CanisterId>,
+  pub derivation_path: Vec<serde_bytes::ByteBuf>,
+}
+#[derive(CandidType, Deserialize)]
+pub struct SchnorrPublicKeyResult {
+  pub public_key: serde_bytes::ByteBuf,
+  pub chain_code: serde_bytes::ByteBuf,
+}
+#[derive(CandidType, Deserialize)]
 pub struct SignWithEcdsaArgsKeyId { pub name: String, pub curve: EcdsaCurve }
 #[derive(CandidType, Deserialize)]
 pub struct SignWithEcdsaArgs {
@@ -357,12 +420,31 @@ pub struct SignWithEcdsaArgs {
 #[derive(CandidType, Deserialize)]
 pub struct SignWithEcdsaResult { pub signature: serde_bytes::ByteBuf }
 #[derive(CandidType, Deserialize)]
+pub struct SignWithSchnorrArgsKeyId {
+  pub algorithm: SchnorrAlgorithm,
+  pub name: String,
+}
+#[derive(CandidType, Deserialize)]
+pub struct SignWithSchnorrArgs {
+  pub key_id: SignWithSchnorrArgsKeyId,
+  pub derivation_path: Vec<serde_bytes::ByteBuf>,
+  pub message: serde_bytes::ByteBuf,
+}
+#[derive(CandidType, Deserialize)]
+pub struct SignWithSchnorrResult { pub signature: serde_bytes::ByteBuf }
+#[derive(CandidType, Deserialize)]
 pub struct StartCanisterArgs { pub canister_id: CanisterId }
 #[derive(CandidType, Deserialize)]
 pub struct StopCanisterArgs { pub canister_id: CanisterId }
 #[derive(CandidType, Deserialize)]
 pub struct StoredChunksArgs { pub canister_id: CanisterId }
 pub type StoredChunksResult = Vec<ChunkHash>;
+#[derive(CandidType, Deserialize)]
+pub struct TakeCanisterSnapshotArgs {
+  pub replace_snapshot: Option<SnapshotId>,
+  pub canister_id: CanisterId,
+}
+pub type TakeCanisterSnapshotResult = Snapshot;
 #[derive(CandidType, Deserialize)]
 pub struct UninstallCodeArgs {
   pub canister_id: CanisterId,
@@ -388,6 +470,9 @@ impl Service {
   }
   pub async fn bitcoin_get_balance_query(&self, arg0: BitcoinGetBalanceQueryArgs) -> Result<(BitcoinGetBalanceQueryResult,)> {
     ic_cdk::call(self.0, "bitcoin_get_balance_query", (arg0,)).await
+  }
+  pub async fn bitcoin_get_block_headers(&self, arg0: BitcoinGetBlockHeadersArgs) -> Result<(BitcoinGetBlockHeadersResult,)> {
+    ic_cdk::call(self.0, "bitcoin_get_block_headers", (arg0,)).await
   }
   pub async fn bitcoin_get_current_fee_percentiles(&self, arg0: BitcoinGetCurrentFeePercentilesArgs) -> Result<(BitcoinGetCurrentFeePercentilesResult,)> {
     ic_cdk::call(self.0, "bitcoin_get_current_fee_percentiles", (arg0,)).await
@@ -416,6 +501,9 @@ impl Service {
   pub async fn delete_canister(&self, arg0: DeleteCanisterArgs) -> Result<()> {
     ic_cdk::call(self.0, "delete_canister", (arg0,)).await
   }
+  pub async fn delete_canister_snapshot(&self, arg0: DeleteCanisterSnapshotArgs) -> Result<()> {
+    ic_cdk::call(self.0, "delete_canister_snapshot", (arg0,)).await
+  }
   pub async fn deposit_cycles(&self, arg0: DepositCyclesArgs) -> Result<()> {
     ic_cdk::call(self.0, "deposit_cycles", (arg0,)).await
   }
@@ -434,6 +522,12 @@ impl Service {
   pub async fn install_code(&self, arg0: InstallCodeArgs) -> Result<()> {
     ic_cdk::call(self.0, "install_code", (arg0,)).await
   }
+  pub async fn list_canister_snapshots(&self, arg0: ListCanisterSnapshotsArgs) -> Result<(ListCanisterSnapshotsResult,)> {
+    ic_cdk::call(self.0, "list_canister_snapshots", (arg0,)).await
+  }
+  pub async fn load_canister_snapshot(&self, arg0: LoadCanisterSnapshotArgs) -> Result<()> {
+    ic_cdk::call(self.0, "load_canister_snapshot", (arg0,)).await
+  }
   pub async fn node_metrics_history(&self, arg0: NodeMetricsHistoryArgs) -> Result<(NodeMetricsHistoryResult,)> {
     ic_cdk::call(self.0, "node_metrics_history", (arg0,)).await
   }
@@ -446,8 +540,14 @@ impl Service {
   pub async fn raw_rand(&self) -> Result<(RawRandResult,)> {
     ic_cdk::call(self.0, "raw_rand", ()).await
   }
+  pub async fn schnorr_public_key(&self, arg0: SchnorrPublicKeyArgs) -> Result<(SchnorrPublicKeyResult,)> {
+    ic_cdk::call(self.0, "schnorr_public_key", (arg0,)).await
+  }
   pub async fn sign_with_ecdsa(&self, arg0: SignWithEcdsaArgs) -> Result<(SignWithEcdsaResult,)> {
     ic_cdk::call(self.0, "sign_with_ecdsa", (arg0,)).await
+  }
+  pub async fn sign_with_schnorr(&self, arg0: SignWithSchnorrArgs) -> Result<(SignWithSchnorrResult,)> {
+    ic_cdk::call(self.0, "sign_with_schnorr", (arg0,)).await
   }
   pub async fn start_canister(&self, arg0: StartCanisterArgs) -> Result<()> {
     ic_cdk::call(self.0, "start_canister", (arg0,)).await
@@ -457,6 +557,9 @@ impl Service {
   }
   pub async fn stored_chunks(&self, arg0: StoredChunksArgs) -> Result<(StoredChunksResult,)> {
     ic_cdk::call(self.0, "stored_chunks", (arg0,)).await
+  }
+  pub async fn take_canister_snapshot(&self, arg0: TakeCanisterSnapshotArgs) -> Result<(TakeCanisterSnapshotResult,)> {
+    ic_cdk::call(self.0, "take_canister_snapshot", (arg0,)).await
   }
   pub async fn uninstall_code(&self, arg0: UninstallCodeArgs) -> Result<()> {
     ic_cdk::call(self.0, "uninstall_code", (arg0,)).await
@@ -468,4 +571,3 @@ impl Service {
     ic_cdk::call(self.0, "upload_chunk", (arg0,)).await
   }
 }
-

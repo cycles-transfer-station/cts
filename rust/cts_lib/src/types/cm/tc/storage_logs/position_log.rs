@@ -127,9 +127,55 @@ impl StorageLogTrait for PositionLog {
 }
 
 
+#[test]
+fn test_forward_backward_1() {
+    let p = PositionLog{
+        id: 456789465,
+        positor: Principal::from_slice(&[1,2,3,4,5]),
+        quest: CreatePositionQuestLog{
+            quantity: 4562345878999,
+            cycles_per_token_rate: 489123,
+        },
+        position_kind: PositionKind::Token,
+        mainder_position_quantity: 789789779,
+        fill_quantity: 13216421683211,
+        fill_average_rate: 354645321684,
+        payouts_fees_sum: 6532138431,
+        creation_timestamp_nanos: 545452316544,
+        position_termination: None,
+        void_position_payout_dust_collection: true,
+        void_position_payout_ledger_transfer_fee: 7899879,
+    };
+    let s = p.stable_memory_serialize();
+    let p2 = PositionLog::stable_memory_serialize_backwards(&s);
+    assert_eq!(p, p2);
+}
 
 
 
-
-
-
+#[test]
+fn test_forward_backward_2() {
+    let p = PositionLog{
+        id: 5469876248,
+        positor: Principal::from_slice(&[6,7,8,9,4,3]),
+        quest: CreatePositionQuestLog{
+            quantity: 98765132168,
+            cycles_per_token_rate: 32468798321,
+        },
+        position_kind: PositionKind::Cycles,
+        mainder_position_quantity: 3678321213,
+        fill_quantity: 3216852131,
+        fill_average_rate: 3468431,
+        payouts_fees_sum: 3546843210,
+        creation_timestamp_nanos: 68776321321,
+        position_termination: Some(PositionTerminationData{
+            timestamp_nanos: 8765132365329582623,
+            cause: PositionTerminationCause::Fill,
+        }),
+        void_position_payout_dust_collection: true,
+        void_position_payout_ledger_transfer_fee: 7899879,
+    };
+    let s = p.stable_memory_serialize();
+    let p2 = PositionLog::stable_memory_serialize_backwards(&s);
+    assert_eq!(p, p2);
+}
