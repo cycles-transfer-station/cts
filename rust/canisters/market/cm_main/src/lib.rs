@@ -382,34 +382,25 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
         cm_main_data.tc_canister_code.clone()
     });
     
-    let ucs: Vec<UpgradeCanister> = with(&CM_MAIN_DATA, |cm_main_data| {
-        cm_main_data.trade_contracts.iter()
-        .filter_map(|tc| {
-            if let Some(ref specific_cs) = q.specific_cs {
-                if specific_cs.contains(&tc.0.trade_contract_canister_id) == false {
-                    return None;
-                }
-            } else if &tc.1.tc_module_hash == tc_cc.module_hash() {
-                return None; // if no specific cs are chosen, then don't upgrade canisters that already have the latest module hash.
-            }
-            Some(
-                UpgradeCanister{
-                    canister_id: tc.0.trade_contract_canister_id.clone(),
-                    take_canister_snapshot: true,
-                }
-            )
-        })
-        .take(200)
-        .collect()
-    });
-    
-    if let Some(ref specific_cs) = q.specific_cs {
-        if specific_cs.len() != ucs.len() {
-            trap("specific_cs.len() != ucs.len()");
+    let tcs: Vec<Principal> = match q.specific_cs {
+        Some(tcs) => tcs.into_iter().collect(),
+        None => {
+            with(&CM_MAIN_DATA, |cm_main_data| {
+                cm_main_data.trade_contracts.iter()
+                .filter_map(|tc| {
+                    if &tc.1.tc_module_hash != tc_cc.module_hash() {
+                        Some(tc.0.trade_contract_canister_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .take(200)
+                .collect()
+            })
         }
-    }
+    };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(ucs, &tc_cc, &q.post_upgrade_quest).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest, true).await;
     
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {

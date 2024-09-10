@@ -250,18 +250,12 @@ pub mod upgrade_canisters {
         pub start_canister_result: Option<Result<(), CallError>>,
     }
         
-    pub struct UpgradeCanister{
-        pub canister_id: Principal,
-        pub take_canister_snapshot: bool, // if true this will replace the earliest snapshot if there is an earliest snapshot. 
-    }
-    pub async fn upgrade_canisters(ucs: Vec<UpgradeCanister>, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> Vec<(Principal, UpgradeOutcome)> {    
-        futures::future::join_all(ucs.into_iter().map(|uc| upgrade_canister_(uc, canister_code, post_upgrade_quest))).await // // use async fn upgrade_canister_, (not async block)
+    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> Vec<(Principal, UpgradeOutcome)> {    
+        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest, take_canister_snapshot))).await // // use async fn upgrade_canister_, (not async block)
     }
     
-    async fn upgrade_canister_(uc: UpgradeCanister, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
-        
-        let UpgradeCanister{ canister_id: c, take_canister_snapshot, } = uc;
-        
+    async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> (Principal, UpgradeOutcome) {
+                
         let mut upgrade_outcome = UpgradeOutcome::default();
                 
         let mc_service = ManagementCanisterService(Principal::management_canister());
