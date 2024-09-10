@@ -300,7 +300,7 @@ pub mod upgrade_canisters {
             };
             upgrade_outcome.install_code_result = Some(install_code(a).await);
         
-        }    
+        }
         
         upgrade_outcome.start_canister_result = Some(start_canister(CanisterIdRecord{canister_id: c}).await.map_err(call_error_as_u32_and_string));
                 
