@@ -224,9 +224,15 @@ pub fn stable_read_into_vec<M: Memory>(memory: &M, start: u64, len: usize) -> Ve
 pub mod upgrade_canisters {
     
     use std::collections::HashSet;
-    use crate::types::{CallError, CanisterCode};
     use candid::{CandidType, Deserialize, Principal};
     use outsiders::management_canister::{Service as ManagementCanisterService, ListCanisterSnapshotsArgs, TakeCanisterSnapshotArgs, Snapshot, SnapshotId};
+    use ic_cdk::api::management_canister::main::{start_canister, stop_canister, CanisterIdRecord};
+    use crate::{
+        types::{CallError, CanisterCode},
+        tools::call_error_as_u32_and_string,
+        management_canister::{InstallCodeQuest, InstallCodeMode, install_code},    
+    };    
+    
     
     #[derive(CandidType, Deserialize)]
     pub struct ControllerUpgradeCSQuest {
@@ -253,9 +259,6 @@ pub mod upgrade_canisters {
     }
     
     async fn upgrade_canister_(uc: UpgradeCanister, canister_code: &CanisterCode, post_upgrade_quest: &[u8]) -> (Principal, UpgradeOutcome) {
-        use ic_cdk::api::management_canister::main::{start_canister,stop_canister, CanisterIdRecord};
-        use crate::management_canister::{InstallCodeQuest, InstallCodeMode, install_code};    
-        use crate::tools::call_error_as_u32_and_string;
         
         let UpgradeCanister{ canister_id: c, take_canister_snapshot, } = uc;
         
