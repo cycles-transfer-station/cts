@@ -368,6 +368,29 @@ pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, Tr
 // ----------------
 
 
+#[query]
+pub fn sns_validate_controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Result<String,String> {
+    with(&CM_MAIN_DATA, |cm_main_data| {
+        let module_hash_hex = {
+            if let Some(new_canister_code) = q.new_canister_code {
+                new_canister_code.verify_module_hash().unwrap();
+                new_canister_code.module_hash_hex() 
+            } else {
+                cm_main_data.tc_canister_code.module_hash_hex()
+            }
+        };
+        let mut str = format!("Upgrade the trade-contract canisters with the module-hash: {}.", module_hash_hex); 
+        if let Some(specific_cs) = q.specific_cs {
+            str.push_str(&format!("\nSpecific trade-contract canisters to upgrade: "));
+            for c in specific_cs {
+                str.push_str(&format!("{}, ", c));
+            }
+        }
+        str.push_str(&format!("\npost_upgrade_arg: {}", hex::encode(&q.post_upgrade_quest)));
+        str.push_str(&format!("\ntake_snapshots: {}", q.take_snapshots));
+        Ok(str)
+    })
+}
 
 
 #[update]
@@ -400,7 +423,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest, true).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest, q.take_snapshots).await;
     
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {

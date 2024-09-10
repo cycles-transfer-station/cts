@@ -48,3 +48,5 @@ anyhow = { workspace = true }
 serde_bytes = { workspace = true }
 serde = { workspace = true }
 outsiders = { workspace = true }
+ic-agent = { workspace = true }
+tokio = { workspace = true }

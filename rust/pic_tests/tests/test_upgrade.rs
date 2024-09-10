@@ -10,16 +10,6 @@ use serde_bytes::ByteBuf;
 
 use icrc_ledger_types::icrc1::{account::Account};
 
-type GitCommitId = &'static str;
-struct CanisterGitVersions {
-    cts: GitCommitId,
-    bank: GitCommitId,
-    cm_main: GitCommitId,
-    fueler: GitCommitId,
-    cm_tc: GitCommitId,
-    cm_positions_storage: GitCommitId,
-    cm_trades_storage: GitCommitId,
-}
 
 
 #[test]
@@ -34,68 +24,14 @@ fn test_upgrade_1() {
     // set up starting versions 
     // update these git-commit-ids when mainnet upgrades
     // these should be in sync with the mainnet canisters
-    let start_at_version = CanisterGitVersions{
-        cts:                    "2782354e775732afcc1bd690087fa0f57e63abd9",
-        bank:                   "0c275e46ad36c45e9edd3701b41317f7f0c42129",
-        cm_main:                "2782354e775732afcc1bd690087fa0f57e63abd9",
-        fueler:                 "32e3689f8f5ea27b11cfae9aede81cfc88ca306a",
-        cm_tc:                  "0c275e46ad36c45e9edd3701b41317f7f0c42129",
-        cm_positions_storage:   "0c275e46ad36c45e9edd3701b41317f7f0c42129",
-        cm_trades_storage:      "0c275e46ad36c45e9edd3701b41317f7f0c42129",
-    };
+    let start_at_version = CanisterGitVersions::current_live_mainnet_versions();
     
-    let (tx, rx) = mpsc::channel::<Box<dyn FnOnce(&mut CanisterModules)->() + Send + Sync>>();
-    let tx1 = tx.clone();
-    let tx2 = tx.clone();
-    let tx3 = tx.clone();
-    let tx4 = tx.clone();
-    let tx5 = tx.clone();
-    let tx6 = tx.clone();
-    
-    let mut modules = CanisterModules::blank();
-    
-    let forthejoin = [
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("cts.wasm", start_at_version.cts);
-            tx.send(Box::new(move |modules: &mut CanisterModules| { modules.cts = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("bank.wasm", start_at_version.bank);
-            tx1.send(Box::new(move |modules: &mut CanisterModules| { modules.bank = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("cm_main.wasm", start_at_version.cm_main);
-            tx2.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_main = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("fueler.wasm", start_at_version.fueler);
-            tx3.send(Box::new(move |modules: &mut CanisterModules| { modules.fueler = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("cm_tc.wasm", start_at_version.cm_tc);
-            tx4.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_tc = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("cm_positions_storage.wasm", start_at_version.cm_positions_storage);
-            tx5.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_positions_storage = module; })).unwrap(); // moves module into main thread
-        }),
-        thread::spawn(move || { // moves tx into thread
-            let module = build_canister_with_git_commit("cm_trades_storage.wasm", start_at_version.cm_trades_storage);
-            tx6.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_trades_storage = module; })).unwrap(); // moves module into main thread
-        }),
-    ];
+    println!("Starting at versions: {:?}", start_at_version);
 
-    for _ in 0..forthejoin.len() { 
-        let f = rx.recv().unwrap();
-        f(&mut modules);
-    }
-    
-    for handle in forthejoin {
-        handle.join().unwrap();
-    }
-    
-    let pic = set_up_with_modules(modules.clone());
-    let icp_tc = set_up_tc_with_modules(&pic, modules.clone());
+    let start_at_modules = get_canister_modules_of_the_git_versions(start_at_version);
+            
+    let pic = set_up_with_modules(start_at_modules.clone());
+    let icp_tc = set_up_tc_with_modules(&pic, start_at_modules.clone());
     let (_ledger1, tc1) = set_up_new_ledger_and_tc(&pic);
     let (_ledger2, tc2) = set_up_new_ledger_and_tc(&pic);
     let (_ledger3, tc3) = set_up_new_ledger_and_tc(&pic);
@@ -109,25 +45,25 @@ fn test_upgrade_1() {
             canister: CTS,
             controller: SNS_ROOT,
             global_variables: vec![0],
-            stable_raw: vec![],
+            stable_variables: vec![],
         },
         CanisterMemoryIds{
             canister: CM_MAIN,
             controller: SNS_ROOT,
             global_variables: vec![0],
-            stable_raw: vec![],
+            stable_variables: vec![],
         },
         CanisterMemoryIds{
             canister: BANK,
             controller: SNS_ROOT,
             global_variables: vec![0, 3],
-            stable_raw: vec![1, 2]
+            stable_variables: vec![1, 2]
         },
         CanisterMemoryIds{
             canister: FUELER,
             controller: SNS_ROOT,
             global_variables: vec![0],
-            stable_raw: vec![],
+            stable_variables: vec![],
         }
     ].into_iter()
     .chain(
@@ -137,7 +73,7 @@ fn test_upgrade_1() {
                 canister: tc,
                 controller: CM_MAIN,
                 global_variables: vec![0, 1, 2],
-                stable_raw: vec![]
+                stable_variables: vec![]
             }
         })
     )
@@ -152,10 +88,9 @@ fn test_upgrade_1() {
 
     // upgrade to current canisters in this working copy directory 
     // use the management-canister install_code api for this upgrade. don't use pic functions for this upgrade.
-    //CanisterModules::default_release()
-    let update_to_modules = CanisterModules::default_release();
+    let update_to_modules = CanisterModules::default_release();//get_canister_modules_of_the_git_versions(CanisterGitVersions::same());
     
-    use outsiders::management_canister::{InstallCodeArgs, CanisterInstallMode};
+    use outsiders::management_canister::{InstallCodeArgs, CanisterInstallMode, StopCanisterArgs, StartCanisterArgs};
     
     for (first_level_canister, update_to_module) in [
         (CTS, update_to_modules.cts), 
@@ -163,10 +98,21 @@ fn test_upgrade_1() {
         (CM_MAIN, update_to_modules.cm_main), 
         (FUELER, update_to_modules.fueler)
     ] {
+        let raw_effective_principal = pocket_ic::common::rest::RawEffectivePrincipal::CanisterId(first_level_canister.as_slice().into()); 
         call_candid_as::<_, ()>(
             &pic,
             Principal::management_canister(),
-            pocket_ic::common::rest::RawEffectivePrincipal::CanisterId(first_level_canister.as_slice().into()),
+            raw_effective_principal.clone(),
+            SNS_ROOT,
+            "stop_canister",
+            (StopCanisterArgs{
+              canister_id: first_level_canister,
+            },)
+        ).unwrap();
+        call_candid_as::<_, ()>(
+            &pic,
+            Principal::management_canister(),
+            raw_effective_principal.clone(),
             SNS_ROOT,
             "install_code",
             (InstallCodeArgs{
@@ -175,6 +121,16 @@ fn test_upgrade_1() {
               mode: CanisterInstallMode::Upgrade(None),
               canister_id: first_level_canister,
               sender_canister_version: None,
+            },)
+        ).unwrap();
+        call_candid_as::<_, ()>(
+            &pic,
+            Principal::management_canister(),
+            raw_effective_principal,
+            SNS_ROOT,
+            "start_canister",
+            (StartCanisterArgs{
+              canister_id: first_level_canister,
             },)
         ).unwrap();
     } 
@@ -190,9 +146,11 @@ fn test_upgrade_1() {
             specific_cs: None, 
             new_canister_code: Some(cts_lib::types::CanisterCode::new(update_to_modules.cm_tc)), 
             post_upgrade_quest: candid::encode_args(()).unwrap(),
+            take_snapshots: false,
         },)
     ).unwrap().0;
-    for (tc, upgrade_tc_r) in upgrade_tcs_rs {
+    for (_tc, upgrade_tc_r) in upgrade_tcs_rs {
+        assert!(upgrade_tc_r.take_canister_snapshot_result.is_none()); // temp while waiting for pic to implement snapshots          
         upgrade_tc_r.stop_canister_result.unwrap().unwrap();
         upgrade_tc_r.install_code_result.unwrap().unwrap();    
         upgrade_tc_r.start_canister_result.unwrap().unwrap();
@@ -222,8 +180,121 @@ fn test_upgrade_1() {
 }
 
 
+// ---------------
 
-fn build_canister_with_git_commit(file_name: &'static str, git_commit_id: &'static str) -> Vec<u8> {
+
+
+type GitCommitId = String;
+#[derive(Debug)]
+struct CanisterGitVersions {
+    cts: GitCommitId,
+    bank: GitCommitId,
+    cm_main: GitCommitId,
+    fueler: GitCommitId,
+    cm_tc: GitCommitId,
+    cm_positions_storage: GitCommitId,
+    cm_trades_storage: GitCommitId,
+}
+impl CanisterGitVersions{
+    fn same(git_commit_id: GitCommitId) -> Self {
+        Self {
+            cts: git_commit_id.clone(),
+            bank: git_commit_id.clone(),
+            cm_main: git_commit_id.clone(),
+            fueler: git_commit_id.clone(),
+            cm_tc: git_commit_id.clone(),
+            cm_positions_storage: git_commit_id.clone(),
+            cm_trades_storage: git_commit_id.clone(),
+            
+        }
+    }
+    fn current_live_mainnet_versions() -> Self {
+        let cm_tc_git_commit_id = get_current_mainnet_canister_git_commit_id(Principal::from_text("xvedx-siaaa-aaaar-qactq-cai").unwrap());
+        Self {
+            cts: get_current_mainnet_canister_git_commit_id(CTS),
+            bank: get_current_mainnet_canister_git_commit_id(BANK),
+            cm_main: get_current_mainnet_canister_git_commit_id(CM_MAIN),
+            fueler: get_current_mainnet_canister_git_commit_id(FUELER),
+            cm_tc: cm_tc_git_commit_id.clone(),   
+            cm_positions_storage: cm_tc_git_commit_id.clone(), // there are no live storage-canisters yet so for now we'll use the cm_tc git version
+            cm_trades_storage: cm_tc_git_commit_id,
+        }
+    }
+}
+
+
+
+
+
+fn get_current_mainnet_canister_git_commit_id(c: Principal) -> GitCommitId {
+    use ic_agent::{Agent};
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let agent = Agent::builder().with_url("https://icp-api.io").build().unwrap();
+    let b = rt.block_on(agent.read_state_canister_metadata(c, "git_commit_id")).unwrap();
+    String::from_utf8(b).unwrap()
+}
+
+
+
+fn get_canister_modules_of_the_git_versions(start_at_version: CanisterGitVersions) -> CanisterModules {
+
+    let (tx, rx) = mpsc::channel::<Box<dyn FnOnce(&mut CanisterModules)->() + Send + Sync>>();
+    let tx1 = tx.clone();
+    let tx2 = tx.clone();
+    let tx3 = tx.clone();
+    let tx4 = tx.clone();
+    let tx5 = tx.clone();
+    let tx6 = tx.clone();
+    
+    let mut modules = CanisterModules::blank();
+    
+    let forthejoin = [
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("cts.wasm", &start_at_version.cts);
+            tx.send(Box::new(move |modules: &mut CanisterModules| { modules.cts = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("bank.wasm", &start_at_version.bank);
+            tx1.send(Box::new(move |modules: &mut CanisterModules| { modules.bank = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("cm_main.wasm", &start_at_version.cm_main);
+            tx2.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_main = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("fueler.wasm", &start_at_version.fueler);
+            tx3.send(Box::new(move |modules: &mut CanisterModules| { modules.fueler = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("cm_tc.wasm", &start_at_version.cm_tc);
+            tx4.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_tc = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("cm_positions_storage.wasm", &start_at_version.cm_positions_storage);
+            tx5.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_positions_storage = module; })).unwrap(); // moves module into main thread
+        }),
+        thread::spawn(move || { // moves tx into thread
+            let module = build_canister_with_git_commit("cm_trades_storage.wasm", &start_at_version.cm_trades_storage);
+            tx6.send(Box::new(move |modules: &mut CanisterModules| { modules.cm_trades_storage = module; })).unwrap(); // moves module into main thread
+        }),
+    ];
+
+    for _ in 0..forthejoin.len() { 
+        let f = rx.recv().unwrap();
+        f(&mut modules);
+    }
+    
+    for handle in forthejoin {
+        handle.join().unwrap();
+    }
+    
+    modules
+}
+
+
+
+
+fn build_canister_with_git_commit<'a>(file_name: &'static str, git_commit_id: &'a str) -> Vec<u8> {
     
     // make new temp folder , 
     let dir = std::env::temp_dir().join(&format!("cts_test_upgrade_temp_dir_{}_{}", file_name, git_commit_id));
@@ -265,6 +336,15 @@ fn build_canister_with_git_commit(file_name: &'static str, git_commit_id: &'stat
             .current_dir((&dir).join("cts"))
             .status()
             .expect("Error starting process to build canisters");
+        /*
+        let build_status: ExitStatus = Command::new("bash")
+            .arg("scripts/podman_build.sh")
+            .env_clear()
+            .env("PATH", env!("PATH"))
+            .current_dir((&dir).join("cts"))
+            .status()
+            .expect("Error starting process to build canisters");
+        */
         assert!(build_status.success());
     }
     
@@ -283,17 +363,17 @@ struct CanisterMemoryIds {
     canister: Principal,
     controller: Principal, 
     global_variables: Vec<u8>, // list of memory-ids
-    stable_raw: Vec<u8>,
+    stable_variables: Vec<u8>, // list of memory-ids
 }
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct CanisterMemoriesRawData {
     global_variables: Vec<Vec<u8>>, // list of memory-backups
-    stable_raw: Vec<Vec<u8>>,
+    stable_variables: Vec<Vec<u8>>, // list of memory-backups
 }
 
 fn download_canister_memories(canister_memory_ids: &CanisterMemoryIds) -> CanisterMemoriesRawData {
     CanisterMemoriesRawData{
         global_variables: vec![],
-        stable_raw: vec![]
+        stable_variables: vec![]
     }
 }

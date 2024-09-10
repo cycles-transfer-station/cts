@@ -238,7 +238,9 @@ pub mod upgrade_canisters {
     pub struct ControllerUpgradeCSQuest {
         pub specific_cs: Option<HashSet<Principal>>, 
         pub new_canister_code: Option<CanisterCode>, 
-        pub post_upgrade_quest: Vec<u8>
+        #[serde(with = "serde_bytes")]
+        pub post_upgrade_quest: Vec<u8>,
+        pub take_snapshots: bool,
     }
     
     // options are for the steps, none means didn't call.

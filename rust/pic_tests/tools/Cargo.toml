@@ -10,7 +10,6 @@ pocket-ic = { workspace = true }
 cts_lib = { workspace = true }
 outsiders = { workspace = true }
 serde = { workspace = true }
-serde_bytes = { workspace = true }
 icrc-ledger-types = { workspace = true }
 more-asserts = { workspace = true }
 ic-ledger-types = { workspace = true }
