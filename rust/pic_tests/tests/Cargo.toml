@@ -45,9 +45,6 @@ icrc1-test-suite = { workspace = true }
 icrc1-test-env = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }
-<<<<<<< HEAD
 serde_bytes = { workspace = true }
 serde = { workspace = true }
 outsiders = { workspace = true }
-=======
->>>>>>> master
