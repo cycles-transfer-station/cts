@@ -18,7 +18,7 @@ use cts_lib::{
         time_nanos,
         time_nanos_u64,
         time_seconds,
-        caller_is_controller_gaurd,
+        caller_is_controller_guard,
         call_error_as_u32_and_string,
         sha256,
         upgrade_canisters::{
@@ -1044,7 +1044,7 @@ pub extern "C" fn view_payouts_errors() {
 #[export_name = "canister_update controller_clear_payouts_errors"]
 pub extern "C" fn controller_clear_payouts_errors() {
 
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     with_mut(&CM_DATA, |cm_data| {
         cm_data.do_payouts_errors = Vec::new();
@@ -1058,7 +1058,7 @@ pub extern "C" fn controller_clear_payouts_errors() {
 
 #[update]
 pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Vec<(Principal, UpgradeOutcome)> {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     #[allow(non_snake_case)]
     let LOG_STORAGE_DATA: &'static LocalKey<RefCell<LogStorageData>> = match log_storage_type {
@@ -1131,7 +1131,7 @@ pub struct ControllerCallCanisterQuest {
 
 #[export_name = "canister_update controller_call_canister"]
 pub extern "C" fn controller_call_canister() {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     let (q,): (ControllerCallCanisterQuest,) = arg_data(ArgDecoderConfig::default());
             

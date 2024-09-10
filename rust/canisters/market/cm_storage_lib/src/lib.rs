@@ -6,7 +6,7 @@ use cts_lib::{
         localkey::{
             refcell::{with, with_mut}
         },
-        caller_is_controller_gaurd,
+        caller_is_controller_guard,
     },
     consts::GiB,
 };
@@ -120,7 +120,7 @@ where
     F: Fn(&[u8]) -> u128,
     Q: Fn(&[u8]) -> Vec<K>
 {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     msg_cycles_accept128(msg_cycles_available128());
     
@@ -226,7 +226,7 @@ where
 
 #[update]
 fn controller_mark_full(mark: bool) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     with_mut(&STORAGE_DATA, |data| {
         data.controller_mark_full = mark;
     })
@@ -236,7 +236,7 @@ fn controller_mark_full(mark: bool) {
 
 #[update]
 pub fn cm_update_log(log_id: u128, log_b: Vec<u8>) {
-    caller_is_controller_gaurd(&caller());
+    caller_is_controller_guard(&caller());
     
     let logs_storage_memory: VirtualMemory<DefaultMemoryImpl> = get_logs_storage_memory();
     
