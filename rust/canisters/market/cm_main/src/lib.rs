@@ -31,7 +31,7 @@ use cts_lib::{
         sha256,
         time_nanos_u64,
         call_error_as_u32_and_string,
-        caller_is_sns_governance_guard,
+        caller_is_sns_governance_gaurd,
     },
     consts::{MiB, MANAGEMENT_CANISTER_ID},
 };
@@ -112,7 +112,7 @@ fn post_upgrade() {
 
 #[update]
 pub fn controller_upload_canister_code(canister_code: CanisterCode, market_canister_type: MarketCanisterType) {
-    caller_is_sns_governance_guard();
+    caller_is_sns_governance_gaurd();
     
     if *(canister_code.module_hash()) != sha256(canister_code.module()) {
         trap("module hash is not as given");
@@ -164,7 +164,7 @@ pub fn sns_validate_controller_create_trade_contract(q: ControllerCreateIcrc1Tok
 pub async fn controller_create_trade_contract(q: ControllerCreateIcrc1TokenTradeContractQuest) 
  -> Result<ControllerCreateIcrc1TokenTradeContractSuccess, ControllerCreateIcrc1TokenTradeContractError> {
 
-    caller_is_sns_governance_guard();
+    caller_is_sns_governance_gaurd();
     
     let mid_call_data: ControllerCreateIcrc1TokenTradeContractMidCallData = with_mut(&CM_MAIN_DATA, |data| {
         match data.controller_create_icrc1token_trade_contract_mid_call_data {
@@ -372,7 +372,7 @@ pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, Tr
 
 #[update]
 pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
-    caller_is_sns_governance_guard();
+    caller_is_sns_governance_gaurd();
     
     let tc_cc: CanisterCode = with_mut(&CM_MAIN_DATA, |cm_main_data| {
         if let Some(new_canister_code) = q.new_canister_code {
@@ -427,7 +427,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
 
 #[update]
 pub async fn controller_upgrade_tc_log_storage_canisters(tc: Principal, q: ControllerUpgradeCSQuest, log_storage_type: LogStorageType) -> Result<Vec<(Principal, UpgradeOutcome)>, CallError> {
-    caller_is_sns_governance_guard();
+    caller_is_sns_governance_gaurd();
     
     if let Some(ref new_cc) = q.new_canister_code {
         new_cc.verify_module_hash().unwrap();

@@ -3,7 +3,7 @@ use candid::Principal;
 use cts_lib::{
     tools::{
         upgrade_canisters::{upgrade_canisters, UpgradeOutcome},
-        caller_is_sns_governance_guard,
+        caller_is_sns_governance_gaurd,
     },
     types::CanisterCode,
 };
@@ -11,7 +11,7 @@ use cts_lib::{
 
 #[update]
 pub async fn upgrade_top_level_canister(canister_id: Principal, cc: CanisterCode, post_upgrade_quest: Vec<u8>) {
-    caller_is_sns_governance_guard();
+    caller_is_sns_governance_gaurd();
     
     cc.verify_module_hash().unwrap();
     
