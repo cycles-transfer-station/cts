@@ -199,7 +199,7 @@ pub fn round_robin<T: Copy>(ctcs: &Vec<T>, round_robin_counter: &'static LocalKe
 
 
 
-pub fn caller_is_controller_gaurd(caller: &Principal) {
+pub fn caller_is_controller_guard(caller: &Principal) {
     if is_controller(caller) == false {
         trap("Caller must be a controller for this method.");
     }
@@ -281,7 +281,7 @@ pub fn sns_validation_string<T: core::fmt::Debug>(q: T) -> String {
 
 
 
-pub fn caller_is_sns_governance_gaurd() {
+pub fn caller_is_sns_governance_guard() {
     let must_be_principal: Principal = {
         use crate::consts::livetest::*;
         if [LIVETEST_CTS, LIVETEST_CM_MAIN].contains(&ic_cdk::api::id()) {
