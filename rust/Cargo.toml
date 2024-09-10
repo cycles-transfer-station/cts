@@ -14,7 +14,7 @@ members = [
     "canisters/fueler",
     "canisters/top_level_upgrader",
     "pic_tests/canister_caller",
-    "outsiders", "canisters/top_level_upgrader",
+    "outsiders",
 ]
 
 exclude = [
