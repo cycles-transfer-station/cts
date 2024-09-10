@@ -52,6 +52,9 @@ pub mod canister_code {
         pub fn module_hash(&self) -> &[u8; 32] {
             &self.module_hash
         }
+        pub fn module_hash_hex(&self) -> String {
+            hex::encode(self.module_hash())
+        }
         pub fn verify_module_hash(&self) -> Result<(), ()> {
             if *(self.module_hash()) != crate::tools::sha256(self.module()) {
                 Err(())
@@ -118,7 +121,3 @@ pub mod http_request{
     }
 
 }
-
-
-
-
