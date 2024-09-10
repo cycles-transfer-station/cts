@@ -91,7 +91,6 @@ type Snapshot = record {
 type TradeContractData = record {
   tc_module_hash : blob;
   latest_upgrade_timestamp_nanos : nat64;
-  latest_snapshot : opt Snapshot;
 };
 type TradeContractIdAndLedgerId = record {
   icrc1_ledger_canister_id : principal;

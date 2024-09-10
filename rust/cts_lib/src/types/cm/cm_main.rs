@@ -6,7 +6,6 @@ use crate::{
     icrc::Tokens,
     consts::TRILLION,
 };
-use outsiders::management_canister::Snapshot;
 
 
 pub const NEW_ICRC1TOKEN_TRADE_CONTRACT_CYCLES: Cycles = 7 * TRILLION;
@@ -23,7 +22,6 @@ pub struct TradeContractIdAndLedgerId {
 pub struct TradeContractData {
     pub tc_module_hash: [u8; 32],
     pub latest_upgrade_timestamp_nanos: u64,
-    pub latest_snapshot: Option<Snapshot>,
 }
 
 #[derive(CandidType, Deserialize)]

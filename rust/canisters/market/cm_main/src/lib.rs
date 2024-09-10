@@ -280,7 +280,6 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                 mid_call_data.icrc1token_trade_contract_data = Some(TradeContractData{
                     tc_module_hash,
                     latest_upgrade_timestamp_nanos: time_nanos_u64(),
-                    latest_snapshot: None,
                 });
             } 
             Err(call_error) => {
@@ -415,15 +414,6 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
         for (tc, uo) in rs.iter() {
-            if let Some(ref r) = uo.take_canister_snapshot_result {
-                if let Ok(ref new_snapshot) = r {
-                    if let Some(i) = cm_main_data.trade_contracts.iter_mut().find(|i| i.0.trade_contract_canister_id == *tc) {
-                        i.1.latest_snapshot = Some(new_snapshot.clone());
-                    } else {
-                        ic_cdk::print("check this");
-                    }
-                }
-            }
             if let Some(ref r) = uo.install_code_result {
                 if r.is_ok() {
                     if let Some(i) = cm_main_data.trade_contracts.iter_mut().find(|i| i.0.trade_contract_canister_id == *tc) {
