@@ -75,13 +75,19 @@ type Result_1 = variant {
   Ok : ControllerCreateIcrc1TokenTradeContractSuccess;
   Err : ControllerCreateIcrc1TokenTradeContractError;
 };
-type Result_2 = variant { Ok; Err : record { nat32; text } };
-type Result_3 = variant {
+type Result_2 = variant { Ok : Snapshot; Err : record { nat32; text } };
+type Result_3 = variant { Ok; Err : record { nat32; text } };
+type Result_4 = variant {
   Ok : vec record { principal; UpgradeOutcome };
   Err : record { nat32; text };
 };
-type Result_4 = variant { Ok : text; Err : text };
-type Result_5 = variant { Ok : blob; Err : record { nat32; text } };
+type Result_5 = variant { Ok : text; Err : text };
+type Result_6 = variant { Ok : blob; Err : record { nat32; text } };
+type Snapshot = record {
+  id : blob;
+  total_size : nat64;
+  taken_at_timestamp : nat64;
+};
 type TradeContractData = record {
   tc_module_hash : blob;
   latest_upgrade_timestamp_nanos : nat64;
@@ -91,9 +97,10 @@ type TradeContractIdAndLedgerId = record {
   trade_contract_canister_id : principal;
 };
 type UpgradeOutcome = record {
-  install_code_result : opt Result_2;
-  start_canister_result : opt Result_2;
-  stop_canister_result : opt Result_2;
+  take_canister_snapshot_result : opt Result_2;
+  install_code_result : opt Result_3;
+  start_canister_result : opt Result_3;
+  stop_canister_result : opt Result_3;
 };
 service : (CMMainInit) -> {
   continue_controller_create_trade_contract : () -> (Result);
@@ -104,18 +111,18 @@ service : (CMMainInit) -> {
       principal,
       ControllerUpgradeCSQuest,
       LogStorageType,
-    ) -> (Result_3);
+    ) -> (Result_4);
   controller_upgrade_tcs : (ControllerUpgradeCSQuest) -> (
       vec record { principal; UpgradeOutcome },
     );
   controller_upload_canister_code : (CanisterCode, MarketCanisterType) -> ();
   sns_validate_controller_create_trade_contract : (
       ControllerCreateIcrc1TokenTradeContractQuest,
-    ) -> (Result_4) query;
+    ) -> (Result_5) query;
   view_icrc1_token_trade_contracts : () -> (
       vec record { TradeContractIdAndLedgerId; TradeContractData },
     ) query;
-  view_tc_payouts_errors : (principal, nat32) -> (Result_5);
+  view_tc_payouts_errors : (principal, nat32) -> (Result_6);
   view_tcs_status : () -> (
       record {
         vec record { principal; CanisterStatusResult };

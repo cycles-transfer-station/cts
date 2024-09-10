@@ -45,11 +45,17 @@ type PositionTerminationData = record {
   timestamp_nanos : nat;
   cause : PositionTerminationCause;
 };
-type Result = variant { Ok; Err : record { nat32; text } };
-type Result_1 = variant { Ok : text; Err : text };
-type Result_2 = variant { Ok : TradeSuccess; Err : TradeError };
-type Result_3 = variant { Ok : nat; Err : TransferBalanceError };
-type Result_4 = variant { Ok; Err : VoidPositionError };
+type Result = variant { Ok : Snapshot; Err : record { nat32; text } };
+type Result_1 = variant { Ok; Err : record { nat32; text } };
+type Result_2 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : TradeSuccess; Err : TradeError };
+type Result_4 = variant { Ok : nat; Err : TransferBalanceError };
+type Result_5 = variant { Ok; Err : VoidPositionError };
+type Snapshot = record {
+  id : blob;
+  total_size : nat64;
+  taken_at_timestamp : nat64;
+};
 type StorageCanister = record {
   first_log_id : nat;
   canister_id : principal;
@@ -101,9 +107,10 @@ type TransferError = variant {
   InsufficientFunds : record { balance : nat };
 };
 type UpgradeOutcome = record {
-  install_code_result : opt Result;
-  start_canister_result : opt Result;
-  stop_canister_result : opt Result;
+  take_canister_snapshot_result : opt Result;
+  install_code_result : opt Result_1;
+  start_canister_result : opt Result_1;
+  stop_canister_result : opt Result_1;
 };
 type ViewLatestTradesQuest = record { opt_start_before_id : opt nat };
 type ViewLatestTradesSponse = record {
@@ -144,19 +151,19 @@ service : (CMIcrc1TokenTradeContractInit) -> {
       ControllerUpgradeCSQuest,
       LogStorageType,
     ) -> (vec record { principal; UpgradeOutcome });
-  sns_validate_trade_cycles : (TradeCyclesQuest) -> (Result_1) query;
-  sns_validate_trade_tokens : (TradeTokensQuest) -> (Result_1) query;
+  sns_validate_trade_cycles : (TradeCyclesQuest) -> (Result_2) query;
+  sns_validate_trade_tokens : (TradeTokensQuest) -> (Result_2) query;
   sns_validate_transfer_cycles_balance : (TransferBalanceQuest) -> (
-      Result_1,
+      Result_2,
     ) query;
   sns_validate_transfer_token_balance : (TransferBalanceQuest) -> (
-      Result_1,
+      Result_2,
     ) query;
-  sns_validate_void_position : (VoidPositionQuest) -> (Result_1) query;
-  trade_cycles : (TradeCyclesQuest) -> (Result_2);
-  trade_tokens : (TradeTokensQuest) -> (Result_2);
-  transfer_cycles_balance : (TransferBalanceQuest) -> (Result_3);
-  transfer_token_balance : (TransferBalanceQuest) -> (Result_3);
+  sns_validate_void_position : (VoidPositionQuest) -> (Result_2) query;
+  trade_cycles : (TradeCyclesQuest) -> (Result_3);
+  trade_tokens : (TradeTokensQuest) -> (Result_3);
+  transfer_cycles_balance : (TransferBalanceQuest) -> (Result_4);
+  transfer_token_balance : (TransferBalanceQuest) -> (Result_4);
   view_current_positions : (ViewStorageLogsQuest) -> (vec PositionLog) query;
   view_cycles_position_book : (ViewPositionBookQuest) -> (
       ViewPositionBookSponse,
@@ -170,5 +177,5 @@ service : (CMIcrc1TokenTradeContractInit) -> {
     ) query;
   view_trades_storage_canisters : () -> (vec StorageCanister) query;
   view_volume_stats : () -> (ViewVolumeStatsSponse) query;
-  void_position : (TradeSuccess) -> (Result_4);
+  void_position : (TradeSuccess) -> (Result_5);
 }

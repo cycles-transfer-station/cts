@@ -12,6 +12,7 @@ members = [
     "canisters/market/cm_trades_storage",
     "canisters/market/cm_positions_storage",
     "canisters/fueler",
+    "canisters/top_level_upgrader",
     "pic_tests/canister_caller",
     "outsiders",
 ]

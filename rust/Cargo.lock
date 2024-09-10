@@ -1119,6 +1119,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "top_level_upgrader"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cts_lib",
+ "ic-cdk 0.15.1",
+]
+
+[[package]]
 name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

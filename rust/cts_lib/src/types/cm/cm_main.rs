@@ -74,4 +74,3 @@ pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
 }
 
 pub type ViewTCsStatusSponse = (Vec<(Principal/*tc*/, outsiders::management_canister::CanisterStatusResult)>, Vec<(Principal, CallError)>);
-
