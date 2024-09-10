@@ -121,3 +121,14 @@ pub mod http_request{
     }
 
 }
+
+
+pub mod cts {
+    use candid::{CandidType, Deserialize, Principal};
+    use std::collections::HashSet;
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct CTSInit {
+        pub batch_creators: Option<HashSet<Principal>>,
+    }
+}
