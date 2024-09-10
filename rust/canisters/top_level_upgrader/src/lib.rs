@@ -1,5 +1,5 @@
-use ic_cdk::update;
-use candid::Principal;
+use ic_cdk::{update, query};
+use candid::{Principal, CandidType, Deserialize};
 use cts_lib::{
     tools::{
         upgrade_canisters::{upgrade_canisters, UpgradeOutcome},
@@ -9,22 +9,37 @@ use cts_lib::{
 };
 
 
+#[derive(CandidType, Deserialize)]
+pub struct UpgradeTopLevelCanisterQuest{
+    canister_id: Principal,
+    cc: CanisterCode, 
+    post_upgrade_quest: Vec<u8>
+}
+
+#[query]
+pub fn sns_validate_upgrade_top_level_canister(q: UpgradeTopLevelCanisterQuest) -> Result<String,String> {
+    q.cc.verify_module_hash().unwrap();
+    let mut str = format!("Upgrade the top-level canister: {} with the module-hash: {}.", q.canister_id, q.cc.module_hash_hex()); 
+    str.push_str(&format!("\npost_upgrade_arg: {}", hex::encode(&q.post_upgrade_quest)));
+    Ok(str)
+}
+
 #[update]
-pub async fn upgrade_top_level_canister(canister_id: Principal, cc: CanisterCode, post_upgrade_quest: Vec<u8>) {
+pub async fn upgrade_top_level_canister(q: UpgradeTopLevelCanisterQuest) {
     caller_is_sns_governance_guard();
     
-    cc.verify_module_hash().unwrap();
+    q.cc.verify_module_hash().unwrap();
     
-    ic_cdk::print(&format!("Upgrading: {} with module-hash: {}", canister_id, cc.module_hash_hex()));
+    ic_cdk::print(&format!("Upgrading: {} with module-hash: {}", q.canister_id, q.cc.module_hash_hex()));
     
     let uo: UpgradeOutcome = upgrade_canisters(
-        vec![canister_id],
-        &cc,
-        &post_upgrade_quest,
+        vec![q.canister_id],
+        &q.cc,
+        &q.post_upgrade_quest,
         true,
     ).await.into_iter().next().unwrap().1;
 
-    ic_cdk::print(&format!("Upgrade outcome when upgrading: {} with module-hash: {}:\n{:?}", canister_id, cc.module_hash_hex(), uo));
+    ic_cdk::print(&format!("Upgrade outcome when upgrading: {} with module-hash: {}:\n{:?}", q.canister_id, q.cc.module_hash_hex(), uo));
 }
 
 

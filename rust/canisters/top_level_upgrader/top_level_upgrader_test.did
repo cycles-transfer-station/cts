@@ -1,2 +1,13 @@
 type CanisterCode = record { module_hash : blob; module : blob };
-service : { upgrade_top_level_canister : (principal, CanisterCode, blob) -> () }
+type Result = variant { Ok : text; Err : text };
+type UpgradeTopLevelCanisterQuest = record {
+  cc : CanisterCode;
+  post_upgrade_quest : blob;
+  canister_id : principal;
+};
+service : {
+  sns_validate_upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> (
+      Result,
+    ) query;
+  upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> ();
+}

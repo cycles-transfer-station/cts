@@ -12,3 +12,5 @@ crate-type = ["cdylib"]
 cts_lib = { path = "../../cts_lib" }
 candid = { workspace = true }
 ic-cdk = { workspace = true }
+serde = { workspace = true }
+hex = { workspace = true }
