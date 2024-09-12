@@ -381,7 +381,7 @@ pub fn sns_validate_controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Resul
                 cm_main_data.tc_canister_code.module_hash_hex()
             }
         };
-        let mut str = format!("Upgrade the trade-contract canisters with the module-hash: {}.", module_hash_hex); 
+        let mut str = format!("Upgrade the trade-contract canisters with the module: {}.", module_hash_hex); 
         if let Some(specific_cs) = q.specific_cs {
             str.push_str(&format!("\nSpecific trade-contract canisters to upgrade: "));
             for c in specific_cs {
