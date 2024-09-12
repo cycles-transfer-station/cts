@@ -218,6 +218,8 @@ fn post_upgrade() {
         localkey::cell::set(&CYCLES_BANK_TRANSFER_FEE, cm_data.cycles_bank_transfer_fee);
         localkey::cell::set(&CTS_ID, cm_data.cts_id);    
     });
+    
+    ic_cdk_timers::set_timer(Duration::from_secs(30), || ic_cdk::spawn(do_payouts()));
 }
 
 // -----------------
