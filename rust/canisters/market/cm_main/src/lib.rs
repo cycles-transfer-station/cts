@@ -370,6 +370,31 @@ pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, Tr
 
 
 
+#[query]
+pub fn sns_validate_controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Result<String,String> {
+    with(&CM_MAIN_DATA, |cm_main_data| {
+        let module_hash_hex = {
+            if let Some(new_canister_code) = q.new_canister_code {
+                new_canister_code.verify_module_hash().unwrap();
+                new_canister_code.module_hash_hex() 
+            } else {
+                cm_main_data.tc_canister_code.module_hash_hex()
+            }
+        };
+        let mut str = format!("Upgrade the trade-contract canisters with the module-hash: {}.", module_hash_hex); 
+        if let Some(specific_cs) = q.specific_cs {
+            str.push_str(&format!("\nSpecific trade-contract canisters to upgrade: "));
+            for c in specific_cs {
+                str.push_str(&format!("{}, ", c));
+            }
+        }
+        str.push_str(&format!("\npost_upgrade_arg: {}", hex::encode(&q.post_upgrade_quest)));
+        Ok(str)
+    })
+}
+
+
+
 #[update]
 pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Principal, UpgradeOutcome)> {
     caller_is_sns_governance_guard();

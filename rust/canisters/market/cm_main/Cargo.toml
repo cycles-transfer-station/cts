@@ -17,3 +17,4 @@ ic-stable-structures = { workspace = true }
 canister-tools = { workspace = true }
 ic-cdk = { workspace = true }
 outsiders = { path = "../../../outsiders" }
+hex = { workspace = true }

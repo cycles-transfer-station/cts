@@ -119,6 +119,9 @@ service : (CMMainInit) -> {
   sns_validate_controller_create_trade_contract : (
       ControllerCreateIcrc1TokenTradeContractQuest,
     ) -> (Result_5) query;
+  sns_validate_controller_upgrade_tcs : (ControllerUpgradeCSQuest) -> (
+      Result_5,
+    ) query;
   view_icrc1_token_trade_contracts : () -> (
       vec record { TradeContractIdAndLedgerId; TradeContractData },
     ) query;
