@@ -7,6 +7,7 @@ use std::{
     },
     cell::RefCell,
     borrow::Cow,
+    time::Duration,
 };
 use cts_lib::{
     icrc::{
@@ -328,6 +329,23 @@ fn post_upgrade() {
             }
         });
     });
+        
+    
+    // for any leftover ongoing mint-cycles bc the timers cancel on upgrade. 
+    ic_cdk_timers::set_timer(Duration::from_secs(60), || {
+        let users: Vec<Principal> = with(&CB_DATA, |cb_data | {
+            cb_data.users_mint_cycles.keys().copied().collect()
+        });        
+        ic_cdk::spawn(async {
+            let rs: Vec<Result<MintCyclesSuccess, CompleteMintCyclesError>> 
+                = futures::future::join_all(users.iter().copied().map(|user_id| complete_mint_cycles_(user_id))).await;
+            for (user_id, r) in users.into_iter().zip(rs.into_iter()) {
+                if let Err(e) = r {
+                    ic_cdk::println!("post_upgrade complete-mint-cycles timer received a complete_mint_cycles_ error. User: {}. Error: {:?}", user_id, e);
+                } 
+            }
+        });
+    }); 
 
 } 
 
@@ -831,6 +849,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL {
             mid_call_data.lock = false;
             with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+            ic_cdk_timers::set_timer(Duration::from_secs(60), move || ic_cdk::spawn(async move { let _: Result<_, _> = complete_mint_cycles_(user_id).await; })); 
             return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles));
         }
         match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
@@ -844,6 +863,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                 } else {
                     mid_call_data.lock = false;
                     with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+                    ic_cdk_timers::set_timer(Duration::from_secs(60), move || ic_cdk::spawn(async move { let _: Result<_, _> = complete_mint_cycles_(user_id).await; })); 
                     return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
                 }
             }

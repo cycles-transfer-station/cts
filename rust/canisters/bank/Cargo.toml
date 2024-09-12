@@ -21,3 +21,5 @@ hex = { workspace = true }
 ic-certified-map = { workspace = true }
 leb128 = { workspace = true }
 serde_cbor = { workspace = true }
+ic-cdk-timers = { workspace = true }
+futures.workspace = true
