@@ -24,11 +24,12 @@ pub const ICP_MINTER: Principal = Principal::from_slice(b"icp-minter");
 pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
-pub const CTS_CONTROLLER: Principal = SNS_ROOT; // Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
+pub const CTS_CONTROLLER: Principal = SNS_ROOT;
 pub const CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 110, 1, 1]);
 pub const CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 111, 1, 1]);
 pub const BANK: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 170, 1, 1]);
-pub const FUELER: Principal = Principal::from_slice(&[0,0,0,0,2,48,0,191,1,1]); // update this when mainnet canister live.
+pub const FUELER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 1, 177, 1, 1]); // dvpyg-3qaaa-aaaar-qagyq-cai 
+pub const TOP_LEVEL_UPGRADER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 2, 8, 1, 1]); // yvs6s-hyaaa-aaaar-qaiea-cai
 pub const SNS_ROOT: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 218, 1, 1]) ; // ibahq-taaaa-aaaaq-aadna-cai
 pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
 pub const SNS_LEDGER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 220, 1, 1]);
@@ -456,9 +457,7 @@ pub fn set_up_fueler(pic: &PocketIc) -> Principal {
         std::fs::read(wasms_dir().join("fueler.wasm")).unwrap(),
         candid::encode_one(
             FuelerData{
-                sns_root: SNS_ROOT,
-                cm_main: CM_MAIN,
-                cts_cycles_bank: BANK,
+                
             }
         ).unwrap(),
         Some(SNS_ROOT)

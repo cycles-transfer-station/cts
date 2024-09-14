@@ -1097,7 +1097,7 @@ pub async fn controller_upgrade_log_storage_canisters(q: ControllerUpgradeCSQues
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs, &cc, &q.post_upgrade_quest, true).await; 
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(cs, &cc, &q.post_upgrade_quest, q.take_canisters_snapshots).await; 
     
     // update successes in the main data.
     with_mut(&LOG_STORAGE_DATA, |log_storage_data| {

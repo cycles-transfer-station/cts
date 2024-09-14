@@ -5,7 +5,7 @@ use crate::{
         IcpId,
     },
     consts::{
-        NANOS_IN_A_SECOND, SNS_GOVERNANCE,
+        NANOS_IN_A_SECOND, MAINNET_SNS_GOVERNANCE,
     },
     types::{
         Cycles,
@@ -238,7 +238,8 @@ pub mod upgrade_canisters {
     pub struct ControllerUpgradeCSQuest {
         pub specific_cs: Option<HashSet<Principal>>, 
         pub new_canister_code: Option<CanisterCode>, 
-        pub post_upgrade_quest: Vec<u8>
+        pub post_upgrade_quest: Vec<u8>,
+        pub take_canisters_snapshots: bool
     }
     
     // options are for the steps, none means didn't call.
@@ -250,8 +251,8 @@ pub mod upgrade_canisters {
         pub start_canister_result: Option<Result<(), CallError>>,
     }
         
-    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> Vec<(Principal, UpgradeOutcome)> {    
-        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest, take_canister_snapshot))).await // // use async fn upgrade_canister_, (not async block)
+    pub async fn upgrade_canisters(cs: Vec<Principal>, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canisters_snapshots: bool) -> Vec<(Principal, UpgradeOutcome)> {    
+        futures::future::join_all(cs.into_iter().map(|c| upgrade_canister_(c, canister_code, post_upgrade_quest, take_canisters_snapshots))).await // // use async fn upgrade_canister_, (not async block)
     }
     
     async fn upgrade_canister_(c: Principal, canister_code: &CanisterCode, post_upgrade_quest: &[u8], take_canister_snapshot: bool) -> (Principal, UpgradeOutcome) {
@@ -323,10 +324,51 @@ pub fn caller_is_sns_governance_guard() {
         if [LIVETEST_CTS, LIVETEST_CM_MAIN].contains(&ic_cdk::api::id()) {
             LIVETEST_CONTROLLER
         } else {
-            SNS_GOVERNANCE
+            MAINNET_SNS_GOVERNANCE
         }
     };
     if ic_cdk::caller() != must_be_principal {
         trap("Caller must be the CTS SNS governance canister.");
+    }
+}
+
+
+
+pub mod canister_status {
+    use outsiders::management_canister::{Service as ManagementCanisterService, CanisterStatusArgs, CanisterStatusResult}; 
+    use crate::{tools::call_error_as_u32_and_string, types::CallError};
+    use candid::Principal;
+    
+    pub type ViewCanistersStatusSponse = (Vec<(Principal/*tc*/, CanisterStatusResult)>, Vec<(Principal, CallError)>);
+    
+    pub async fn view_canisters_status(cs: Vec<Principal>) -> ViewCanistersStatusSponse { 
+        
+        let management_canister_service = ManagementCanisterService(Principal::management_canister());
+        
+        let mut futures: Vec<_/*future*/> = Vec::new();
+        
+        for c in cs.iter().copied() {
+            futures.push(
+                management_canister_service.canister_status(CanisterStatusArgs{canister_id: c})
+            );
+        }
+        
+        let rs = futures::future::join_all(futures).await;
+        
+        let mut successes: Vec<(Principal, CanisterStatusResult)> = vec![];
+        let mut errors: Vec<(Principal, CallError)> = vec![];
+        
+        for (c, r) in cs.into_iter().zip(rs.into_iter()) {
+            match r {
+                Ok((s,)) => {
+                    successes.push((c, s));
+                }
+                Err(call_error) => {
+                    errors.push((c, call_error_as_u32_and_string(call_error)));
+                }
+            }
+        }
+        
+        (successes, errors)
     }
 }

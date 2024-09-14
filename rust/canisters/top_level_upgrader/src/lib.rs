@@ -4,8 +4,10 @@ use cts_lib::{
     tools::{
         upgrade_canisters::{upgrade_canisters, UpgradeOutcome},
         caller_is_sns_governance_guard,
+        canister_status::{view_canisters_status, ViewCanistersStatusSponse},
     },
     types::CanisterCode,
+    consts::MAINNET_TOP_LEVEL_CANISTERS,
 };
 
 
@@ -13,7 +15,8 @@ use cts_lib::{
 pub struct UpgradeTopLevelCanisterQuest{
     canister_id: Principal,
     cc: CanisterCode, 
-    post_upgrade_quest: Vec<u8>
+    post_upgrade_quest: Vec<u8>,
+    take_canister_snapshot: bool,
 }
 
 #[query]
@@ -21,6 +24,7 @@ pub fn sns_validate_upgrade_top_level_canister(q: UpgradeTopLevelCanisterQuest) 
     q.cc.verify_module_hash().unwrap();
     let mut str = format!("Upgrade the top-level canister: {} with the module-hash: {}.", q.canister_id, q.cc.module_hash_hex()); 
     str.push_str(&format!("\npost_upgrade_arg: {}", hex::encode(&q.post_upgrade_quest)));
+    str.push_str(&format!("\ntake_canister_snapshot: {}", q.take_canister_snapshot));
     Ok(str)
 }
 
@@ -36,11 +40,25 @@ pub async fn upgrade_top_level_canister(q: UpgradeTopLevelCanisterQuest) {
         vec![q.canister_id],
         &q.cc,
         &q.post_upgrade_quest,
-        true,
+        q.take_canister_snapshot,
     ).await.into_iter().next().unwrap().1;
 
     ic_cdk::print(&format!("Upgrade outcome when upgrading: {} with module-hash: {}:\n{:?}", q.canister_id, q.cc.module_hash_hex(), uo));
 }
+
+
+
+#[query]
+pub fn view_top_level_canisters() -> Vec<Principal> { 
+    MAINNET_TOP_LEVEL_CANISTERS.to_vec()
+}    
+
+
+#[update]
+pub async fn view_top_level_canisters_status() -> ViewCanistersStatusSponse { 
+    view_canisters_status(MAINNET_TOP_LEVEL_CANISTERS.into()).await
+}    
+
 
 
 

@@ -1,13 +1,48 @@
 type CanisterCode = record { module_hash : blob; module : blob };
+type CanisterStatusResult = record {
+  status : CanisterStatusResultStatus;
+  memory_size : nat;
+  cycles : nat;
+  settings : DefiniteCanisterSettings;
+  query_stats : CanisterStatusResultQueryStats;
+  idle_cycles_burned_per_day : nat;
+  module_hash : opt blob;
+  reserved_cycles : nat;
+};
+type CanisterStatusResultQueryStats = record {
+  response_payload_bytes_total : nat;
+  num_instructions_total : nat;
+  num_calls_total : nat;
+  request_payload_bytes_total : nat;
+};
+type CanisterStatusResultStatus = variant { stopped; stopping; running };
+type DefiniteCanisterSettings = record {
+  freezing_threshold : nat;
+  controllers : vec principal;
+  reserved_cycles_limit : nat;
+  log_visibility : LogVisibility;
+  wasm_memory_limit : nat;
+  memory_allocation : nat;
+  compute_allocation : nat;
+};
+type LogVisibility = variant { controllers; public };
 type Result = variant { Ok : text; Err : text };
 type UpgradeTopLevelCanisterQuest = record {
   cc : CanisterCode;
   post_upgrade_quest : blob;
   canister_id : principal;
+  take_canister_snapshot : bool;
 };
 service : {
   sns_validate_upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> (
       Result,
     ) query;
   upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> ();
+  view_top_level_canisters : () -> (vec principal) query;
+  view_top_level_canisters_status : () -> (
+      record {
+        vec record { principal; CanisterStatusResult };
+        vec record { principal; record { nat32; text } };
+      },
+    );
 }

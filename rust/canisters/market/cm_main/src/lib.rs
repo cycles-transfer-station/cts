@@ -32,10 +32,10 @@ use cts_lib::{
         time_nanos_u64,
         call_error_as_u32_and_string,
         caller_is_sns_governance_guard,
+        canister_status::{view_canisters_status, ViewCanistersStatusSponse},
     },
-    consts::{MiB, MANAGEMENT_CANISTER_ID},
+    consts::MiB,
 };
-use outsiders::management_canister::{Service as ManagementCanisterService, CanisterStatusArgs};
 use canister_tools::{self, MemoryId};
 use std::cell::{RefCell};
 use serde::Serialize;
@@ -389,6 +389,7 @@ pub fn sns_validate_controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Resul
             }
         }
         str.push_str(&format!("\npost_upgrade_arg: {}", hex::encode(&q.post_upgrade_quest)));
+        str.push_str(&format!("\ntake_canisters_snapshots: {}", q.take_canisters_snapshots));
         Ok(str)
     })
 }
@@ -425,7 +426,7 @@ pub async fn controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Vec<(Princip
         }
     };
     
-    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest, true).await;
+    let rs: Vec<(Principal, UpgradeOutcome)> = upgrade_canisters(tcs, &tc_cc, &q.post_upgrade_quest, q.take_canisters_snapshots).await;
     
     // update successes in the main data.
     with_mut(&CM_MAIN_DATA, |cm_main_data| {
@@ -492,39 +493,13 @@ pub async fn view_tc_payouts_errors(tc: Principal, chunk_i: u32) -> Result<Vec<u
 
 
 #[update]
-pub async fn view_tcs_status() -> ViewTCsStatusSponse { 
+pub async fn view_tcs_status() -> ViewCanistersStatusSponse { 
     
-    let management_canister_service = ManagementCanisterService(MANAGEMENT_CANISTER_ID);
-    
-    let mut futures: Vec<_/*future*/> = Vec::new();
-    
-    with(&CM_MAIN_DATA, |d| {
-        for tc in d.trade_contracts.iter().map(|(tc_and_ledger, _)| tc_and_ledger.trade_contract_canister_id) {
-            futures.push(
-                management_canister_service.canister_status(CanisterStatusArgs{canister_id: tc})
-            );
-        }
+    let tcs: Vec<Principal> = with(&CM_MAIN_DATA, |d| {
+        d.trade_contracts.iter().map(|(tc_and_ledger, _)| tc_and_ledger.trade_contract_canister_id).collect()
     });
     
-    let rs = futures::future::join_all(futures).await;
-    
-    let mut successes: Vec<(Principal, outsiders::management_canister::CanisterStatusResult)> = vec![];
-    let mut errors: Vec<(Principal, CallError)> = vec![];
-    
-    with(&CM_MAIN_DATA, |d| {
-        for (tc, r) in d.trade_contracts.iter().map(|(tc_and_ledger, _)| tc_and_ledger.trade_contract_canister_id).take(rs.len()).zip(rs.into_iter()) {
-            match r {
-                Ok((s,)) => {
-                    successes.push((tc, s));
-                }
-                Err(call_error) => {
-                    errors.push((tc, call_error_as_u32_and_string(call_error)));
-                }
-            }
-        }
-    });
-    
-    (successes, errors)
+    view_canisters_status(tcs).await
 }    
 
 

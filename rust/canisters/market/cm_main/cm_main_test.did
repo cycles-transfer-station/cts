@@ -48,6 +48,7 @@ type ControllerIsInTheMiddleOfADifferentCallKind = variant {
 };
 type ControllerUpgradeCSQuest = record {
   new_canister_code : opt CanisterCode;
+  take_canisters_snapshots : bool;
   post_upgrade_quest : blob;
   specific_cs : opt vec principal;
 };

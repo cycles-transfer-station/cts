@@ -72,5 +72,3 @@ pub enum ControllerCreateIcrc1TokenTradeContractMidCallError {
     TCInitCandidEncodeError(String),
     InstallCodeIcrc1TokenTradeContractCallError(CallError),
 }
-
-pub type ViewTCsStatusSponse = (Vec<(Principal/*tc*/, outsiders::management_canister::CanisterStatusResult)>, Vec<(Principal, CallError)>);
