@@ -75,7 +75,7 @@ fn icrc3_value_of_an_icrc_id<'a>(icrc_id: &'a IcrcId) -> Icrc3Value<'a> {
 #[test]
 fn test_icrc3_block_hash() {
     use candid::Principal;
-    use cts_lib::types::bank::new_log_types::LogTX;
+    use crate::types::bank::new_log_types::LogTX;
     
     let block = Log{
         phash: Some(serde_bytes::ByteArray::new([0; 32])),
