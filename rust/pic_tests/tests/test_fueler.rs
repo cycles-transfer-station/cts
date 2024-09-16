@@ -20,7 +20,7 @@ fn fueler_test_1() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
     
-    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
+    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, TOP_LEVEL_UPGRADER, tc];
 
     for canister in canisters.into_iter() {
         // pre-condition
@@ -53,7 +53,7 @@ fn fueler_test_2() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
 
-    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
+    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, TOP_LEVEL_UPGRADER, tc];
 
     for canister in canisters.into_iter() {
         // pre-condition
@@ -125,7 +125,7 @@ fn fueler_test_3() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
 
-    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
+    let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, TOP_LEVEL_UPGRADER, tc];
     
     for canister in canisters.into_iter() {
         pic.add_cycles(canister, FUEL_TOPUP_TRIGGER_THRESHOLD + 2*TRILLION - (pic.cycle_balance(canister)));

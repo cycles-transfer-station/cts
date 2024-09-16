@@ -408,7 +408,7 @@ pub fn set_up_with_modules_and_inits<A: ArgumentEncoder, B: ArgumentEncoder, C: 
         sns_root_wasm, 
         candid::encode_one(
             outsiders::sns_root::SnsRootCanister {
-                dapp_canister_ids: vec![CTS, BANK, CM_MAIN, FUELER],
+                dapp_canister_ids: vec![FUELER, TOP_LEVEL_UPGRADER],
                 testflight: false,
                 latest_ledger_archive_poll_timestamp_seconds: None,
                 archive_canister_ids: vec![],
