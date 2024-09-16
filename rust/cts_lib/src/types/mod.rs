@@ -140,6 +140,7 @@ pub mod top_level_upgrader {
     pub struct UpgradeTopLevelCanisterQuest{
         pub canister_id: Principal,
         pub cc: crate::types::CanisterCode, 
+        #[serde(with = "serde_bytes")]
         pub post_upgrade_quest: Vec<u8>,
         pub take_canister_snapshot: bool,
     }
