@@ -11,8 +11,8 @@ type CMIcrc1TokenTradeContractInit = record {
 type CanisterCode = record { module_hash : blob; module : blob };
 type ControllerUpgradeCSQuest = record {
   new_canister_code : opt CanisterCode;
+  take_canisters_snapshots : bool;
   post_upgrade_quest : blob;
-  take_snapshots : bool;
   specific_cs : opt vec principal;
 };
 type CreatePositionQuestLog = record {

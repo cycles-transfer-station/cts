@@ -5,7 +5,7 @@ use crate::cmc::{LedgerTopupCyclesCmcIcpTransferError, LedgerTopupCyclesCmcNotif
 
 pub mod old_log_types;
 pub mod new_log_types;
-
+pub mod icrc3;
 
 pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
 

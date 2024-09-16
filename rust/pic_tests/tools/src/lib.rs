@@ -1,5 +1,5 @@
 use pocket_ic::{*, common::rest::RawEffectivePrincipal};
-use candid::{Nat, Principal, CandidType, Deserialize};
+use candid::{Nat, Principal, CandidType, Deserialize, utils::ArgumentEncoder};
 use std::collections::{HashSet, HashMap};
 use cts_lib::{
     consts::{TRILLION, KiB, NANOS_IN_A_SECOND, SECONDS_IN_A_DAY, SECONDS_IN_A_HOUR},
@@ -24,11 +24,12 @@ pub const ICP_MINTER: Principal = Principal::from_slice(b"icp-minter");
 pub const CMC: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,4,1,1]);
 pub const NNS_GOVERNANCE: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,1,1,1]);
 pub const ICP_LEDGER: Principal = Principal::from_slice(&[0,0,0,0,0,0,0,2,1,1]);
-pub const CTS_CONTROLLER: Principal = SNS_ROOT; // Principal::from_slice(&[0,1,2,3,4,5,6,7,8,9]);
+pub const CTS_CONTROLLER: Principal = SNS_ROOT;
 pub const CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 110, 1, 1]);
 pub const CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 111, 1, 1]);
 pub const BANK: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 170, 1, 1]);
-pub const FUELER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 1, 177, 1, 1]); // dvpyg-3qaaa-aaaar-qagyq-cai.
+pub const FUELER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 1, 177, 1, 1]); // dvpyg-3qaaa-aaaar-qagyq-cai 
+pub const TOP_LEVEL_UPGRADER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 2, 8, 1, 1]); // yvs6s-hyaaa-aaaar-qaiea-cai
 pub const SNS_ROOT: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 218, 1, 1]) ; // ibahq-taaaa-aaaaq-aadna-cai
 pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
 pub const SNS_LEDGER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 220, 1, 1]);
@@ -234,34 +235,30 @@ fn create_ledger_(pic: &PocketIc, symbol: &str, name: &str, opt_canister_id: Opt
 
 
 
-pub type CanisterModule = Vec<u8>;
+type Module = Vec<u8>;
 
 #[derive(Clone)]
-pub struct CanisterModules {
-    pub cts: CanisterModule,
-    pub bank: CanisterModule,
-    pub cm_main: CanisterModule,
-    pub fueler: CanisterModule,
-    pub cm_tc: CanisterModule,
-    pub cm_positions_storage: CanisterModule,
-    pub cm_trades_storage: CanisterModule,
+pub struct TopLevelModules {
+    pub cts: Module,
+    pub bank: Module,
+    pub cm_main: Module,
+    pub fueler: Module,
+    pub top_level_upgrader: Module,
 }
-impl CanisterModules {
+impl TopLevelModules {
     pub fn default_dev() -> Self {
-        Self::of_the_wasms_dir(wasms_dir_dev())
+        Self::of_the_current_wasms_dir(wasms_dir_dev())
     }
     pub fn default_release() -> Self {
-        Self::of_the_wasms_dir(wasms_dir_release())
+        Self::of_the_current_wasms_dir(wasms_dir_release())
     }
-    fn of_the_wasms_dir(dir: PathBuf) -> Self {
-        Self{
+    fn of_the_current_wasms_dir(dir: PathBuf) -> Self {
+        Self {
             cts: std::fs::read(dir.join("cts.wasm")).unwrap(),
             bank: std::fs::read(dir.join("bank.wasm")).unwrap(),
             cm_main: std::fs::read(dir.join("cm_main.wasm")).unwrap(),
             fueler: std::fs::read(dir.join("fueler.wasm")).unwrap(),
-            cm_tc: std::fs::read(dir.join("cm_tc.wasm")).unwrap(),
-            cm_positions_storage: std::fs::read(dir.join("cm_positions_storage.wasm")).unwrap(),
-            cm_trades_storage: std::fs::read(dir.join("cm_trades_storage.wasm")).unwrap(),
+            top_level_upgrader: std::fs::read(dir.join("top_level_upgrader.wasm")).unwrap(),
         }
     }
     pub fn blank() -> Self {
@@ -270,6 +267,56 @@ impl CanisterModules {
             bank: Vec::new(),
             cm_main: Vec::new(),
             fueler: Vec::new(),
+            top_level_upgrader: Vec::new(),
+        }
+    }
+}
+
+
+#[derive(Clone)]
+pub struct TopLevelInits<A: ArgumentEncoder, B: ArgumentEncoder, C: ArgumentEncoder, D: ArgumentEncoder, E: ArgumentEncoder> {  
+    pub cts: A,
+    pub bank: B,
+    pub cm_main: C,
+    pub fueler: D,
+    pub top_level_upgrader: E,
+}
+
+pub type TopLevelInitsDefaultGenericTypes = TopLevelInits<(CTSInit,), (), (CMMainInit,), (FuelerData,), ()>;
+impl TopLevelInitsDefaultGenericTypes {
+    pub fn default() -> Self {
+        Self {
+            cts: (CTSInit{ batch_creators: Some([CTS_CONTROLLER].into()) },),
+            bank: (),
+            cm_main: (CMMainInit{ cts_id: CTS, cycles_bank_id: BANK },),
+            fueler: (FuelerData{},),
+            top_level_upgrader: (),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TCsModules{
+    pub cm_tc: Vec<u8>,
+    pub cm_positions_storage: Vec<u8>,
+    pub cm_trades_storage: Vec<u8>,
+}
+impl TCsModules {
+    fn of_the_current_wasms_dir(dir: PathBuf) -> Self {
+        Self{
+            cm_tc: std::fs::read(dir.join("cm_tc.wasm")).unwrap(),
+            cm_positions_storage: std::fs::read(dir.join("cm_positions_storage.wasm")).unwrap(),
+            cm_trades_storage: std::fs::read(dir.join("cm_trades_storage.wasm")).unwrap(),
+        }
+    }
+    pub fn default_dev() -> Self {
+        Self::of_the_current_wasms_dir(wasms_dir_dev())
+    }
+    pub fn default_release() -> Self {
+        Self::of_the_current_wasms_dir(wasms_dir_release())
+    }
+    pub fn blank() -> Self {
+        Self {
             cm_tc: Vec::new(),
             cm_positions_storage: Vec::new(),
             cm_trades_storage: Vec::new(),
@@ -277,14 +324,14 @@ impl CanisterModules {
     }
 }
 
-
 pub fn set_up() -> PocketIc {
-    set_up_with_modules(
-        CanisterModules::default_dev(),
+    set_up_with_modules_and_inits(
+        TopLevelModules::default_dev(),
+        TopLevelInits::default(),
     )
 }
 
-pub fn set_up_with_modules(modules: CanisterModules) -> PocketIc {
+pub fn set_up_with_modules_and_inits<A: ArgumentEncoder, B: ArgumentEncoder, C: ArgumentEncoder, D: ArgumentEncoder, E: ArgumentEncoder>(modules: TopLevelModules, inits: TopLevelInits<A, B, C, D, E>) -> PocketIc {
     
     // set pic binary location if not set
     const POCKET_IC_BIN_VARNAME: &'static str = "POCKET_IC_BIN";
@@ -433,36 +480,33 @@ pub fn set_up_with_modules(modules: CanisterModules) -> PocketIc {
     pic.add_cycles(SNS_LEDGER_INDEX, START_WITH_FUEL);
     
     // CTS
-    pic.create_canister_with_id(Some(SNS_ROOT), None, CTS).unwrap();
+    pic.create_canister_with_id(Some(TOP_LEVEL_UPGRADER), None, CTS).unwrap();
     pic.add_cycles(CTS, START_WITH_FUEL);
     pic.install_canister(
         CTS, 
         modules.cts, 
-        candid::encode_one(CTSInit{ batch_creators: Some([CTS_CONTROLLER].into()) }).unwrap(), 
-        Some(SNS_ROOT), 
+        candid::encode_args(inits.cts).unwrap(), 
+        Some(TOP_LEVEL_UPGRADER), 
     );
     
     // BANK
-    pic.create_canister_with_id(Some(SNS_ROOT), None, BANK).unwrap();
+    pic.create_canister_with_id(Some(TOP_LEVEL_UPGRADER), None, BANK).unwrap();
     pic.add_cycles(BANK, START_WITH_FUEL);
     pic.install_canister(
         BANK, 
         modules.bank, 
-        candid::encode_args(()).unwrap(), 
-        Some(SNS_ROOT), 
+        candid::encode_args(inits.bank).unwrap(), 
+        Some(TOP_LEVEL_UPGRADER), 
     );
 
     // CM_MAIN
-    pic.create_canister_with_id(Some(SNS_ROOT), None, CM_MAIN).unwrap();
+    pic.create_canister_with_id(Some(TOP_LEVEL_UPGRADER), None, CM_MAIN).unwrap();
     pic.add_cycles(CM_MAIN, START_WITH_FUEL);
     pic.install_canister(
         CM_MAIN, 
         modules.cm_main, 
-        candid::encode_one(CMMainInit {
-            cts_id: CTS,
-            cycles_bank_id: BANK,
-        }).unwrap(), 
-        Some(SNS_ROOT), 
+        candid::encode_args(inits.cm_main).unwrap(), 
+        Some(TOP_LEVEL_UPGRADER), 
     );
     
     // FUELER
@@ -471,13 +515,17 @@ pub fn set_up_with_modules(modules: CanisterModules) -> PocketIc {
     pic.install_canister(
         FUELER,
         modules.fueler,
-        candid::encode_one(
-            FuelerData{
-                sns_root: SNS_ROOT,
-                cm_main: CM_MAIN,
-                cts_cycles_bank: BANK,
-            }
-        ).unwrap(),
+        candid::encode_args(inits.fueler).unwrap(),
+        Some(SNS_ROOT)
+    );
+    
+    // TOP_LEVEL_UPGRADER
+    pic.create_canister_with_id(Some(SNS_ROOT), None, TOP_LEVEL_UPGRADER).unwrap();
+    pic.add_cycles(TOP_LEVEL_UPGRADER, START_WITH_FUEL);
+    pic.install_canister(
+        TOP_LEVEL_UPGRADER,
+        modules.top_level_upgrader,
+        candid::encode_args(inits.top_level_upgrader).unwrap(),
         Some(SNS_ROOT)
     );
     
@@ -488,11 +536,11 @@ pub fn set_up_with_modules(modules: CanisterModules) -> PocketIc {
 pub fn set_up_tc(pic: &PocketIc) -> Principal {
     set_up_tc_with_modules(
         pic,
-        CanisterModules::default_dev(),
+        TCsModules::default_dev(),
     )
 }
 
-pub fn set_up_tc_with_modules(pic: &PocketIc, modules: CanisterModules) -> Principal {
+pub fn set_up_tc_with_modules(pic: &PocketIc, modules: TCsModules) -> Principal {
     
     for (wasm, market_canister_type) in [
         (modules.cm_tc, MarketCanisterType::TradeContract),

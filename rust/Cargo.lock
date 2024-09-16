@@ -36,8 +36,10 @@ dependencies = [
  "candid",
  "canister-tools",
  "cts_lib",
+ "futures",
  "hex",
  "ic-cdk 0.15.1",
+ "ic-cdk-timers",
  "ic-certified-map",
  "ic-stable-structures",
  "leb128",
@@ -1125,7 +1127,9 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "cts_lib",
+ "hex",
  "ic-cdk 0.15.1",
+ "serde",
 ]
 
 [[package]]

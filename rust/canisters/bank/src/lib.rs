@@ -7,6 +7,7 @@ use std::{
     },
     cell::RefCell,
     borrow::Cow,
+    time::Duration,
 };
 use cts_lib::{
     icrc::{
@@ -30,7 +31,7 @@ use cts_lib::{
     management_canister::CanisterIdRecord,
     types::{
         Cycles,
-        bank::{*, old_log_types, new_log_types},
+        bank::{*, old_log_types, new_log_types, icrc3::*},
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,
@@ -77,8 +78,8 @@ use serde_bytes::{ByteArray, ByteBuf};
 mod dedup;
 use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
 
-mod icrc3;
-use icrc3::*;
+mod icrc3_certification;
+use icrc3_certification::*;
 
 // --------- TYPES -----------
 
@@ -145,7 +146,7 @@ pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles =
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
 pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
-pub const ICRC1_SYMBOL: &'static str = "T-CYCLES-CTS";
+pub const ICRC1_SYMBOL: &'static str = "T CYCLES:CTS";
 pub const ICRC1_DECIMALS: u8 = 12;
 
 pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
@@ -328,6 +329,30 @@ fn post_upgrade() {
             }
         });
     });
+        
+    // certify icrc3
+    with(&NEW_LOGS, |new_logs| {
+        if new_logs.len() != 0 {
+            let latest_block_height = new_logs.len() - 1;
+            set_root_hash(latest_block_height, icrc3_value_of_a_block_log(&new_logs.get(latest_block_height).unwrap()).hash());
+        }
+    });
+    
+    // for any leftover ongoing mint-cycles bc the timers cancel on upgrade. 
+    ic_cdk_timers::set_timer(Duration::from_secs(60), || {
+        let users: Vec<Principal> = with(&CB_DATA, |cb_data | {
+            cb_data.users_mint_cycles.keys().copied().collect()
+        });        
+        ic_cdk::spawn(async {
+            let rs: Vec<Result<MintCyclesSuccess, CompleteMintCyclesError>> 
+                = futures::future::join_all(users.iter().copied().map(|user_id| complete_mint_cycles_(user_id))).await;
+            for (user_id, r) in users.into_iter().zip(rs.into_iter()) {
+                if let Err(e) = r {
+                    ic_cdk::println!("post_upgrade complete-mint-cycles timer received a complete_mint_cycles_ error. User: {}. Error: {:?}", user_id, e);
+                } 
+            }
+        });
+    }); 
 
 } 
 
@@ -831,6 +856,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
         if canister_balance128() < MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL {
             mid_call_data.lock = false;
             with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+            ic_cdk_timers::set_timer(Duration::from_secs(60), move || ic_cdk::spawn(async move { let _: Result<_, _> = complete_mint_cycles_(user_id).await; })); 
             return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::CouldNotPerformCmcNotifyCallDueToLowBankCanisterCycles));
         }
         match ledger_topup_cycles_cmc_notify(mid_call_data.cmc_icp_transfer_block_height.unwrap(), ic_cdk::api::id()).await {
@@ -844,6 +870,7 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
                 } else {
                     mid_call_data.lock = false;
                     with_mut(&CB_DATA, |cb_data| { cb_data.users_mint_cycles.insert(user_id, mid_call_data); });
+                    ic_cdk_timers::set_timer(Duration::from_secs(60), move || ic_cdk::spawn(async move { let _: Result<_, _> = complete_mint_cycles_(user_id).await; })); 
                     return Err(MintCyclesError::MidCallError(MintCyclesMidCallError::LedgerTopupCyclesCmcNotifyError(ledger_topup_cycles_cmc_notify_error)));
                 }
             }
@@ -969,12 +996,14 @@ pub fn icrc3_get_blocks(q: GetBlocksArgs) -> GetBlocksResult<'static> { // retur
         let result = GetBlocksResult {
             log_length: new_logs.len() as u128,
             blocks: blocks,
-            archived_blocks : vec![ // one item in this bc right now every block is on this canister
-                GetBlocksArgsAndCallback{
+            archived_blocks : if archived_blocks_args.len() != 0 {
+                vec![GetBlocksArgsAndCallback{
                     args: archived_blocks_args,
                     callback: Icrc3Callback::new(ic_cdk::api::id(), "icrc3_get_blocks"),
-                }
-            ],
+                }]
+            } else {
+                vec![]
+            },
         };
         reply((result,));
         return;

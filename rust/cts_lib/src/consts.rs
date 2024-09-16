@@ -67,8 +67,24 @@ pub const ICP_LEDGER_TOP_UP_CANISTER_MEMO: IcpMemo = IcpMemo(0x50555054); // == 
 
 // -----------------------------------------------------------------
 
+pub const MAINNET_SNS_ROOT: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 218, 1, 1]) ; // ibahq-taaaa-aaaaq-aadna-cai
+pub const MAINNET_SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
 
-pub const SNS_GOVERNANCE: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 0, 0, 219, 1, 1]); // igbbe-6yaaa-aaaaq-aadnq-cai
+pub const MAINNET_CTS: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 110, 1, 1]);
+pub const MAINNET_CM_MAIN: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 111, 1, 1]);
+pub const MAINNET_BANK: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 0, 170, 1, 1]);
+pub const MAINNET_FUELER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 1, 177, 1, 1]); // dvpyg-3qaaa-aaaar-qagyq-cai
+pub const MAINNET_TOP_LEVEL_UPGRADER: Principal = Principal::from_slice(&[0, 0, 0, 0, 2, 48, 2, 8, 1, 1]); // yvs6s-hyaaa-aaaar-qaiea-cai
+
+
+#[test]
+fn test_fueler_principal() {
+    println!("{:?}", Principal::from_text("dvpyg-3qaaa-aaaar-qagyq-cai").unwrap().as_slice());
+}
+
+pub const MAINNET_TOP_LEVEL_CANISTERS: [Principal; 3] = [MAINNET_CTS, MAINNET_CM_MAIN, MAINNET_BANK];
+
+
 
 pub mod livetest {
     use candid::Principal;

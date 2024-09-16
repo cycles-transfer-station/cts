@@ -132,3 +132,16 @@ pub mod cts {
         pub batch_creators: Option<HashSet<Principal>>,
     }
 }
+
+pub mod top_level_upgrader {
+    use candid::{CandidType, Deserialize, Principal};
+    
+    #[derive(CandidType, Deserialize)]
+    pub struct UpgradeTopLevelCanisterQuest{
+        pub canister_id: Principal,
+        pub cc: crate::types::CanisterCode, 
+        pub post_upgrade_quest: Vec<u8>,
+        pub take_canister_snapshot: bool,
+    }
+
+}

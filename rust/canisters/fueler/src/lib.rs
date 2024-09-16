@@ -5,15 +5,16 @@ use ic_cdk::{
 };
 use cts_lib::{
     tools::{
-        localkey::refcell::{with, with_mut}
+        localkey::refcell::{with_mut},
+        canister_status::ViewCanistersStatusSponse,
     },
     ic_ledger_types::{MAINNET_CYCLES_MINTING_CANISTER_ID, ICP_LEDGER_TRANSFER_DEFAULT_FEE},
     types::{
         fueler::*,
-        cm::cm_main::ViewTCsStatusSponse,
         bank::{BANK_TRANSFER_FEE, MintCyclesQuest, MintCyclesResult, MintCyclesSuccess, MintCyclesError, CompleteMintCyclesResult, CompleteMintCyclesError, CyclesOutQuest, CyclesOutError},
     },
     icrc::{BlockId, IcrcId},
+    consts::{MAINNET_BANK, MAINNET_CM_MAIN, MAINNET_SNS_ROOT, MAINNET_TOP_LEVEL_UPGRADER},
 };
 use outsiders::{
     sns_root::{Service as SNSRootService, GetSnsCanistersSummaryRequest},
@@ -50,7 +51,14 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, None::<fn(FuelerData) -> FuelerData>);
+    //canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, None::<fn(FuelerData) -> FuelerData>);
+    canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, Some::<fn(OldFuelerData) -> FuelerData>(
+        |_old| {
+            FuelerData{}
+        }
+    ));
+    
+    
     check_thresholds();
     start_timer();
 }
@@ -87,7 +95,7 @@ async fn fuel() {
     
     let mut topup_canisters: HashMap<Principal, u128/*topup-mount*/> = HashMap::new();
     
-    let sns_root_service = SNSRootService(with(&FUELER_DATA, |d| d.sns_root));
+    let sns_root_service = SNSRootService(MAINNET_SNS_ROOT);
             
     // the get_sns_canisters_summary does not poll for new archives. the response might not include new archives. 
     match sns_root_service.get_sns_canisters_summary(
@@ -143,10 +151,34 @@ async fn fuel() {
         }
     }    
     
-    // do special call to the ledger to view the archives? no bc we can't see the cycles-balance of them even if we have the canister-ids. they will be updated in the get_sns_canisters_summary sponse at some point.
-    
+    for (canister, method_name) in [
+        (MAINNET_TOP_LEVEL_UPGRADER, "view_top_level_canisters_status"), 
+        (MAINNET_CM_MAIN, "view_tcs_status")
+    ] {
+        match ic_cdk::call::<(), (ViewCanistersStatusSponse,)>(
+            canister,
+            method_name,
+            (),
+        ).await { 
+            Ok((s,)) => {
+                for (tc, status) in s.0.into_iter() {
+                    if status.cycles < FUEL_TOPUP_TRIGGER_THRESHOLD {
+                        topup_canisters.insert(tc, FUEL_TOPUP_TO_MINIMUM_BALANCE - status.cycles);
+                    }
+                }
+                for (tc, call_error) in s.1.into_iter() {
+                    ic_cdk::print(&format!("Error received when cm_main tried getting canister_status of a tc: {},\nError: {:?}", tc, call_error));
+                }
+            },
+            Err(call_error) => {
+                ic_cdk::print(&format!("{} call error: {:?}", method_name, call_error));
+            }
+        };        
+    }
+        
     // do special method call for the cts-cycles-bank call the canister_cycles_balance_minus_total_supply method. 
-    let cts_cycles_bank: Principal = with(&FUELER_DATA, |fueler_data| fueler_data.cts_cycles_bank); 
+    // override entry from view-top-level-canisters-status-sponse
+    let cts_cycles_bank: Principal = MAINNET_BANK; 
     match ic_cdk::call::<(), (i128,)>(
         cts_cycles_bank,
         "canister_cycles_balance_minus_total_supply",
@@ -161,28 +193,8 @@ async fn fuel() {
             ic_cdk::print(&format!("Call error when calling bank canister_cycles_balance_minus_total_supply.\nError: {:?}", call_error));
         }
     };
-
-    // do method calls for the tcs
- 
-    match ic_cdk::call::<(), (ViewTCsStatusSponse,)>(
-        with_mut(&FUELER_DATA, |fueler_data| { fueler_data.cm_main }),
-        "view_tcs_status",
-        ()
-    ).await {
-        Ok((s,)) => {
-            for (tc, status) in s.0.into_iter() {
-                if status.cycles < FUEL_TOPUP_TRIGGER_THRESHOLD {
-                    topup_canisters.insert(tc, FUEL_TOPUP_TO_MINIMUM_BALANCE - status.cycles);
-                }
-            }
-            for (tc, call_error) in s.1.into_iter() {
-                ic_cdk::print(&format!("Error received when cm_main tried getting canister_status of a tc: {},\nError: {:?}", tc, call_error));
-            }
-        }
-        Err(call_error) => {
-            ic_cdk::print(&format!("view_tcs_status call error: {:?}", call_error));
-        }
-    }
+    
+    // fuel up
     
     let sum_fuel: u128 = topup_canisters.values().sum::<u128>().saturating_add(BANK_TRANSFER_FEE * topup_canisters.len() as u128);
     
