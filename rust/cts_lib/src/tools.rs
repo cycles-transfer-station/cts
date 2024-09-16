@@ -238,12 +238,13 @@ pub mod upgrade_canisters {
     pub struct ControllerUpgradeCSQuest {
         pub specific_cs: Option<HashSet<Principal>>, 
         pub new_canister_code: Option<CanisterCode>, 
+        #[serde(with = "serde_bytes")]
         pub post_upgrade_quest: Vec<u8>,
         pub take_canisters_snapshots: bool
     }
     
     // options are for the steps, none means didn't call.
-    #[derive(CandidType, Deserialize, Default, Debug, PartialEq, Eq)]
+    #[derive(CandidType, Deserialize, Default, Debug, PartialEq, Eq, Clone)]
     pub struct UpgradeOutcome {
         pub stop_canister_result: Option<Result<(), CallError>>,
         pub take_canister_snapshot_result: Option<Result<Snapshot, CallError>>, // this can also contain an error for the list_canister_snapshots call which is done before any other calls if take_canister_snapshot = true

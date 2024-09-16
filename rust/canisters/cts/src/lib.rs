@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use serde_bytes::ByteBuf;
 use num_traits::cast::ToPrimitive;
 use cts_lib::{
-    types::http_request::*,
+    types::{
+        http_request::*,
+        cts::*,
+    },
     tools::{
         localkey::{
             refcell::{
@@ -84,10 +87,6 @@ thread_local! {
 // -------------------------------------------------------------
 
 
-#[derive(CandidType, Deserialize)]
-struct CTSInit {
-    batch_creators: Option<HashSet<Principal>>,
-}
 
 #[init]
 fn init(cts_init: CTSInit) {

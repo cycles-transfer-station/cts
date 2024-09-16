@@ -368,8 +368,6 @@ pub fn view_icrc1_token_trade_contracts() -> Vec<(TradeContractIdAndLedgerId, Tr
 // ----------------
 
 
-
-
 #[query]
 pub fn sns_validate_controller_upgrade_tcs(q: ControllerUpgradeCSQuest) -> Result<String,String> {
     with(&CM_MAIN_DATA, |cm_main_data| {

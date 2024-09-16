@@ -19,7 +19,6 @@ use icrc_ledger_types::icrc1::account::Account;
 fn fueler_test_1() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
-    set_up_fueler(&pic);
     
     let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
 
@@ -53,7 +52,6 @@ fn fueler_test_1() {
 fn fueler_test_2() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
-    set_up_fueler(&pic);
 
     let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
 
@@ -126,7 +124,6 @@ fn fueler_test_2() {
 fn fueler_test_3() {
     let pic = set_up();
     let tc = set_up_tc(&pic);
-    set_up_fueler(&pic);
 
     let canisters = [SNS_ROOT, SNS_GOVERNANCE, SNS_LEDGER, SNS_LEDGER_INDEX, SNS_SWAP, CTS, BANK, CM_MAIN, FUELER, tc];
     

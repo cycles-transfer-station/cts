@@ -52,12 +52,6 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     //canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, None::<fn(FuelerData) -> FuelerData>);
-    #[derive(candid::CandidType, candid::Deserialize)]
-    pub struct OldFuelerData {
-        pub sns_root: Principal,
-        pub cm_main: Principal,
-        pub cts_cycles_bank: Principal,
-    }
     canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, Some::<fn(OldFuelerData) -> FuelerData>(
         |_old| {
             FuelerData{}

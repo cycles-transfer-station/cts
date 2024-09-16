@@ -97,3 +97,6 @@ show-build-hashes:
     
 live-local: (build "dev")
     cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test make_live_go -- --include-ignored --nocapture
+
+test-upgrade: (build "release")
+    cd {{justfile_directory()}}/rust/pic_tests/tests && cargo test test_upgrade -- --include-ignored --nocapture

@@ -27,6 +27,19 @@ type DefiniteCanisterSettings = record {
 };
 type LogVisibility = variant { controllers; public };
 type Result = variant { Ok : text; Err : text };
+type Result_1 = variant { Ok : Snapshot; Err : record { nat32; text } };
+type Result_2 = variant { Ok; Err : record { nat32; text } };
+type Snapshot = record {
+  id : blob;
+  total_size : nat64;
+  taken_at_timestamp : nat64;
+};
+type UpgradeOutcome = record {
+  take_canister_snapshot_result : opt Result_1;
+  install_code_result : opt Result_2;
+  start_canister_result : opt Result_2;
+  stop_canister_result : opt Result_2;
+};
 type UpgradeTopLevelCanisterQuest = record {
   cc : CanisterCode;
   post_upgrade_quest : blob;
@@ -37,7 +50,9 @@ service : {
   sns_validate_upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> (
       Result,
     ) query;
-  upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> ();
+  upgrade_top_level_canister : (UpgradeTopLevelCanisterQuest) -> (
+      UpgradeOutcome,
+    );
   view_top_level_canisters : () -> (vec principal) query;
   view_top_level_canisters_status : () -> (
       record {

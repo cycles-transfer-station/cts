@@ -1,4 +1,4 @@
-use candid::{CandidType, Deserialize};
+use candid::{Principal, CandidType, Deserialize};
 use std::time::Duration;
 use crate::consts::{SECONDS_IN_A_DAY, TRILLION};
 
@@ -14,4 +14,11 @@ impl FuelerData {
     pub fn new() -> Self {
         Self {}
     }
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct OldFuelerData {
+    pub sns_root: Principal,
+    pub cm_main: Principal,
+    pub cts_cycles_bank: Principal,
 }
