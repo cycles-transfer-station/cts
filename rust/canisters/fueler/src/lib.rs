@@ -51,13 +51,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    //canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, None::<fn(FuelerData) -> FuelerData>);
-    canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, Some::<fn(OldFuelerData) -> FuelerData>(
-        |_old| {
-            FuelerData{}
-        }
-    ));
-    
+    canister_tools::post_upgrade(&FUELER_DATA, FUELER_DATA_MEMORY_ID, None::<fn(FuelerData) -> FuelerData>);
     
     check_thresholds();
     start_timer();

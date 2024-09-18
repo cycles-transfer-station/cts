@@ -43,7 +43,7 @@ fn test_upgrade_1() {
             cts: default_inits.cts,
             bank: default_inits.bank,
             cm_main: default_inits.cm_main,
-            fueler: (cts_lib::types::fueler::OldFuelerData{ cm_main: CM_MAIN, cts_cycles_bank: BANK, sns_root: SNS_ROOT },),
+            fueler: (cts_lib::types::fueler::FuelerData{},),
             top_level_upgrader: default_inits.top_level_upgrader,
         }
     };
