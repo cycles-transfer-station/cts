@@ -12,7 +12,7 @@ exclude = [
 
 [workspace.dependencies]
 icrc-ledger-types = "0.1.5"
-pocket-ic = "4.0.0"
+pocket-ic = "5.0.0"
 more-asserts = "0.3.1"
 candid = "0.10.10"
 cts_lib = { path = "../cts_lib" }
