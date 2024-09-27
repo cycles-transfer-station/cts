@@ -9,7 +9,6 @@ type ViewLatestTradesSponse = record {
 };
 service : (LogStorageInit) -> {
   flush : (FlushQuest) -> (Result);
-  map_logs_rchunks : (nat, opt nat, nat32) -> () query;
   view_latest_trades : (ViewLatestTradesQuest) -> (
       ViewLatestTradesSponse,
     ) query;

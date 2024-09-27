@@ -2,7 +2,4 @@ type FlushError = variant { StorageIsFull };
 type FlushQuest = record { bytes : blob };
 type LogStorageInit = record { log_size : nat32 };
 type Result = variant { Ok : record {}; Err : FlushError };
-service : (LogStorageInit) -> {
-  flush : (FlushQuest) -> (Result);
-  map_logs_rchunks : (principal, opt nat, nat32) -> () query;
-}
+service : (LogStorageInit) -> { flush : (FlushQuest) -> (Result) }

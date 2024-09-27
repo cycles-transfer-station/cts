@@ -81,7 +81,7 @@ pub fn flush(q: FlushQuest) -> Result<FlushSuccess, FlushError> {
     })
 }
 
-#[query(manual_reply = true)]
+#[query(manual_reply = true, hidden = true)]
 pub fn map_logs_rchunks(k: UserPositionsKey, opt_start_before_id: Option<u128>, chunk_size: u32) {
     with(&USER_POSITIONS, |user_positions| {
         cm_storage_lib::map_logs_rchunks(&k, opt_start_before_id, chunk_size, user_positions);
