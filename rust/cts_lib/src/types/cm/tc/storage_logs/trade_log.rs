@@ -1,25 +1,23 @@
 use crate::{
     icrc::Tokens,
     types::{
+        Cycles,
         cm::{
             tc::{
                 CyclesPerToken,
                 PositionKind,
+                PayoutData,
+                PositionId,
+                PurchaseId,
+                storage_logs::StorageLogTrait,
             }
         }        
     },
     tools::{principal_as_thirty_bytes, thirty_bytes_as_principal},
 };
-use super::{*};
+use candid::{Principal, CandidType, Deserialize};
+use serde::Serialize;
 
-
-
-
-#[derive(Clone, Copy, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct PayoutData {
-    pub did_transfer: bool, // if false that means it is dust-collection.
-    pub ledger_transfer_fee: Tokens,
-}
 
 // -----------------
 

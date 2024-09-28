@@ -19,10 +19,8 @@ use cts_lib::{
     icrc::IcrcId,
     types::cm::tc::{
         PositionId,
-        storage_logs::{
-            StorageLogTrait,
-            trade_log::PayoutData,
-        }
+        PayoutData,
+        storage_logs::StorageLogTrait,
     }
 };
 

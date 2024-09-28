@@ -9,9 +9,7 @@ use crate::{
 };
 use cts_lib::{
     icrc::{IcrcId, Icrc1TransferQuest},
-    types::cm::tc::{
-        storage_logs::trade_log::PayoutData,
-    },
+    types::cm::tc::PayoutData,
     tools::localkey,
 };
 use serde_bytes::{ByteBuf, ByteArray};

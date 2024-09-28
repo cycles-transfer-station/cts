@@ -8,11 +8,7 @@ use cts_lib::{
             VoidCyclesPosition,
             VoidTokenPosition,
             VPUpdateStoragePositionData,
-            storage_logs::{
-                trade_log::{
-                    PayoutData,
-                }
-            }
+            PayoutData,
         }
     },
 };

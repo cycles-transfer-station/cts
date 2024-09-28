@@ -32,13 +32,11 @@ use cts_lib::{
         PositionId,
         PurchaseId,
         PositionKind,
+        PayoutData,
         TradeLogTemporaryData,
         storage_logs::{
             StorageLogTrait,
-            trade_log::{
-                TradeLog,
-                PayoutData,
-            }
+            trade_log::TradeLog,
         }
     },
     tools::{

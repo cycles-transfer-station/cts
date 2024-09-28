@@ -8,7 +8,7 @@ use std::collections::{HashSet, VecDeque, BTreeMap};
 pub mod storage_logs;
 use storage_logs::{
     LogStorageInit,
-    trade_log::{TradeLog, PayoutData},
+    trade_log::TradeLog,
     position_log::PositionLog,
 };
 
@@ -342,6 +342,12 @@ impl TradeLogAndTemporaryData {
         && self.log.cycles_payout_data.is_some()
         && self.log.token_payout_data.is_some()
     }
+}
+
+#[derive(Clone, Copy, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub struct PayoutData {
+    pub did_transfer: bool, // if false that means it is dust-collection.
+    pub ledger_transfer_fee: Tokens,
 }
 
 #[derive(Clone, CandidType, Serialize, Deserialize, PartialEq, Eq, Debug)]
