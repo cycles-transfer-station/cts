@@ -108,7 +108,7 @@ fn test_icrc_id_serialize_backwards() {
 }
 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, serde::Serialize, Deserialize)]
 pub struct Icrc1TransferQuest {
     pub to: IcrcId,
     pub fee: Option<u128>,

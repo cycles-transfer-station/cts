@@ -76,7 +76,7 @@ use serde_bytes::{ByteArray, ByteBuf};
 
 
 mod dedup;
-use dedup::{check_for_dup, DedupMap, icrc1_transfer_quest_structural_hash};
+use dedup::{check_for_dup, DedupMap};
 
 mod icrc3_certification;
 use icrc3_certification::*;
@@ -482,7 +482,7 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
     let mut opt_q_structural_hash: Option<[u8; 32]> = None; // some if q.created_at_time.is_some() 
 
     if let Some(created_at_time) = q.created_at_time {
-        let q_structural_hash = icrc1_transfer_quest_structural_hash(&q);
+        let q_structural_hash = cts_lib::tools::structural_hash(&q).unwrap(); // unwrap ok bc this is within the first message-execution of the call-context.
         opt_q_structural_hash = Some(q_structural_hash);
         with_mut(&CB_DATA, |cb_data| {
             check_for_dup(&mut cb_data.icrc1_transfer_dedup_map, caller, created_at_time, q_structural_hash) // only valid within this message-execution. make sure icrc1_transfer method stays sync.
