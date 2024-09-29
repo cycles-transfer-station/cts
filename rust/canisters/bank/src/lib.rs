@@ -79,7 +79,7 @@ mod dedup;
 use dedup::{check_for_dup, DedupMap};
 
 mod icrc3_certification;
-use icrc3_certification::*;
+use icrc3_certification::{set_root_hash, make_data_certificate_hash_tree};
 
 // --------- TYPES -----------
 
@@ -332,10 +332,7 @@ fn post_upgrade() {
         
     // certify icrc3
     with(&NEW_LOGS, |new_logs| {
-        if new_logs.len() != 0 {
-            let latest_block_height = new_logs.len() - 1;
-            set_root_hash(latest_block_height, icrc3_value_of_a_block_log(&new_logs.get(latest_block_height).unwrap()).hash());
-        }
+        set_root_hash(new_logs);
     });
     
     // for any leftover ongoing mint-cycles bc the timers cancel on upgrade. 
@@ -534,11 +531,10 @@ pub fn icrc1_transfer(q: Icrc1TransferQuest) -> Result<BlockId, Icrc1TransferErr
             };
                             
             new_logs.push(&log).unwrap(); // if growfailed then trap and roll back the transfer.
-            let block_height = new_logs.len() - 1;
             
-            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            set_root_hash(new_logs);
             
-            block_height
+            new_logs.len() - 1
         })
     };
     
@@ -663,12 +659,10 @@ pub fn cycles_in(q: CyclesInQuest) -> Result<BlockId, CyclesInError> {
             };
                             
             new_logs.push(&log).unwrap();
-            let block_height = new_logs.len() - 1;
             
-            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            set_root_hash(new_logs);
             
-            block_height
-            
+            new_logs.len() - 1
         })
     };
     
@@ -742,12 +736,10 @@ pub async fn cycles_out(q: CyclesOutQuest) -> Result<BlockId, CyclesOutError> {
                     };
                     
                     new_logs.push(&log).unwrap();
-                    let block_height = new_logs.len() - 1;
                     
-                    set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+                    set_root_hash(new_logs);
                     
-                    block_height
-                        
+                    new_logs.len() - 1
                 })
             };
                     
@@ -900,11 +892,10 @@ async fn mint_cycles_(user_id: Principal, mut mid_call_data: MintCyclesMidCallDa
             };
             
             new_logs.push(&log).unwrap();
-            let block_height = new_logs.len() - 1;
             
-            set_root_hash(block_height, icrc3_value_of_a_block_log(&log).hash());
+            set_root_hash(new_logs);
             
-            block_height
+            new_logs.len() - 1
         })
     };
     
@@ -1046,21 +1037,12 @@ pub fn icrc3_get_archives(q: GetArchivesArgs) -> GetArchivesResult {
 #[query]
 pub fn icrc3_get_tip_certificate() -> Option<Icrc3DataCertificate> {
     with(&NEW_LOGS, |new_logs| {
-        if new_logs.len() == 0 {
-            return None;
-        }
-        ic_cdk::api::data_certificate()
-            .map(|certificate| {
-                Icrc3DataCertificate{
-                    certificate: ByteBuf::from(certificate),
-                    hash_tree: {
-                        let last_block_index = new_logs.len() - 1;
-                        let last_block_hash: [u8; 32] 
-                            = icrc3_value_of_a_block_log(&new_logs.get(last_block_index).unwrap()).hash();
-                        make_data_certificate_hash_tree(last_block_index, last_block_hash) 
-                    }
-                }
-            })  
+        let certificate = ic_cdk::api::data_certificate()?;
+        let hash_tree = make_data_certificate_hash_tree(new_logs)?;
+        Some(Icrc3DataCertificate{
+            certificate: ByteBuf::from(certificate),
+            hash_tree,
+        })
     })
 }
 
