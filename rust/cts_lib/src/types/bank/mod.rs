@@ -3,7 +3,6 @@ use crate::icrc::{IcrcId, BlockId, IcrcSubaccount};
 use serde_bytes::ByteBuf;
 use crate::cmc::{LedgerTopupCyclesCmcIcpTransferError, LedgerTopupCyclesCmcNotifyError};
 
-pub mod old_log_types;
 pub mod new_log_types;
 pub mod icrc3;
 

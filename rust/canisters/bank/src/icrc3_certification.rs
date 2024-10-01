@@ -1,4 +1,4 @@
-use crate::NewLogs;
+use crate::Logs;
 use ic_cdk::api::set_certified_data;
 use ic_certified_map::{HashTree, fork_hash, labeled_hash, leaf_hash, fork, labeled};
 use serde::Serialize;
@@ -10,7 +10,7 @@ const LABEL_LAST_BLOCK_INDEX: &[u8; 16] = b"last_block_index";
 const LABEL_LAST_BLOCK_HASH: &[u8; 15] = b"last_block_hash";
 
 
-pub fn set_root_hash(logs: &NewLogs) {    
+pub fn set_root_hash(logs: &Logs) {    
     if logs.len() != 0 {
         let last_block_index = logs.len() - 1;
         let last_block_hash = icrc3_value_of_a_block_log(&logs.get(last_block_index).unwrap()).hash(); // unwrap ok bc we check the length of the logs first.
@@ -27,7 +27,7 @@ pub fn set_root_hash(logs: &NewLogs) {
     }
 }
 
-pub fn make_data_certificate_hash_tree(logs: &NewLogs) -> Option<ByteBuf> { // cbor hashtree. none if logs.len == 0 
+pub fn make_data_certificate_hash_tree(logs: &Logs) -> Option<ByteBuf> { // cbor hashtree. none if logs.len == 0 
     if logs.len() == 0 {
         return None;
     }
