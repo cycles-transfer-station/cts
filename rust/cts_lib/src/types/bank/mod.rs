@@ -3,7 +3,7 @@ use crate::icrc::{IcrcId, BlockId, IcrcSubaccount};
 use serde_bytes::ByteBuf;
 use crate::cmc::{LedgerTopupCyclesCmcIcpTransferError, LedgerTopupCyclesCmcNotifyError};
 
-pub mod new_log_types;
+pub mod log_types;
 pub mod icrc3;
 
 pub const BANK_TRANSFER_FEE: Cycles = 10_000_000_000;
@@ -94,6 +94,6 @@ pub enum UserIsInTheMiddleOfADifferentCall {
 
 #[derive(CandidType, Deserialize)]
 pub struct GetLogsBackwardsSponse {
-    pub logs: Vec<(BlockId, new_log_types::Log)>,
+    pub logs: Vec<(BlockId, log_types::Log)>,
     pub is_last_chunk: bool,
 }

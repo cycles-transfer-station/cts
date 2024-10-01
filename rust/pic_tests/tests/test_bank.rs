@@ -6,7 +6,7 @@ use cts_lib::{
     types::{
         CallError,
         CallCanisterQuest,
-        bank::{*, new_log_types::*},
+        bank::{*, log_types::*},
     },
     icrc::BlockId,
 };

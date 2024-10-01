@@ -32,7 +32,7 @@ use cts_lib::{
     management_canister::CanisterIdRecord,
     types::{
         Cycles,
-        bank::{*, new_log_types::*, icrc3::*},
+        bank::{*, log_types::*, icrc3::*},
     },
     cmc::{
         ledger_topup_cycles_cmc_icp_transfer,

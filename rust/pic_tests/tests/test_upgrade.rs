@@ -15,7 +15,7 @@ use cts_lib::{
         CallError,
         CanisterCode,
         top_level_upgrader::UpgradeTopLevelCanisterQuest,
-        bank::{*, new_log_types::*, icrc3::{icrc3_value_of_a_block_log, StartAndLength}},
+        bank::{*, log_types::*, icrc3::{icrc3_value_of_a_block_log, StartAndLength}},
     },
     consts::TRILLION,
     icrc::IcrcId,
