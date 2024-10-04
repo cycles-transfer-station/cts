@@ -16,7 +16,6 @@ pub type Level = u8;
 pub type Rate = f64;
 pub type Amount = u128;
 
-
 #[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
 pub struct TokenId {
     pub platform: PlatformId, 
@@ -60,6 +59,7 @@ pub struct TokenData {
     pub volume_total: Amount,
 }
 
+#[allow(non_snake_case)]
 #[derive(CandidType, Deserialize)]
 pub struct PairData {
     pub id: PairId,
