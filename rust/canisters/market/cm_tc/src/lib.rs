@@ -1,11 +1,11 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::{VecDeque, BTreeMap},
+    collections::{VecDeque, BTreeMap, HashSet},
     time::Duration,
     thread::LocalKey,
-    ops::Bound
+    ops::Bound,
+    iter::DoubleEndedIterator,
 };
-use std::iter::DoubleEndedIterator;
 use cts_lib::{
     tools::{
         localkey::{
@@ -75,7 +75,8 @@ use candid::{
     CandidType,
     Deserialize,
 };
-use serde_bytes::ByteArray;
+use serde_bytes::{ByteArray, ByteBuf};
+use serde::Serialize;
 
 // -------
 
@@ -180,6 +181,7 @@ fn init(cm_init: CMIcrc1TokenTradeContractInit) {
         cm_data.cm_main_id = cm_init.cm_main_id; 
         cm_data.icrc1_token_ledger = cm_init.icrc1_token_ledger; 
         cm_data.icrc1_token_ledger_transfer_fee = cm_init.icrc1_token_ledger_transfer_fee;
+        cm_data.icrc1_token_ledger_decimal_places = cm_init.icrc1_token_ledger_decimal_places;
         cm_data.cycles_bank_id = cm_init.cycles_bank_id;
         cm_data.cycles_bank_transfer_fee = cm_init.cycles_bank_transfer_fee;
     });
@@ -207,7 +209,53 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
+    //canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
+    #[derive(CandidType, Serialize, Deserialize)]
+    pub struct OldCMData {
+        pub cts_id: Principal,
+        pub cm_main_id: Principal,
+        pub icrc1_token_ledger: Principal,
+        pub icrc1_token_ledger_transfer_fee: Tokens,
+        pub cycles_bank_id: Principal,
+        pub cycles_bank_transfer_fee: Cycles,
+        pub positions_id_counter: u128,
+        pub trade_logs_id_counter: u128,
+        pub mid_call_user_cycles_balance_locks: HashSet<Principal>,
+        pub mid_call_user_token_balance_locks: HashSet<Principal>,
+        pub cycles_positions: BTreeMap<PositionId, CyclesPosition>,
+        pub token_positions: BTreeMap<PositionId, TokenPosition>,
+        pub trade_logs: VecDeque<TradeLogAndTemporaryData>,
+        pub void_cycles_positions: BTreeMap<PositionId, VoidCyclesPosition>,
+        pub void_token_positions: BTreeMap<PositionId, VoidTokenPosition>,
+        pub do_payouts_errors: Vec<CallError>,
+        pub candle_counter: CandleCounter,
+    }
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, Some::<fn(OldCMData) -> CMData>(   
+        |old: OldCMData| {
+            CMData{
+                cts_id: old.cts_id,
+                cm_main_id: old.cm_main_id,
+                icrc1_token_ledger: old.icrc1_token_ledger,
+                icrc1_token_ledger_transfer_fee: old.icrc1_token_ledger_transfer_fee,
+                icrc1_token_ledger_decimal_places: 0,
+                cycles_bank_id: old.cycles_bank_id,
+                cycles_bank_transfer_fee: old.cycles_bank_transfer_fee,
+                positions_id_counter: old.positions_id_counter,
+                trade_logs_id_counter: old.trade_logs_id_counter,
+                mid_call_user_cycles_balance_locks: old.mid_call_user_cycles_balance_locks,
+                mid_call_user_token_balance_locks: old.mid_call_user_token_balance_locks,
+                cycles_positions: old.cycles_positions,
+                token_positions: old.token_positions,
+                trade_logs: old.trade_logs,
+                void_cycles_positions: old.void_cycles_positions,
+                void_token_positions: old.void_token_positions,
+                do_payouts_errors: old.do_payouts_errors,
+                candle_counter: old.candle_counter,
+                latest_trade_rate_data: LatestTradeRateData::default(),
+            }
+        }
+    ));
+    
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
@@ -220,6 +268,27 @@ fn post_upgrade() {
     });
     
     ic_cdk_timers::set_timer(Duration::from_secs(30), || ic_cdk::spawn(do_payouts()));
+    
+    // temp run one-time on each current-tc. new tcs will get the decimal_places in the init.
+    ic_cdk_timers::set_timer(Duration::from_secs(30), || ic_cdk::spawn(async {
+        let icrc1_token_ledger: Principal = with(&CM_DATA, |d| { d.icrc1_token_ledger });
+        match ic_cdk::api::call::call::<(), (u8,)>(
+            icrc1_token_ledger,
+            "icrc1_decimals",
+            ()
+        ).await {
+            Ok((decimal_places,)) => {
+                ic_cdk::print(&format!("Success getting decimals from ledger: {}", decimal_places));
+                with_mut(&CM_DATA, |d| { 
+                    d.icrc1_token_ledger_decimal_places = decimal_places; 
+                    ic_cdk::print(&format!("Success setting known ledger decimal places: {}", d.icrc1_token_ledger_decimal_places));
+                });
+            }
+            Err(e) => {
+                ic_cdk::print(&format!("Error getting decimal places from token ledger: {:?}", e));
+            }
+        }
+    }));
 }
 
 // -----------------
@@ -360,6 +429,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
     trade_logs: &mut VecDeque<TradeLogAndTemporaryData>, 
     trade_logs_id_counter: &mut PurchaseId,
     candle_counter: &mut CandleCounter,
+    latest_trade_rate_data: &mut LatestTradeRateData,
 ) {       
     
     if MatcherPositionType::POSITION_KIND == MatcheePositionType::POSITION_KIND {
@@ -443,6 +513,10 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
             );
             
             candle_counter.count_trade(&trade_logs.back().unwrap().log);
+            *latest_trade_rate_data = LatestTradeRateData{
+                rate: trade_rate,
+                timestamp_nanos: time_nanos_u64(),
+            };
             
             if matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()) < minimum_tokens_match() 
             || tokens_transform_cycles(matchee_position.current_position_tokens(matchee_position.current_position_available_cycles_per_token_rate()), matchee_position.current_position_available_cycles_per_token_rate()) < minimum_cycles_match() {
@@ -1028,6 +1102,112 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
         create_view_volume_stats(&cm_data.candle_counter)
     })
 }
+
+// ICRC-45
+
+#[query]
+pub fn icrc_45_get_pairs(q: icrc45::PairRequest) -> icrc45::PairResponse {
+    use icrc45::*;
+    
+    fn cycles_per_token_rate_as_f64(rate: CyclesPerToken, decimal_places: u8) -> f64 {
+        let cycles_per_whole_token = rate * 10_u128.checked_pow(decimal_places as u32).unwrap();
+        let mut s = format!("{}", cycles_per_whole_token);
+        while s.len() < decimal_places as usize + 1 {
+            s.insert_str(0, "0");
+        }
+        let split_i = s.len() - decimal_places as usize;
+        s.insert_str(split_i, ".");
+        while s.ends_with("0") || s.ends_with(".") {
+            let mut brk = false;
+            if s.ends_with(".") { brk = true; }
+            s.pop().unwrap();
+            if brk { break; }
+        }
+        use std::str::FromStr;
+        f64::from_str(&s).unwrap()
+    }
+    
+    if q.pairs.len() == 0 {
+        return Ok(Vec::new());
+    }
+    with(&CM_DATA, |d| {
+        
+        // pairs checks
+        let pair_id_of_this_canister = PairId{ 
+            base: TokenId{
+                platform: INTERNET_COMPUTER_PLATFORM_ID,
+                path: ByteBuf::from(d.cycles_bank_id.as_slice()),
+            },
+            quote: TokenId{
+                platform: INTERNET_COMPUTER_PLATFORM_ID,
+                path: ByteBuf::from(d.icrc1_token_ledger.as_slice()),
+            }
+        };
+        if q.pairs[0] != pair_id_of_this_canister {
+            return Err(PairResponseErr::NotFound(q.pairs[0].clone()));
+        }
+        if q.pairs.len() > 1 {
+            return Err(PairResponseErr::NotFound(q.pairs[1].clone()));
+        }
+        
+        // depth checks
+        let depth_limit: usize = q.depth.map(|depth| depth.level as usize).unwrap_or(DEFAULT_DEPTH_LIMIT);  
+        
+        let volume_stats: ViewVolumeStatsSponse = create_view_volume_stats(&d.candle_counter);
+        
+        let pair_data = PairData {
+            updated_timestamp: time_nanos_u64(), // Last updated timestamp in nanoseconds
+            id: pair_id_of_this_canister,
+            base: TokenData {
+                volume24: volume_stats.volume_cycles.volume_24_hour,
+                volume_total: volume_stats.volume_cycles.volume_sum,
+            },
+            quote: TokenData {
+                volume24: volume_stats.volume_tokens.volume_24_hour,
+                volume_total: volume_stats.volume_tokens.volume_sum,
+            },
+            volume24_USD: None,
+            volume_total_USD: None,
+            last: cycles_per_token_rate_as_f64(d.latest_trade_rate_data.rate, d.icrc1_token_ledger_decimal_places),
+            last_timestamp: d.latest_trade_rate_data.timestamp_nanos,
+            bids: {
+                let mut positions_quantities = vec![];    
+                let mut opt_start_greater_than_rate: Option<CyclesPerToken> = None;
+                loop {
+                    let view_position_book_sponse = view_position_book_(
+                        ViewPositionBookQuest{ opt_start_greater_than_rate },
+                        &d.cycles_positions,
+                    );
+                    positions_quantities.extend_from_slice(&view_position_book_sponse.positions_quantities);
+                    if view_position_book_sponse.is_last_chunk {
+                        break;
+                    }
+                    opt_start_greater_than_rate = Some(positions_quantities.last().unwrap().0);
+                }
+                positions_quantities
+                    .into_iter()
+                    .rev()
+                    .take(depth_limit)
+                    .map(|(rate, quantity)| (cycles_per_token_rate_as_f64(rate, d.icrc1_token_ledger_decimal_places), quantity))  
+                    .collect()
+            },
+            asks: {
+                view_position_book_(
+                    ViewPositionBookQuest{ opt_start_greater_than_rate: None },
+                    &d.token_positions,
+                )
+                .positions_quantities 
+                    .into_iter()
+                    .take(depth_limit)
+                    .map(|(rate, quantity)| (cycles_per_token_rate_as_f64(rate, d.icrc1_token_ledger_decimal_places), quantity))  
+                    .collect()
+            },
+        };
+        
+        Ok(vec![pair_data])
+    })
+}
+
 
 
 

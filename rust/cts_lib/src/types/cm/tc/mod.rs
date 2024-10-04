@@ -41,6 +41,7 @@ pub struct CMIcrc1TokenTradeContractInit {
     pub cm_main_id: Principal,
     pub icrc1_token_ledger: Principal,
     pub icrc1_token_ledger_transfer_fee: Tokens,
+    pub icrc1_token_ledger_decimal_places: u8,
     pub cycles_bank_id: Principal,
     pub cycles_bank_transfer_fee: Cycles,
     pub trades_storage_canister_code: CanisterCode,
@@ -209,6 +210,7 @@ pub struct CMData {
     pub cm_main_id: Principal,
     pub icrc1_token_ledger: Principal,
     pub icrc1_token_ledger_transfer_fee: Tokens,
+    pub icrc1_token_ledger_decimal_places: u8,
     pub cycles_bank_id: Principal,
     pub cycles_bank_transfer_fee: Cycles,
     pub positions_id_counter: u128,
@@ -222,6 +224,7 @@ pub struct CMData {
     pub void_token_positions: BTreeMap<PositionId, VoidTokenPosition>,
     pub do_payouts_errors: Vec<CallError>,
     pub candle_counter: CandleCounter,
+    pub latest_trade_rate_data: LatestTradeRateData,
 }
 
 impl CMData {
@@ -231,6 +234,7 @@ impl CMData {
             cm_main_id: Principal::from_slice(&[]),
             icrc1_token_ledger: Principal::from_slice(&[]),
             icrc1_token_ledger_transfer_fee: 0,
+            icrc1_token_ledger_decimal_places: 0,
             cycles_bank_id: Principal::from_slice(&[]),
             cycles_bank_transfer_fee: 0,
             positions_id_counter: 0,
@@ -244,6 +248,7 @@ impl CMData {
             void_token_positions: BTreeMap::new(),
             do_payouts_errors: Vec::new(),
             candle_counter: CandleCounter::default(),
+            latest_trade_rate_data: LatestTradeRateData::default(),
         }
     }
 }
@@ -386,4 +391,10 @@ pub struct CandleCounter {
     pub segments_1_minute: Vec<Candle>,   // last item is the latest_one_minute
     pub volume_cycles: Cycles,            // all-time
     pub volume_tokens: Tokens,            // all-time
+}
+
+#[derive(Default, CandidType, Serialize, Deserialize)]
+pub struct LatestTradeRateData {
+    pub rate: CyclesPerToken,
+    pub timestamp_nanos: u64,
 }

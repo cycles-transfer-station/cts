@@ -35,6 +35,7 @@ type ControllerCreateIcrc1TokenTradeContractMidCallError = variant {
 type ControllerCreateIcrc1TokenTradeContractQuest = record {
   icrc1_ledger_id : principal;
   icrc1_ledger_transfer_fee : nat;
+  icrc1_ledger_decimal_places : nat8;
 };
 type ControllerCreateIcrc1TokenTradeContractSuccess = record {
   trade_contract_canister_id : principal;
@@ -68,6 +69,8 @@ type MarketCanisterType = variant {
   PositionsStorage;
   TradeContract;
 };
+type PairId = record { base : TokenId; quote : TokenId };
+type PairInfo = record { id : PairId; data : principal };
 type Result = variant {
   Ok : ControllerCreateIcrc1TokenTradeContractSuccess;
   Err : ContinueControllerCreateIcrc1TokenTradeContractError;
@@ -89,6 +92,7 @@ type Snapshot = record {
   total_size : nat64;
   taken_at_timestamp : nat64;
 };
+type TokenId = record { path : blob; platform : nat64 };
 type TradeContractData = record {
   tc_module_hash : blob;
   latest_upgrade_timestamp_nanos : nat64;
@@ -117,6 +121,7 @@ service : (CMMainInit) -> {
       vec record { principal; UpgradeOutcome },
     );
   controller_upload_canister_code : (CanisterCode, MarketCanisterType) -> ();
+  icrc_45_list_pairs : () -> (vec PairInfo) query;
   sns_validate_controller_create_trade_contract : (
       ControllerCreateIcrc1TokenTradeContractQuest,
     ) -> (Result_5) query;
