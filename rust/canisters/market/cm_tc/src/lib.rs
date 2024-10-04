@@ -289,6 +289,32 @@ fn post_upgrade() {
             }
         }
     }));
+    
+    // temp set last trade rate data if there is a last trade.
+    with_mut(&CM_DATA, |cm_data| {        
+        if let Some(tl) = cm_data.trade_logs.back().map(|tl_and_temp| &tl_and_temp.log) {
+            cm_data.latest_trade_rate_data = LatestTradeRateData{
+                rate: tl.cycles_per_token_rate,
+                timestamp_nanos: tl.timestamp_nanos as u64,
+            };
+        } else {
+            with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
+                if let Some(mut iter) = view_storage_logs_::<TradeLog>(
+                    ViewStorageLogsQuest{opt_start_before_id: None, index_key: None},
+                    log_storage_data,
+                    1,
+                ) {
+                    if let Some(b) = iter.next() {
+                        cm_data.latest_trade_rate_data = LatestTradeRateData{
+                            rate: trade_log::rate_of_the_log_serialization(b),
+                            timestamp_nanos: trade_log::timestamp_nanos_of_the_log_serialization(b) as u64,
+                        };
+                    }
+                }
+            });
+        }
+    });
+
 }
 
 // -----------------
