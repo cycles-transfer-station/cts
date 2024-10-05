@@ -16,13 +16,13 @@ pub type Level = u8;
 pub type Rate = f64;
 pub type Amount = u128;
 
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct TokenId {
     pub platform: PlatformId, 
     pub path: PlatformPath,
 } 
 
-#[derive(CandidType, Deserialize, PartialEq, Eq, Clone)]
+#[derive(CandidType, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct PairId {
     pub base: TokenId,
     pub quote: TokenId,
@@ -46,7 +46,7 @@ pub struct PairRequest {
     pub depth: Option<DepthRequest>,
 } 
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Debug)]
 pub enum PairResponseErr {
     NotFound(PairId),
     InvalidDepthLevel(Level),

@@ -1,4 +1,7 @@
-use super::*;
+use crate::{
+    types::Cycles,
+    consts::TRILLION,
+};
 
 struct TradeFeeTier {
     // the max volume (inclusive) of the trade fees of this tier. anything over this amount is the next tier

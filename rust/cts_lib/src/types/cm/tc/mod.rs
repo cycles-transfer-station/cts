@@ -12,6 +12,8 @@ use storage_logs::{
     position_log::PositionLog,
 };
 
+pub mod trade_fee;
+
 
 pub const MAX_LATEST_TRADE_LOGS_SPONSE_TRADE_DATA: usize = 512*KiB*3 / std::mem::size_of::<LatestTradesDataItem>();
 

@@ -25,15 +25,13 @@ use cts_lib::{
                     PositionTerminationCause,
                     PositionTerminationData,
                 }
-            }
+            },
+            trade_fee::calculate_trade_fee,
         }
     },
 };
 use candid::Principal;
 use super::VoidPositionTrait;
-use crate::{
-    trade_fee::calculate_trade_fee
-};
 
 
 

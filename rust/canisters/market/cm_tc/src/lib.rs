@@ -84,7 +84,6 @@ mod payouts;
 mod flush_logs;
 mod candle_counter;
 mod ledger_transfer;
-mod trade_fee;
 mod transfer_memo;
 mod traits;
 
@@ -313,6 +312,7 @@ fn post_upgrade() {
                 }
             });
         }
+        ic_cdk::print(&format!("latest_trade_rate: {}", cm_data.latest_trade_rate_data.rate));
     });
 
 }
@@ -1134,28 +1134,12 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
 #[query]
 pub fn icrc_45_get_pairs(q: icrc45::PairRequest) -> icrc45::PairResponse {
     use icrc45::*;
-    
-    fn cycles_per_token_rate_as_f64(rate: CyclesPerToken, decimal_places: u8) -> f64 {
-        let cycles_per_whole_token = rate * 10_u128.checked_pow(decimal_places as u32).unwrap();
-        let mut s = format!("{}", cycles_per_whole_token);
-        while s.len() < decimal_places as usize + 1 {
-            s.insert_str(0, "0");
-        }
-        let split_i = s.len() - decimal_places as usize;
-        s.insert_str(split_i, ".");
-        while s.ends_with("0") || s.ends_with(".") {
-            let mut brk = false;
-            if s.ends_with(".") { brk = true; }
-            s.pop().unwrap();
-            if brk { break; }
-        }
-        use std::str::FromStr;
-        f64::from_str(&s).unwrap()
-    }
+    use cts_lib::tools::cycles_per_token_rate_as_f64;
     
     if q.pairs.len() == 0 {
         return Ok(Vec::new());
     }
+    
     with(&CM_DATA, |d| {
         
         // pairs checks
