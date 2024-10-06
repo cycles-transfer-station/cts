@@ -604,3 +604,10 @@ fn test_111() {
     
     
 }
+
+ 
+
+#[test]
+fn test_icrc45() {
+    
+}

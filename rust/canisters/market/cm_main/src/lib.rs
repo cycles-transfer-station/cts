@@ -45,6 +45,7 @@ use candid::{
     Deserialize,
     utils::{encode_one}
 };
+use serde_bytes::ByteBuf;
 
 
 // ----------------------
@@ -220,7 +221,6 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                 settings: Some(ManagementCanisterOptionalCanisterSettings{
                     controllers : Some(vec![
                         ic_cdk::api::id(), 
-                        with(&CM_MAIN_DATA, |data| data.cts_id)
                     ]),
                     compute_allocation : None,
                     memory_allocation : Some(TC_CANISTER_NETWORK_MEMORY_ALLOCATION_MiB as u128 * MiB as u128),
@@ -255,6 +255,7 @@ async fn controller_create_icrc1token_trade_contract_(mut mid_call_data: Control
                 cm_main_id: ic_cdk::api::id(),
                 cycles_bank_id: data.cycles_bank_id,
                 cycles_bank_transfer_fee: cts_lib::types::bank::BANK_TRANSFER_FEE,
+                icrc1_token_ledger_decimal_places: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_decimal_places,     
                 icrc1_token_ledger: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_id,
                 icrc1_token_ledger_transfer_fee: mid_call_data.controller_create_icrc1token_trade_contract_quest.icrc1_ledger_transfer_fee,
                 trades_storage_canister_code: data.trades_storage_canister_code.clone(),
@@ -499,6 +500,39 @@ pub async fn view_tcs_status() -> ViewCanistersStatusSponse {
     
     view_canisters_status(tcs).await
 }    
+
+
+// ICRC-45
+
+#[query]
+pub fn icrc_45_list_pairs() -> icrc45::ListPairsResponse {
+    use icrc45::*; 
+    with(&CM_MAIN_DATA, |d| {
+        d.trade_contracts
+        .iter()
+        .map(
+            |(tc_and_ledger, _)| {
+                PairInfo{
+                    data: tc_and_ledger.trade_contract_canister_id, 
+                    id: PairId{
+                        base: TokenId{
+                            platform: INTERNET_COMPUTER_PLATFORM_ID,
+                            path: ByteBuf::from(d.cycles_bank_id.as_slice()),
+                            
+                        },
+                        quote: TokenId{
+                            platform: INTERNET_COMPUTER_PLATFORM_ID,
+                            path: ByteBuf::from(tc_and_ledger.icrc1_ledger_canister_id.as_slice()),
+                        } 
+                    }
+                }
+            }
+        )
+        .collect()        
+    })
+}
+
+
 
 
 

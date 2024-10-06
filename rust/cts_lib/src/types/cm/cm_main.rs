@@ -51,6 +51,7 @@ pub enum ControllerIsInTheMiddleOfADifferentCallKind {
 pub struct ControllerCreateIcrc1TokenTradeContractQuest {
     pub icrc1_ledger_id: Principal,
     pub icrc1_ledger_transfer_fee: Tokens,
+    pub icrc1_ledger_decimal_places: u8,
 }
 
 #[derive(CandidType, Deserialize)]

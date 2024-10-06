@@ -7,6 +7,7 @@ type CMIcrc1TokenTradeContractInit = record {
   positions_storage_canister_code : CanisterCode;
   trades_storage_canister_code : CanisterCode;
   cts_id : principal;
+  icrc1_token_ledger_decimal_places : nat8;
 };
 type CanisterCode = record { module_hash : blob; module : blob };
 type ControllerUpgradeCSQuest = record {
@@ -19,8 +20,28 @@ type CreatePositionQuestLog = record {
   cycles_per_token_rate : nat;
   quantity : nat;
 };
+type DepthRequest = record { level : nat8; limit : nat32 };
 type IcrcId = record { owner : principal; subaccount : opt blob };
 type LogStorageType = variant { Positions; Trades };
+type PairData = record {
+  id : PairId;
+  volume_total_USD : opt nat;
+  asks : vec record { float64; nat };
+  base : TokenData;
+  bids : vec record { float64; nat };
+  last : float64;
+  quote : TokenData;
+  last_timestamp : nat64;
+  volume24_USD : opt nat;
+  updated_timestamp : nat64;
+};
+type PairId = record { base : TokenId; quote : TokenId };
+type PairRequest = record { pairs : vec PairId; depth : opt DepthRequest };
+type PairResponseErr = variant {
+  NotFound : PairId;
+  InvalidDepthLevel : nat8;
+  InvalidDepthLimit : nat32;
+};
 type PositionKind = variant { Token; Cycles };
 type PositionLog = record {
   id : nat;
@@ -48,10 +69,11 @@ type PositionTerminationData = record {
 };
 type Result = variant { Ok : Snapshot; Err : record { nat32; text } };
 type Result_1 = variant { Ok; Err : record { nat32; text } };
-type Result_2 = variant { Ok : text; Err : text };
-type Result_3 = variant { Ok : TradeSuccess; Err : TradeError };
-type Result_4 = variant { Ok : nat; Err : TransferBalanceError };
-type Result_5 = variant { Ok; Err : VoidPositionError };
+type Result_2 = variant { Ok : vec PairData; Err : PairResponseErr };
+type Result_3 = variant { Ok : text; Err : text };
+type Result_4 = variant { Ok : TradeSuccess; Err : TradeError };
+type Result_5 = variant { Ok : nat; Err : TransferBalanceError };
+type Result_6 = variant { Ok; Err : VoidPositionError };
 type Snapshot = record {
   id : blob;
   total_size : nat64;
@@ -63,6 +85,8 @@ type StorageCanister = record {
   log_size : nat32;
   length : nat;
 };
+type TokenData = record { volume24 : nat; volume_total : nat };
+type TokenId = record { path : blob; platform : nat64 };
 type TradeCyclesQuest = record {
   payout_tokens_to_subaccount : opt blob;
   posit_transfer_ledger_fee : opt nat;
@@ -152,19 +176,20 @@ service : (CMIcrc1TokenTradeContractInit) -> {
       ControllerUpgradeCSQuest,
       LogStorageType,
     ) -> (vec record { principal; UpgradeOutcome });
-  sns_validate_trade_cycles : (TradeCyclesQuest) -> (Result_2) query;
-  sns_validate_trade_tokens : (TradeTokensQuest) -> (Result_2) query;
+  icrc_45_get_pairs : (PairRequest) -> (Result_2) query;
+  sns_validate_trade_cycles : (TradeCyclesQuest) -> (Result_3) query;
+  sns_validate_trade_tokens : (TradeTokensQuest) -> (Result_3) query;
   sns_validate_transfer_cycles_balance : (TransferBalanceQuest) -> (
-      Result_2,
+      Result_3,
     ) query;
   sns_validate_transfer_token_balance : (TransferBalanceQuest) -> (
-      Result_2,
+      Result_3,
     ) query;
-  sns_validate_void_position : (VoidPositionQuest) -> (Result_2) query;
-  trade_cycles : (TradeCyclesQuest) -> (Result_3);
-  trade_tokens : (TradeTokensQuest) -> (Result_3);
-  transfer_cycles_balance : (TransferBalanceQuest) -> (Result_4);
-  transfer_token_balance : (TransferBalanceQuest) -> (Result_4);
+  sns_validate_void_position : (VoidPositionQuest) -> (Result_3) query;
+  trade_cycles : (TradeCyclesQuest) -> (Result_4);
+  trade_tokens : (TradeTokensQuest) -> (Result_4);
+  transfer_cycles_balance : (TransferBalanceQuest) -> (Result_5);
+  transfer_token_balance : (TransferBalanceQuest) -> (Result_5);
   view_current_positions : (ViewStorageLogsQuest) -> (vec PositionLog) query;
   view_cycles_position_book : (ViewPositionBookQuest) -> (
       ViewPositionBookSponse,
@@ -178,5 +203,5 @@ service : (CMIcrc1TokenTradeContractInit) -> {
     ) query;
   view_trades_storage_canisters : () -> (vec StorageCanister) query;
   view_volume_stats : () -> (ViewVolumeStatsSponse) query;
-  void_position : (TradeSuccess) -> (Result_5);
+  void_position : (TradeSuccess) -> (Result_6);
 }

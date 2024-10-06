@@ -1,5 +1,6 @@
 pub mod cm_main;
 pub mod tc;
+pub mod icrc45;
 
 
 use candid::{CandidType, Deserialize};

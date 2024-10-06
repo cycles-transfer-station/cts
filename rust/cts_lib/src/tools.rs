@@ -10,6 +10,7 @@ use crate::{
     types::{
         Cycles,
         CallError,
+        cm::tc::CyclesPerToken,
     },
     icrc::{Tokens},
 };
@@ -372,4 +373,47 @@ pub mod canister_status {
         
         (successes, errors)
     }
+}
+
+
+pub fn cycles_per_token_rate_as_f64(rate: CyclesPerToken, token_decimal_places: u8) -> f64 {
+    let cycles_per_whole_token = rate * 10_u128.checked_pow(token_decimal_places as u32).unwrap();
+    let s = cycles_as_tcycles_str(cycles_per_whole_token);
+    use std::str::FromStr;
+    f64::from_str(&s).unwrap()
+}
+
+fn cycles_as_tcycles_str(cycles: Cycles) -> String {
+    token_quantums_as_token_str(cycles, 12)
+}
+
+fn token_quantums_as_token_str(quantums: u128, decimal_places: usize) -> String {
+    let mut s = format!("{}", quantums);
+    while s.len() < decimal_places + 1 {
+        s.insert_str(0, "0");
+    }
+    let split_i = s.len() - decimal_places;
+    s.insert_str(split_i, ".");
+    while s.ends_with("0") || s.ends_with(".") {
+        let mut brk = false;
+        if s.ends_with(".") { brk = true; }
+        s.pop().unwrap();
+        if brk { break; }
+    }
+    s
+}
+
+
+#[test]
+fn test_cycles_per_token_rate_as_f64() {
+    assert_eq!(cycles_per_token_rate_as_f64(75489, 8), 7.5489);
+    assert_eq!(cycles_per_token_rate_as_f64(869, 8), 0.0869);
+    assert_eq!(cycles_per_token_rate_as_f64(7897, 8), 0.7897);
+    assert_eq!(cycles_per_token_rate_as_f64(869, 8), 0.0869);
+    assert_eq!(cycles_per_token_rate_as_f64(7548789629, 8), 754878.9629);
+    assert_eq!(cycles_per_token_rate_as_f64(7548789629, 12), 7548789629.0);
+    assert_eq!(cycles_per_token_rate_as_f64(7548789629, 3), 7.548789629);   
+    assert_eq!(cycles_per_token_rate_as_f64(754000000, 8), 75400.0);   
+    assert_eq!(cycles_per_token_rate_as_f64(7540021, 8), 754.0021);   
+    assert_eq!(cycles_per_token_rate_as_f64(74567, 8), 7.4567);
 }

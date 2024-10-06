@@ -558,6 +558,7 @@ pub fn set_up_tc_with_modules(pic: &PocketIc, modules: TCsModules) -> Principal 
             ControllerCreateIcrc1TokenTradeContractQuest {
                 icrc1_ledger_id: ICP_LEDGER,
                 icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,
+                icrc1_ledger_decimal_places: 8,
             },
         )
     ).unwrap().0.unwrap().trade_contract_canister_id;
@@ -580,6 +581,7 @@ pub fn set_up_new_ledger_and_tc(pic: &PocketIc) -> (Principal, Principal)/*(ledg
             ControllerCreateIcrc1TokenTradeContractQuest {
                 icrc1_ledger_id: ledger,
                 icrc1_ledger_transfer_fee: ICP_LEDGER_TRANSFER_FEE,
+                icrc1_ledger_decimal_places: 8,
             },
         )
     ).unwrap().0.unwrap().trade_contract_canister_id;
