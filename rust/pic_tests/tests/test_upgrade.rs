@@ -153,7 +153,7 @@ fn test_upgrade_1() {
     assert_eq!(
         p1_mint_cycles - (1234*TRILLION) - BANK_TRANSFER_FEE
         + {
-            let cycles_trade = ((p1_mint_icp - ICP_LEDGER_TRANSFER_FEE)*p2_trade_cycles_quest.cycles_per_token_rate);
+            let cycles_trade = (p1_mint_icp - ICP_LEDGER_TRANSFER_FEE)*p2_trade_cycles_quest.cycles_per_token_rate;
             let cycles_fee = cts_lib::types::cm::tc::trade_fee::calculate_trade_fee(0, cycles_trade);
             cycles_trade - cycles_fee - BANK_TRANSFER_FEE
         },
