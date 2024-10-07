@@ -58,3 +58,4 @@ hex = "0.4.3"
 thiserror = "1.0.63"
 wasabi_leb128 = "0.4.0" # for writing u128
 postcard = { version = "1.0.10", features = ["use-std"] }
+base64 = "0.13.0"

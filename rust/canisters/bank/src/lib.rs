@@ -145,8 +145,8 @@ pub const MAX_USERS_MINT_CYCLES: usize = 170;
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles = 2 * TRILLION;
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
-pub const ICRC1_NAME: &'static str = "CTS-CYCLES-BANK";
-pub const ICRC1_SYMBOL: &'static str = "T CYCLES:CTS";
+pub const ICRC1_NAME: &'static str = "THE CYCLES-BANK BY THE CTS.";
+pub const ICRC1_SYMBOL: &'static str = "TCY";
 pub const ICRC1_DECIMALS: u8 = 12;
 
 pub const TX_WINDOW_NANOS: u64 = (NANOS_IN_A_SECOND * SECONDS_IN_A_DAY) as u64;
@@ -290,7 +290,7 @@ pub fn icrc1_metadata() -> Vec<(String, IcrcMetadataValue)> {
         ("icrc1:symbol".to_string(), IcrcMetadataValue::Text(ICRC1_SYMBOL.to_string())),
         ("icrc1:decimals".to_string(), IcrcMetadataValue::Nat(ICRC1_DECIMALS.into())),
         ("icrc1:fee".to_string(), IcrcMetadataValue::Nat(BANK_TRANSFER_FEE.into())),
-        ("icrc1:logo".to_string(), IcrcMetadataValue::Text("".to_string())),
+        ("icrc1:logo".to_string(), IcrcMetadataValue::Text(["data:image/png;base64,", &base64::encode(include_bytes!("../files/l3.png"))].concat())),
     ]
 }
 
