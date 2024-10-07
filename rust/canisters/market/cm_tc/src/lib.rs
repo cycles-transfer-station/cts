@@ -1169,10 +1169,12 @@ pub fn icrc_45_get_pairs(q: icrc45::PairRequest) -> icrc45::PairResponse {
             updated_timestamp: time_nanos_u64(), // Last updated timestamp in nanoseconds
             id: pair_id_of_this_canister,
             base: TokenData {
+                decimals: 12,
                 volume24: volume_stats.volume_cycles.volume_24_hour,
                 volume_total: volume_stats.volume_cycles.volume_sum,
             },
             quote: TokenData {
+                decimals: d.icrc1_token_ledger_decimal_places,
                 volume24: volume_stats.volume_tokens.volume_24_hour,
                 volume_total: volume_stats.volume_tokens.volume_sum,
             },

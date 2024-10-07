@@ -85,7 +85,7 @@ type StorageCanister = record {
   log_size : nat32;
   length : nat;
 };
-type TokenData = record { volume24 : nat; volume_total : nat };
+type TokenData = record { decimals : nat8; volume24 : nat; volume_total : nat };
 type TokenId = record { path : blob; platform : nat64 };
 type TradeCyclesQuest = record {
   payout_tokens_to_subaccount : opt blob;

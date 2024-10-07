@@ -55,6 +55,7 @@ pub enum PairResponseErr {
 
 #[derive(CandidType, Deserialize)]
 pub struct TokenData {
+    pub decimals: u8,
     pub volume24: Amount,
     pub volume_total: Amount,
 }
