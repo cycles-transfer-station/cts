@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    collections::{VecDeque, BTreeMap, HashSet},
+    collections::{VecDeque, BTreeMap},
     time::Duration,
     thread::LocalKey,
     ops::Bound,
@@ -76,7 +76,6 @@ use candid::{
     Deserialize,
 };
 use serde_bytes::{ByteArray, ByteBuf};
-use serde::Serialize;
 
 // -------
 
@@ -208,53 +207,7 @@ fn pre_upgrade() {
 
 #[post_upgrade]
 fn post_upgrade() {
-    //canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
-    #[derive(CandidType, Serialize, Deserialize)]
-    pub struct OldCMData {
-        pub cts_id: Principal,
-        pub cm_main_id: Principal,
-        pub icrc1_token_ledger: Principal,
-        pub icrc1_token_ledger_transfer_fee: Tokens,
-        pub cycles_bank_id: Principal,
-        pub cycles_bank_transfer_fee: Cycles,
-        pub positions_id_counter: u128,
-        pub trade_logs_id_counter: u128,
-        pub mid_call_user_cycles_balance_locks: HashSet<Principal>,
-        pub mid_call_user_token_balance_locks: HashSet<Principal>,
-        pub cycles_positions: BTreeMap<PositionId, CyclesPosition>,
-        pub token_positions: BTreeMap<PositionId, TokenPosition>,
-        pub trade_logs: VecDeque<TradeLogAndTemporaryData>,
-        pub void_cycles_positions: BTreeMap<PositionId, VoidCyclesPosition>,
-        pub void_token_positions: BTreeMap<PositionId, VoidTokenPosition>,
-        pub do_payouts_errors: Vec<CallError>,
-        pub candle_counter: CandleCounter,
-    }
-    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, Some::<fn(OldCMData) -> CMData>(   
-        |old: OldCMData| {
-            CMData{
-                cts_id: old.cts_id,
-                cm_main_id: old.cm_main_id,
-                icrc1_token_ledger: old.icrc1_token_ledger,
-                icrc1_token_ledger_transfer_fee: old.icrc1_token_ledger_transfer_fee,
-                icrc1_token_ledger_decimal_places: 0,
-                cycles_bank_id: old.cycles_bank_id,
-                cycles_bank_transfer_fee: old.cycles_bank_transfer_fee,
-                positions_id_counter: old.positions_id_counter,
-                trade_logs_id_counter: old.trade_logs_id_counter,
-                mid_call_user_cycles_balance_locks: old.mid_call_user_cycles_balance_locks,
-                mid_call_user_token_balance_locks: old.mid_call_user_token_balance_locks,
-                cycles_positions: old.cycles_positions,
-                token_positions: old.token_positions,
-                trade_logs: old.trade_logs,
-                void_cycles_positions: old.void_cycles_positions,
-                void_token_positions: old.void_token_positions,
-                do_payouts_errors: old.do_payouts_errors,
-                candle_counter: old.candle_counter,
-                latest_trade_rate_data: LatestTradeRateData::default(),
-            }
-        }
-    ));
-    
+    canister_tools::post_upgrade(&CM_DATA, STABLE_MEMORY_ID_HEAP_DATA_SERIALIZATION, None::<fn(CMData) -> CMData>);
     canister_tools::post_upgrade(&POSITIONS_STORAGE_DATA, POSITIONS_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     canister_tools::post_upgrade(&TRADES_STORAGE_DATA, TRADES_STORAGE_DATA_MEMORY_ID, None::<fn(LogStorageData) -> LogStorageData>);
     
@@ -267,53 +220,6 @@ fn post_upgrade() {
     });
     
     ic_cdk_timers::set_timer(Duration::from_secs(30), || ic_cdk::spawn(do_payouts()));
-    
-    // temp run one-time on each current-tc. new tcs will get the decimal_places in the init.
-    ic_cdk_timers::set_timer(Duration::from_secs(30), || ic_cdk::spawn(async {
-        let icrc1_token_ledger: Principal = with(&CM_DATA, |d| { d.icrc1_token_ledger });
-        match ic_cdk::api::call::call::<(), (u8,)>(
-            icrc1_token_ledger,
-            "icrc1_decimals",
-            ()
-        ).await {
-            Ok((decimal_places,)) => {
-                ic_cdk::print(&format!("Success getting decimals from ledger: {}", decimal_places));
-                with_mut(&CM_DATA, |d| { 
-                    d.icrc1_token_ledger_decimal_places = decimal_places; 
-                    ic_cdk::print(&format!("Success setting known ledger decimal places: {}", d.icrc1_token_ledger_decimal_places));
-                });
-            }
-            Err(e) => {
-                ic_cdk::print(&format!("Error getting decimal places from token ledger: {:?}", e));
-            }
-        }
-    }));
-    
-    // temp set last trade rate data if there is a last trade.
-    with_mut(&CM_DATA, |cm_data| {        
-        if let Some(tl) = cm_data.trade_logs.back().map(|tl_and_temp| &tl_and_temp.log) {
-            cm_data.latest_trade_rate_data = LatestTradeRateData{
-                rate: tl.cycles_per_token_rate,
-                timestamp_nanos: tl.timestamp_nanos as u64,
-            };
-        } else {
-            with(&TradeLog::LOG_STORAGE_DATA, |log_storage_data| {
-                if let Some(mut iter) = view_storage_logs_::<TradeLog>(
-                    ViewStorageLogsQuest{opt_start_before_id: None, index_key: None},
-                    log_storage_data,
-                    1,
-                ) {
-                    if let Some(b) = iter.next() {
-                        cm_data.latest_trade_rate_data = LatestTradeRateData{
-                            rate: trade_log::rate_of_the_log_serialization(b),
-                            timestamp_nanos: trade_log::timestamp_nanos_of_the_log_serialization(b) as u64,
-                        };
-                    }
-                }
-            });
-        }
-        ic_cdk::print(&format!("latest_trade_rate: {}", cm_data.latest_trade_rate_data.rate));
-    });
 
 }
 
