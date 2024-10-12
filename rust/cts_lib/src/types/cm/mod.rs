@@ -1,7 +1,7 @@
 pub mod cm_main;
 pub mod tc;
 pub mod icrc45;
-
+pub mod get_position;
 
 use candid::{CandidType, Deserialize};
 

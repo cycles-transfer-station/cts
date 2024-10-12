@@ -61,6 +61,7 @@ use ic_cdk::{
             reply,
             reply_raw,
             ArgDecoderConfig,
+            ManualReply,
         },
     },
     update,
@@ -243,16 +244,29 @@ pub fn minimum_cycles_match() -> Cycles {
 // -----------------
 
 
-#[update]
+#[update(hidden = true)]
 pub async fn trade_cycles(q: TradeCyclesQuest) -> TradeResult {
     _trade(caller(), q).await
 }
 
-#[update]
+#[update(hidden = true)]
 pub async fn trade_tokens(q: TradeTokensQuest) -> TradeResult {
     _trade(caller(), q).await
 }
+/*
+pub enum MoreReadablePositionQuest
 
+pub struct MoreReadableTradeQuest{
+    
+    pub rate: f64,
+    
+}
+
+#[update]
+pub trade(q: MoreReadableTradeQuest) -> TradeResult {
+    
+}
+*/
 async fn _trade<TradeQuestType: TradeQuest>(caller: Principal, q: TradeQuestType) -> TradeResult {
     
     if q.is_less_than_minimum_position() {
@@ -483,6 +497,7 @@ fn match_trades<MatcherPositionType: CurrentPositionTrait, MatcheePositionType: 
 
 #[query]
 pub fn sns_validate_trade_cycles(q: TradeCyclesQuest) -> Result<String,String> {
+    // do put as f64 TCycles per whole token rate
     Ok(sns_validation_string(q))
 }
 
@@ -1035,7 +1050,115 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
     })
 }
 
-// ICRC-45
+
+// --- CANDID METHODS FOR THE CROSS-CANISTER-CALLS 
+
+
+#[query(manual_reply = true)]
+pub fn get_position(position_id: PositionId) -> ManualReply<get_position::GetPositionSponse> {
+    use get_position::*;
+    
+    with(&CM_DATA, |cm_data| {
+        
+        // check if valid position-id
+        if cm_data.positions_id_counter <= position_id {
+            return ManualReply::reject(format!("Position-Id {} does not exist on this trading pair.", position_id));
+        }
+        
+        // check current-positions first
+        // then check void-positions
+        // then check storage buffer
+        // then check storage canisters
+        
+        // check current-positions
+        fn cp_as_pl(cp: & impl CurrentPositionTrait) -> PositionLog { cp.as_stable_memory_position_log(None) }
+        let possible_current_position_log: Option<PositionLog> 
+            = cm_data.cycles_positions.get(&position_id).map(cp_as_pl)
+                .or_else(|| cm_data.token_positions.get(&position_id).map(cp_as_pl));
+        
+        if let Some(current_position_log) = possible_current_position_log {
+            let more_readable = MoreReadablePositionLog::from_position_log(current_position_log, false, cm_data.icrc1_token_ledger_decimal_places);
+            return ManualReply::one(GetPositionSponse::Here(more_readable));
+        } 
+        
+        // check void positions
+        fn vp_as_pl_and_vppayoutstatus(vp: & impl VoidPositionTrait) -> (PositionLog, bool) { (vp.update_storage_position_data().update_storage_position_log.clone(), vp.payout_data().is_some()) } 
+        let possible_void_position_log_and_vp_payout_status: Option<(PositionLog, bool/*void-position-payout-status*/)> 
+            = cm_data.void_cycles_positions.get(&position_id).map(vp_as_pl_and_vppayoutstatus)
+                .or_else(|| cm_data.void_token_positions.get(&position_id).map(vp_as_pl_and_vppayoutstatus));
+        
+        if let Some((void_position_log, void_position_payout_status)) = possible_void_position_log_and_vp_payout_status {
+            let more_readable = MoreReadablePositionLog::from_position_log(void_position_log, void_position_payout_status, cm_data.icrc1_token_ledger_decimal_places);
+            return ManualReply::one(GetPositionSponse::Here(more_readable));
+        } 
+        
+        with(&POSITIONS_STORAGE_DATA, |positions_storage_data| {
+            
+            // check if is in storage buffer
+            let first_position_id_after_storage_canisters: PositionId 
+                = positions_storage_data
+                    .storage_canisters
+                    .last()
+                    .map(|sc| sc.first_log_id + sc.length as u128)
+                    .unwrap_or(0);
+            
+            if positions_storage_data.storage_buffer.len() != 0 {
+                if position_id >= first_position_id_after_storage_canisters
+                && position_id < first_position_id_after_storage_canisters + (positions_storage_data.storage_buffer.len() / PositionLog::STABLE_MEMORY_SERIALIZE_SIZE) as u128 {
+                    let position_log_slice_start_i: usize = (position_id - first_position_id_after_storage_canisters) as usize * PositionLog::STABLE_MEMORY_SERIALIZE_SIZE; 
+                    let position_log_slice = &positions_storage_data.storage_buffer[
+                        position_log_slice_start_i
+                        ..
+                        position_log_slice_start_i + PositionLog::STABLE_MEMORY_SERIALIZE_SIZE
+                    ];
+                    let position_log: PositionLog = PositionLog::stable_memory_serialize_backwards(position_log_slice);
+                    let more_readable = MoreReadablePositionLog::from_position_log(position_log, true, cm_data.icrc1_token_ledger_decimal_places); // the code will only reach here if the position is not current or pending, so the void-position-payout-status is true at this point 
+                    return ManualReply::one(GetPositionSponse::Here(more_readable));
+                }    
+            }
+            
+            // check if is on storage canisters
+            for storage_canister_data in positions_storage_data.storage_canisters.iter() {
+                if storage_canister_data.first_log_id <= position_id 
+                && storage_canister_data.first_log_id + (storage_canister_data.length as u128) > position_id {
+                    return ManualReply::one(GetPositionSponse::Storage(GetPositionCallback::new(storage_canister_data.canister_id)));  
+                }
+            }
+            
+            trap("Code will not reach here.");
+            
+        })
+    })   
+}
+
+/*
+#[query]
+pub fn get_positions(_q: ViewStorageLogsQuest<<PositionLog as StorageLogTrait>::LogIndexKey>) -> Vec<MoreReadablePositionLog> {
+    todo!()
+}
+*/
+/*
+enum GetTradeSponse {
+    Here(TradeLog),
+    Storage(GetTradeCallback)
+}
+
+#[query]
+pub fn get_trade(trade_id: u128) -> GetTradeSponse {
+    
+}
+
+#[query]
+pub fn get_trades(_q: ViewStorageLogsQuest<<TradeLog as StorageLogTrait>::LogIndexKey>) -> {
+    
+}
+*/
+
+
+
+
+
+// --- ICRC-45 ---
 
 #[query]
 pub fn icrc_45_get_pairs(q: icrc45::PairRequest) -> icrc45::PairResponse {
