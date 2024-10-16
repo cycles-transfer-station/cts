@@ -1035,6 +1035,13 @@ pub fn view_volume_stats() -> ViewVolumeStatsSponse {
     })
 }
 
+#[query]
+pub fn quote_token() -> Principal {
+    with(&CM_DATA, |cm_data| {
+        cm_data.icrc1_token_ledger
+    })
+} 
+
 // ICRC-45
 
 #[query]

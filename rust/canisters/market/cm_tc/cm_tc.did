@@ -177,6 +177,7 @@ service : (CMIcrc1TokenTradeContractInit) -> {
       LogStorageType,
     ) -> (vec record { principal; UpgradeOutcome });
   icrc_45_get_pairs : (PairRequest) -> (Result_2) query;
+  quote_token : () -> (principal) query;
   sns_validate_trade_cycles : (TradeCyclesQuest) -> (Result_3) query;
   sns_validate_trade_tokens : (TradeTokensQuest) -> (Result_3) query;
   sns_validate_transfer_cycles_balance : (TransferBalanceQuest) -> (
