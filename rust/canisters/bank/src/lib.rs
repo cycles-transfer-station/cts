@@ -145,7 +145,7 @@ pub const MAX_USERS_MINT_CYCLES: usize = 170;
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_START_MINT_CYCLES_CALL: Cycles = 2 * TRILLION;
 pub const MINIMUM_CANISTER_CYCLES_BALANCE_FOR_A_CMC_NOTIFY_MINT_CYCLES_CALL: Cycles = 1 * TRILLION;
 
-pub const ICRC1_NAME: &'static str = "THE CYCLES-BANK BY THE CTS.";
+pub const ICRC1_NAME: &'static str = "THE CYCLES-BANK";
 pub const ICRC1_SYMBOL: &'static str = "TCY";
 pub const ICRC1_DECIMALS: u8 = 12;
 
