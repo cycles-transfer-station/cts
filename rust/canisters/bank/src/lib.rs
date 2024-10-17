@@ -290,7 +290,7 @@ pub fn icrc1_metadata() -> Vec<(String, IcrcMetadataValue)> {
         ("icrc1:symbol".to_string(), IcrcMetadataValue::Text(ICRC1_SYMBOL.to_string())),
         ("icrc1:decimals".to_string(), IcrcMetadataValue::Nat(ICRC1_DECIMALS.into())),
         ("icrc1:fee".to_string(), IcrcMetadataValue::Nat(BANK_TRANSFER_FEE.into())),
-        ("icrc1:logo".to_string(), IcrcMetadataValue::Text(["data:image/png;base64,", &base64::encode(include_bytes!("../files/l3.png"))].concat())),
+        ("icrc1:logo".to_string(), IcrcMetadataValue::Text(["data:image/png;base64,", &base64::encode(include_bytes!("../files/logo.png"))].concat())),
     ]
 }
 
